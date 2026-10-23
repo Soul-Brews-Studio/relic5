@@ -33,6 +33,18 @@ def status(root, now=None):
     for m in p.machines():
         if not os.path.isfile(os.path.join(p.dir, m, "meta", "sessions.parquet")):
             warnings.append(f"machine {m}: no meta/sessions.parquet (sessions and repo filters miss it)")
+    versions = {}
+    for m in p.machines():
+        vp = os.path.join(p.dir, m, "_versions.json")
+        if os.path.isfile(vp):
+            try:
+                versions[m] = __import__("json").load(open(vp))
+            except ValueError:
+                warnings.append(f"machine {m}: unreadable _versions.json")
+    for tool in ("relic-scan", "relic-extract", "relic5-push"):
+        seen = {v.get(tool) for v in versions.values()}
+        if len(seen) > 1:
+            warnings.append(f"{tool} differs between machines: " + ", ".join(f"{m} {v.get(tool)}" for m, v in sorted(versions.items())))
     rows = {s: sum(man["streams"].get(s, {}).get("rows", 0) for man in mans.values()) for s in MONTH_STREAMS}
     built = max((man["built"] for man in mans.values()), default=None)
     from .fts import current, search_dir
@@ -56,6 +68,7 @@ def status(root, now=None):
                             for m in months]},
         "weeks": {"total": len(months), "sealed": len(sealed), "open": cur if cur in months else None, "quarantine_rows": 0},
         "machines": machines,
+        "versions": versions,
         "rows": {"events": rows["text"] + rows["thinking"], "text": rows["text"], "thinking": rows["thinking"],
                  "tools": rows["tools"], "sessions": None, "files": sum(len(p.files(s)) for s in MONTH_STREAMS)},
         "jobs": {"running": []},

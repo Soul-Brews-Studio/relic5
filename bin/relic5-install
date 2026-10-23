@@ -1,0 +1,40 @@
+#!/bin/sh
+# relic5 install: put this machine's relic-scan, relic-extract and relic5-push on another machine, so every machine
+# runs the same versions (relic_status warns when they differ, from each push's _versions.json).
+#
+#   bin/relic5-install nat@mba.follow-rankine.ts.net            # copy, then print both sides' versions
+#   bin/relic5-install -n nat@mba.follow-rankine.ts.net         # only compare versions
+#
+# Binaries are copied only to the same OS and CPU (uname -sm): an arm64 Mac build runs on another arm64 Mac, not on
+# white (Linux x86_64), which needs its own build. Each replaced binary is kept as <name>.bak-<its old version>.
+# relic5-push is stamped with this checkout's commit, since the copy has no git to ask.
+set -u
+DRY=""
+[ "${1:-}" = "-n" ] && { DRY=1; shift; }
+[ $# -eq 1 ] || { echo "usage: $0 [-n] user@host" >&2; exit 2; }
+H=$1
+SSH="ssh -o BatchMode=yes -o ConnectTimeout=10"
+HERE=$(cd "$(dirname "$0")" && pwd)
+REV=$(git -C "$HERE" rev-parse --short HEAD 2>/dev/null || echo unknown)
+ver() { "$@" --version 2>/dev/null | head -1 | sed 's/^[^ ]* //'; }
+
+me=$(uname -sm)
+there=$($SSH "$H" 'uname -sm') || { echo "cannot reach $H" >&2; exit 1; }
+show() {
+  printf '%-14s %-24s %s\n' tool here "$H"
+  for t in relic-scan relic-extract; do
+    printf '%-14s %-24s %s\n' "$t" "$(ver "$HOME/.local/bin/$t")" "$($SSH "$H" "\$HOME/.local/bin/$t --version 2>/dev/null | head -1 | sed 's/^[^ ]* //'")"
+  done
+  printf '%-14s %-24s %s\n' relic5-push "$REV" "$($SSH "$H" "sed -n 's/^STAMP=//p' \$HOME/.local/bin/relic5-push 2>/dev/null")"
+}
+[ -n "$DRY" ] && { show; exit 0; }
+[ "$me" = "$there" ] || { echo "refuse: here $me, $H is $there; build there instead" >&2; show; exit 1; }
+
+$SSH "$H" 'mkdir -p "$HOME/.local/bin"' || exit 1
+for t in relic-scan relic-extract; do
+  [ -x "$HOME/.local/bin/$t" ] || { echo "no $HOME/.local/bin/$t here" >&2; exit 1; }
+  $SSH "$H" "f=\$HOME/.local/bin/$t; [ -x \$f ] && v=\$(\$f --version 2>/dev/null | head -1 | sed 's/^[^ ]* //') && cp -p \$f \$f.bak-\$v; true"
+  scp -q "$HOME/.local/bin/$t" "$H:.local/bin/$t.new" && $SSH "$H" "mv \$HOME/.local/bin/$t.new \$HOME/.local/bin/$t" || exit 1
+done
+sed "s/^STAMP=.*/STAMP=$REV/" "$HERE/relic5-push" | $SSH "$H" 'cat > "$HOME/.local/bin/relic5-push.new" && chmod +x "$HOME/.local/bin/relic5-push.new" && mv "$HOME/.local/bin/relic5-push.new" "$HOME/.local/bin/relic5-push"' || exit 1
+show

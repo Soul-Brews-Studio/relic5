@@ -43,6 +43,8 @@ def test_push_streams_only(env):
     assert not (base / "text/.2026-11.parquet.part").exists()   # half-written part never sent
     assert os.path.getmtime(base / "text/2026-10.parquet") == pytest.approx(os.path.getmtime(src / "text/2026-10.parquet"), abs=1)
     assert "stream text     files=1" in r.stdout
+    v = __import__("json").load(open(base / "_versions.json"))
+    assert v["machine"] == "m5" and "relic-scan" in v and v["relic5-push"]
 
 
 def test_second_push_sends_nothing_and_never_deletes(env):

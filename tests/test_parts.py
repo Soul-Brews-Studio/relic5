@@ -36,3 +36,11 @@ def test_status(root):
     assert s["machines"]["m5"]["text"]["newest_ts"] == "2026-10-23T11:30:00.000Z"
     assert s["rows"]["text"] == 7 and s["watermarks"]["vectors"]["pending"] == 7
     assert any("mba: no meta" in w for w in s["warnings"])
+
+
+def test_status_warns_on_version_mismatch(root):
+    for m, v in (("m5", "26.10.23-alpha.1858"), ("mba", "26.10.23-alpha.1308")):
+        json.dump({"relic-scan": v, "relic-extract": "x", "relic5-push": "y"}, open(os.path.join(root, f"parts/{m}/_versions.json"), "w"))
+    s = status(root, now=NOW)
+    assert s["versions"]["mba"]["relic-scan"] == "26.10.23-alpha.1308"
+    assert [w for w in s["warnings"] if w.startswith("relic-scan differs")] and not [w for w in s["warnings"] if w.startswith("relic-extract differs")]
