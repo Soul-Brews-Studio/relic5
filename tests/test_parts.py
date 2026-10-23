@@ -1,0 +1,38 @@
+import json, os
+from datetime import datetime, timezone
+
+import duckdb
+
+from relic5.parts import Parts, this_month
+from relic5.status import status
+
+NOW = datetime(2026, 10, 23, 14, 0, tzinfo=timezone.utc)
+
+
+def test_bangkok_month():
+    assert this_month(datetime(2026, 9, 30, 17, 30, tzinfo=timezone.utc)) == "2026-10"   # 00:30 in Bangkok
+
+
+def test_index_writes_month_manifests(root):
+    p = Parts(root)
+    assert p.months() == ["2026-09", "2026-10"] and p.stale() == ["2026-09", "2026-10"]
+    assert p.index(duckdb.connect(), log=lambda s: None, now=NOW) == ["2026-09", "2026-10"]
+    man = json.load(open(os.path.join(root, "index/2026-10/manifest.json")))
+    assert man["sealed"] is False and man["streams"]["text"]["rows"] == 6          # 7 pushed, the shared one folds
+    assert man["streams"]["text"]["machines"]["mba"]["rows"] == 1
+    assert json.load(open(os.path.join(root, "index/2026-09/manifest.json")))["sealed"] is True
+    assert p.stale() == [] and p.index(duckdb.connect(), log=lambda s: None) == []   # nothing changed: nothing rewritten
+
+
+def test_part_files_ignored(root):
+    open(os.path.join(root, "parts/m5/text/.2026-11.parquet.part"), "w").write("half")
+    assert "2026-11" not in Parts(root).months()
+
+
+def test_status(root):
+    Parts(root).index(duckdb.connect(), log=lambda s: None, now=NOW)
+    s = status(root, now=NOW)
+    assert s["layout"]["unit"] == "month" and s["months"]["total"] == 2 and s["months"]["open"] == "2026-10"
+    assert s["machines"]["m5"]["text"]["newest_ts"] == "2026-10-23T11:30:00.000Z"
+    assert s["rows"]["text"] == 7 and s["watermarks"]["vectors"]["pending"] == 7
+    assert any("mba: no meta" in w for w in s["warnings"])

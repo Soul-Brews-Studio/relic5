@@ -1,0 +1,57 @@
+#!/bin/sh
+# relic5 push: copy this machine's relic-extract parts to the hub, under parts/<machine>/.
+#
+#   bin/relic5-push                         # RELIC5_HUB=nat@white.follow-rankine.ts.net, machine = short hostname
+#   RELIC5_MACHINE=mba bin/relic5-push      # name the machine yourself
+#   bin/relic5-push -n                      # dry run: list what would move, send nothing
+#
+# Ported from agent-relic-v3 hub/push.sh (commit 6a6d9d8). Kept from it: rsync over ssh, -a so mtimes travel
+# (an unchanged month is skipped; only grown months move), never --delete on the hub (a part pruned here stays on
+# the hub), and the realpath guard (white's /Users/nat is a symlink to /home/nat: a target that resolves
+# somewhere else is refused, not merged into). Changed: it sends ~/.relic-extract streams, not raw transcripts,
+# and each machine lands in its own folder, so nothing from two machines ever shares a path.
+set -u
+HUB="${RELIC5_HUB:-nat@white.follow-rankine.ts.net}"
+SRC="${RELIC5_SRC:-$HOME/.relic-extract}"
+DEST="${RELIC5_DEST:-relic5/parts}"            # relative to the hub user's home
+MACHINE="${RELIC5_MACHINE:-$(hostname -s | tr 'A-Z' 'a-z')}"
+STREAMS="${RELIC5_STREAMS:-text thinking tools vault}"
+DRY=""
+[ "${1:-}" = "-n" ] && DRY="-n"
+
+case "$MACHINE" in *[!a-z0-9-]*|"") echo "bad machine name: '$MACHINE'" >&2; exit 2;; esac
+[ -d "$SRC" ] || { echo "no $SRC" >&2; exit 2; }
+# relic-extract holds an flock on $SRC/.lock for its whole run (relic-extract src/run.rs). Hold a shared one for
+# the push: no push while it cuts, and it waits for a push in flight. Busy now = exit 75, try after the run.
+if [ -z "${RELIC5_LOCKED:-}" ] && [ -e "$SRC/.lock" ]; then
+  RELIC5_LOCKED=1 exec perl -MFcntl=:flock -e '$^F = 255; open(my $f, "<", shift) or die "lock: $!\n";
+    flock($f, LOCK_SH | LOCK_NB) or do { print STDERR "relic-extract is running; push later\n"; exit 75 };
+    exec @ARGV or die "exec: $!\n"' "$SRC/.lock" "$0" "$@"
+fi
+SSH="ssh -o BatchMode=yes -o ConnectTimeout=10"
+
+home=$($SSH "$HUB" 'printf %s "$HOME"') || { echo "cannot reach $HUB" >&2; exit 1; }
+target="$home/$DEST/$MACHINE"
+real=$($SSH "$HUB" "mkdir -p '$target' && realpath '$target'") || exit 1
+[ "$real" = "$target" ] || { echo "refuse: on $HUB $target resolves to $real" >&2; exit 1; }
+
+rc=0
+t0=$(date +%s)
+for s in $STREAMS; do
+  [ -d "$SRC/$s" ] || continue
+  # --stats is parsed into one line per stream: files sent, bytes sent.
+  out=$(rsync -a $DRY --timeout=120 --stats --exclude='.*' "$SRC/$s/" "$HUB:$target/$s/" 2>&1) || { echo "$out" >&2; rc=1; continue; }
+  files=$(printf '%s\n' "$out" | sed -n 's/^Number of regular files transferred: //p' | tr -d ',')
+  sent=$(printf '%s\n' "$out" | sed -n 's/^Total bytes sent: //p' | tr -d ',')
+  printf 'stream %-8s files=%s sent=%s\n' "$s" "${files:-0}" "${sent:-0}"
+done
+# relic-scan's session table: repo, tier and the subagent tree for relic_sessions / relic_session.
+META="${RELIC5_SCAN:-$HOME/.relic-scan}/meta/sessions.parquet"
+if [ -f "$META" ]; then
+  out=$(rsync -a $DRY --timeout=120 --stats --mkpath "$META" "$HUB:$target/meta/" 2>&1) || { echo "$out" >&2; rc=1; }
+  printf 'stream %-8s files=%s sent=%s\n' meta "$(printf '%s\n' "$out" | sed -n 's/^Number of regular files transferred: //p' | tr -d ',')" \
+    "$(printf '%s\n' "$out" | sed -n 's/^Total bytes sent: //p' | tr -d ',')"
+fi
+printf '%s relic5 push %s -> %s:%s rc=%s %ss%s\n' "$(date '+%F %T')" "$MACHINE" "$HUB" "$target" "$rc" \
+  "$(( $(date +%s) - t0 ))" "${DRY:+ (dry run)}"
+exit $rc

@@ -1,0 +1,17 @@
+# relic5 hub on white: MCP + read API on the tailnet address, one token per machine.
+# From agent-relic-v3 hub/systemd/relic3-serve.service (6a6d9d8). The tokens live in ~/.config/relic5/tokens (0600),
+# never in this file; serve refuses to start without one.
+#   cp deploy/systemd/relic5-serve.service ~/.config/systemd/user/ && systemctl --user daemon-reload
+#   systemctl --user enable --now relic5-serve
+[Unit]
+Description=relic5 hub: MCP and read API for every machine (tailscale, token)
+After=network-online.target tailscaled.service
+
+[Service]
+Environment=RELIC5_ROOT=%h/relic5
+ExecStart=%h/relic5/app/.venv/bin/relic5 serve --root %h/relic5 --host 127.0.0.1,100.103.52.67 --port 8795
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
