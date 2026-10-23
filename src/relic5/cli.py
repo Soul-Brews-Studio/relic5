@@ -117,6 +117,8 @@ def main(argv=None):
             j.progress(done=len(done), unit="months", message="manifests: " + (",".join(done) or "none changed"))
             tabs = fts.build(root, con, force=force, log=lambda m: (print(m), j.progress(message=m)))
             j.progress(done=len(tabs), unit="tables", message="fts: " + (",".join(tabs) or "none changed"))
+            from . import names as NM
+            j.progress(done=NM.build(root, con, Parts(root)), unit="sessions", message="names")
             from . import vec as V
             marks = {m: V.watermarks(root, con, m) for m in V.models(root)}
             p = os.path.join(fts.search_dir(root), "vectors.json")

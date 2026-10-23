@@ -9,7 +9,7 @@ reads relic5 the same way. What differs, by design:
   score      keyword hits: how many times the query's words occur (no BM25 until the embed milestone)
 Search is keyword: every word of the query must occur (ILIKE, so a Thai substring matches).
 """
-import base64, hashlib, json, re
+import base64, hashlib, json, os, re
 
 from .parts import STREAMS, Parts
 from .window import window
@@ -69,6 +69,13 @@ class Relic5:
         return f"""(SELECT * EXCLUDE (rn) FROM (SELECT *, row_number() OVER (PARTITION BY sid ORDER BY tier <> 'main', machine) AS rn
                    FROM (SELECT regexp_extract(filename, '/parts/([^/]+)/', 1) AS machine, * EXCLUDE (filename)
                    FROM read_parquet([{lst}], union_by_name = true, filename = true))) WHERE rn = 1)"""
+
+    def _names(self, sids):
+        from .names import path
+        p = path(self.parts.root)
+        if not sids or not os.path.exists(p):
+            return {}
+        return {r["sid"]: r["name"] for r in self._rows(f"SELECT sid, name FROM read_parquet('{p}') WHERE sid IN (SELECT unnest(?))", [list(sids)])}
 
     def _repos(self, sids):
         meta = self._meta()
@@ -256,11 +263,13 @@ class Relic5:
         total, events = self._rows(f"SELECT count(*) AS n, coalesce(sum(n_rows), 0) AS e FROM {meta} WHERE {w}", params)[0].values()
         rows = self._rows(f"""SELECT s.*, (SELECT count(*) FROM {meta} c WHERE c.parent_sid = s.sid) AS children
                               FROM {meta} s WHERE {w} ORDER BY last_ts DESC NULLS LAST LIMIT ?""", params + [limit or DEFAULT_LIMIT])
+        names = self._names({r["sid"] for r in rows})
+        rows = [r | {"name": names.get(r["sid"])} for r in rows]
         return {"total": total, "counted": "top-level sessions only (no parent_sid); subagents fold into children",
                 "events": int(events), "sessions": [self._session_row(r) for r in rows]}
 
     def _session_row(self, r):
-        return {"uuid": r["sid"], "name": None, "home": r["machine"], "tenant": r["cat"], "source": r["engine"],
+        return {"uuid": r["sid"], "name": r.get("name"), "home": r["machine"], "tenant": r["cat"], "source": r["engine"],
                 "link": f"relic5://session/{r['sid']}", "repo": r["proj"], "worktree": "", "tier": r["tier"],
                 "startedAt": r["first_ts"], "endedAt": r["last_ts"], "events": r["n_rows"], "children": r.get("children", 0),
                 "months": r["months"]}
@@ -279,6 +288,9 @@ class Relic5:
             raise UsageError(f"{ident} names {len(rows)}+ sessions: " + ", ".join(r["sid"] for r in rows[:5]))
         s = rows[0]
         kids = self._rows(f"SELECT * FROM {meta} WHERE parent_sid = ? ORDER BY first_ts", [s["sid"]])
+        names = self._names({s["sid"]} | {k["sid"] for k in kids})
+        s = s | {"name": names.get(s["sid"])}
+        kids = [k | {"name": names.get(k["sid"])} for k in kids]
         out = self._session_row(s | {"children": len(kids)})
         out |= {"parent": s["parent_sid"], "base": s["base"], "counts": {k: s[k] for k in (
             "text_rows", "text_msgs", "user_text", "assistant_text", "thinking", "tool_calls", "tool_results", "tool_errors")},
