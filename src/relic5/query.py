@@ -70,6 +70,16 @@ class Relic5:
                    FROM (SELECT regexp_extract(filename, '/parts/([^/]+)/', 1) AS machine, * EXCLUDE (filename)
                    FROM read_parquet([{lst}], union_by_name = true, filename = true))) WHERE rn = 1)"""
 
+    def meta_has(self, col):
+        """Does every machine's sessions.parquet carry this column (relic-scan PR #37 added cwd, title, branch, version)?"""
+        fs = self.parts.meta()
+        if not fs:
+            return False
+        try:
+            return all(col in {r[0] for r in self.con.cursor().execute(f"DESCRIBE SELECT * FROM read_parquet('{f}')").fetchall()} for f in fs)
+        except Exception:
+            return False
+
     def _names(self, sids):
         from .names import path
         p = path(self.parts.root)
@@ -85,7 +95,7 @@ class Relic5:
 
     # ---- search ----
     def search(self, query, since=None, until=None, horizon=None, repo=None, session=None, role=None, tier=None,
-               with_=None, limit=DEFAULT_LIMIT, cursor=None, vector=None, model=None, hybrid=False, sort=None, min_chars=None):
+               with_=None, limit=DEFAULT_LIMIT, cursor=None, vector=None, model=None, hybrid=False, sort=None, min_chars=None, cwd=None):
         """BM25 over the published index (search.py); ILIKE over the parts when none is built or FTS cannot parse
         the query (relic3 falls back the same way, query.ts:127-140)."""
         if not (query or "").split():
@@ -96,12 +106,14 @@ class Relic5:
             if not self.index.built():
                 raise UsageError("no index published yet")
             from . import search as S
-            return S.search(self, self.index, query, vector=vector, model=model, hybrid=hybrid, sort=sort, min_chars=min_chars, **kw)
+            return S.search(self, self.index, query, vector=vector, model=model, hybrid=hybrid, sort=sort, min_chars=min_chars, cwd=cwd, **kw)
         if self.index.built():
             from . import search as S
             try:
-                return S.search(self, self.index, query, sort=sort, **kw)
+                return S.search(self, self.index, query, sort=sort, cwd=cwd, **kw)
             except UsageError:
+                raise
+            except NotFound:
                 raise
             except Exception as ex:   # an FTS parse error: answer by substring, and say so
                 r = self.search_ilike(query, **kw)
@@ -316,7 +328,12 @@ class Relic5:
         s = s | {"name": names.get(s["sid"])}
         kids = [k | {"name": names.get(k["sid"])} for k in kids]
         out = self._session_row(s | {"children": len(kids)})
-        out |= {"parent": s["parent_sid"], "base": s["base"], "counts": {k: s[k] for k in (
+        cwd = s.get("cwd")
+        resume = None
+        if cwd:
+            resume = f"cd {cwd} && " + (f"codex resume {s['sid']}" if s.get("engine") == "codex" else f"claude --resume {s['sid']}")
+        out |= {"cwd": cwd, "branch": s.get("branch"), "version": s.get("version"), "title": s.get("title"), "resume": resume,
+                "parent": s["parent_sid"], "base": s["base"], "counts": {k: s[k] for k in (
             "text_rows", "text_msgs", "user_text", "assistant_text", "thinking", "tool_calls", "tool_results", "tool_errors")},
                 "subagents": [self._session_row(k) for k in kids]}
         return out

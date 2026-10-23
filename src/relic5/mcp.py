@@ -29,7 +29,7 @@ SEARCH_PROPS = {
     "until": {**STR, "description": "YYYY-MM-DD (through 23:59:59Z of that UTC day), an ISO time, or Nd/Nh/Nm before now"},
     "repo": STR, "session": {**STR, "description": "session uuid prefix"}, "role": STR, "tier": STR, "via": STR, "chat": STR,
     "from_user": STR,
-    "cwd": {**STR, "description": "where a session ran (not in relic5 yet)"},
+    "cwd": {**STR, "description": "sessions that began in this folder or below it (relic-scan meta cwd)"},
     "with": {**STR, "enum": ["tools", "thinking", "vault", "all"], "description": "also search tool calls, thinking, ψ notes, or all"},
     "limit": {"type": "integer", "minimum": 1, "description": f"default {DEFAULT_LIMIT}"},
     "cursor": {**STR, "description": "next_cursor from a previous result"},
@@ -97,14 +97,14 @@ def run_tool(relic, name, a, door=None):
         note = None
         if a.get("semantic") and vec is None:   # the hub embeds nothing: no vector, answer by keyword and say so
             note = "semantic needs the query embedded by the client (relic5 mcp on a Mac adds `vector`): these are keyword hits"
-        for k in ("via", "chat", "from_user", "cwd"):
+        for k in ("via", "chat", "from_user"):
             if a.get(k) is not None:
-                raise UsageError(f"{k} is not available on relic5 yet: relic-extract's parts do not carry it")
+                raise UsageError(f"{k} is not in the index yet (relic-scan will carry channel fields next)")
         r = relic.search(_str(a, "query"), since=_str(a, "since"), until=_str(a, "until"), horizon=_str(a, "horizon"),
                          repo=_str(a, "repo"), session=_str(a, "session"), role=_str(a, "role"), tier=_str(a, "tier"),
                          with_=_str(a, "with"), limit=min(_int(a, "limit", 1) or DEFAULT_LIMIT, 100), cursor=_str(a, "cursor"),
                          vector=vec, model=_str(a, "model") if vec is not None else None,
-                         hybrid=bool(a.get("hybrid")) and vec is not None, sort=_str(a, "sort"),
+                         hybrid=bool(a.get("hybrid")) and vec is not None, sort=_str(a, "sort"), cwd=_str(a, "cwd"),
                          min_chars=_int(a, "min_chars") if vec is not None else None)
         return {"note": note, **r} if note else r
     if name == "relic_show":

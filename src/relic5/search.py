@@ -78,7 +78,7 @@ def pick_model(index, model):
 
 
 def search(relic, index, query, since=None, until=None, horizon=None, repo=None, session=None, role=None, tier=None,
-           with_=None, limit=20, cursor=None, vector=None, model=None, hybrid=False, sort=None, min_chars=None):
+           with_=None, limit=20, cursor=None, vector=None, model=None, hybrid=False, sort=None, min_chars=None, cwd=None):
     from .query import UsageError, repo_pattern
     if sort not in (None, "", "relevant", "newest"):
         raise UsageError("sort is relevant | newest")
@@ -105,7 +105,9 @@ def search(relic, index, query, since=None, until=None, horizon=None, repo=None,
             conds.append(c.format(q_(v)))
     if session:
         conds.append(f"sid LIKE {q_(session.replace('%', '') + '%')}")
-    if repo or tier:
+    if cwd and not relic.meta_has("cwd"):
+        raise UsageError("cwd is not in the index yet (needs relic-scan >= PR #37 on every machine)")
+    if repo or tier or cwd:
         meta = relic._meta()
         if not meta:
             raise UsageError("repo/tier need relic-scan's meta/sessions.parquet on the hub (push it)")
@@ -116,13 +118,16 @@ def search(relic, index, query, since=None, until=None, horizon=None, repo=None,
         if tier:
             sub.append("tier = ?")
             sp.append(tier)
+        if cwd:   # sessions that ran in PATH or below it (relic3 --cwd)
+            sub.append("(cwd = ? OR starts_with(cwd, ?))")
+            sp += [cwd.rstrip("/"), cwd.rstrip("/") + "/"]
         sids = [r["sid"] for r in relic._rows(f"SELECT DISTINCT sid FROM {meta} WHERE {' AND '.join(sub)}", sp)]
         if not sids:
             return {"hits": [], "next_cursor": None, "horizon": horizon or "archive", "horizons_tried": [], "widened": False,
                     "searched_weeks": [], "searched_months": [], "scope_empty": True}
         conds.append("sid IN (" + ",".join(q_(s) for s in sids) + ")")
         filt["sids"] = set(sids)
-    sig = hashlib.sha1(json.dumps([query, lo, hi, repo, session, role, tier, with_, sort]).encode()).hexdigest()[:12]
+    sig = hashlib.sha1(json.dumps([query, lo, hi, repo, session, role, tier, with_, sort, cwd]).encode()).hexdigest()[:12]
     off, pinned = 0, None
     if cursor:
         try:
