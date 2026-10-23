@@ -51,7 +51,7 @@ MONTH = "strftime((ts AT TIME ZONE 'UTC') + INTERVAL 7 HOUR, '%Y-%m')"
 
 def select_sql(files, known_table=None):
     keep = f"AND session_uuid NOT IN (SELECT sid FROM {known_table})" if known_table else ""
-    ev = f"""SELECT 'text' AS s, hash(text_hash, uid)::BIGINT AS h, 0::BIGINT AS idx, coalesce(source, 'claude') AS engine,
+    ev = f"""SELECT 'text' AS s, (hash(text_hash, uid) & 9223372036854775807)::BIGINT AS h, 0::BIGINT AS idx, coalesce(source, 'claude') AS engine,
                role, role AS type, session_uuid AS sid, {TS} AS ts, {TS_TH} AS ts_th, text,
                NULL::VARCHAR AS kind, NULL::VARCHAR AS call_id, NULL::VARCHAR AS name, NULL::VARCHAR AS body, NULL::BOOLEAN AS err,
                NULL::VARCHAR AS red, ['relic3-import'] AS machines,
@@ -61,7 +61,7 @@ def select_sql(files, known_table=None):
              WHERE role IN ('user', 'assistant') AND ts IS NOT NULL AND text IS NOT NULL {keep}"""
     if not files["tools"]:
         return ev
-    tl = f"""SELECT 'tools' AS s, hash(text_hash, uid)::BIGINT AS h, coalesce(part, 0)::BIGINT AS idx, coalesce(source, 'claude') AS engine,
+    tl = f"""SELECT 'tools' AS s, (hash(text_hash, uid) & 9223372036854775807)::BIGINT AS h, coalesce(part, 0)::BIGINT AS idx, coalesce(source, 'claude') AS engine,
                '' AS role, role AS type, session_uuid AS sid, {TS} AS ts, {TS_TH} AS ts_th, NULL::VARCHAR AS text,
                CASE WHEN role = 'tool_result' THEN 'result' ELSE 'call' END AS kind, NULL::VARCHAR AS call_id,
                nullif(regexp_extract(text, '^\\[tool_use ([\\w.:-]+)\\]', 1), '') AS name, text AS body, false AS err,
@@ -91,13 +91,13 @@ def convert(con, index_dir, out_dir, known=None, log=print, weeks=None):
     cols = [c.split()[0] for c in SCHEMA.split(", ")]
     for mon in rows:
         p = os.path.join(out_dir, f"{mon}.parquet")
-        con.execute(f"COPY (SELECT {', '.join(cols)} FROM imp WHERE month = '{mon}' ORDER BY ts, sid, s, idx) TO '{p}.tmp' (FORMAT parquet)")
+        con.execute(f"COPY (SELECT {', '.join(cols)} FROM imp WHERE month = '{mon}' ORDER BY ts, sid, s, idx) TO '{p}.tmp' (FORMAT parquet, COMPRESSION zstd)")
         os.replace(p + ".tmp", p)
     os.makedirs(os.path.join(out_dir, "meta"), exist_ok=True)
     mp = os.path.join(out_dir, "meta", "sessions.parquet")
     con.execute(f"""COPY (SELECT sid, 'main' AS tier, NULL::VARCHAR AS parent_sid, any_value(engine) AS engine, NULL::VARCHAR AS proj,
                     'relic3-import' AS cat, false AS probe, min(ts) AS first_ts, max(ts) AS last_ts, count(*)::BIGINT AS n_rows,
-                    list(DISTINCT month) AS months FROM imp GROUP BY sid) TO '{mp}.tmp' (FORMAT parquet)""")
+                    list(DISTINCT month) AS months FROM imp GROUP BY sid) TO '{mp}.tmp' (FORMAT parquet, COMPRESSION zstd)""")
     os.replace(mp + ".tmp", mp)
     n_s = con.execute("SELECT count(DISTINCT sid) FROM imp").fetchone()[0]
     log(f"import: {sum(rows.values()):,} rows, {n_s:,} sessions, {len(rows)} months -> {out_dir} ({time.time() - t:.0f}s)")

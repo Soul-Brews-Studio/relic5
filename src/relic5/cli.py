@@ -4,6 +4,8 @@
                                   on the hub: tokens stored hashed (tokens.json, 0600), the secret shown once
   relic5 index [--root ~/relic5] [--force] [YYYY-MM ...]   on the hub: month manifests, BM25 tables, names (fast lane)
   relic5 index --vectors                     on the hub: vector tables and watermarks only (slow lane, after shards land)
+  relic5 import relic3 [--weeks 2026W40-2026-09-28,...] [--all] [--out ~/.relic-import/relic3]
+                                  old relic3 weeks -> relic-scan month files of the sessions no machine holds
   relic5 mcp                      stdio MCP on a Mac: forwards to the hub, embeds semantic queries here
   relic5 embed [--probe] [--limit 5000] [--prefix 0,1] [--engine mps]   client: embed missing chunks, ship a shard
   relic5 eval [tests/eval/semantic.json] [--semantic]   recall@10 of a query file against the hub
@@ -188,6 +190,19 @@ def _main(argv=None):
     elif cmd == "mcp":
         from .shim import serve as shim
         shim(URL)
+    elif cmd == "import" and rest[:1] == ["relic3"]:
+        import duckdb, subprocess as sp
+        from . import importer
+        idx = os.path.expanduser(_opt(rest, "--index", "~/.relic3-hub/index"))
+        out = os.path.expanduser(_opt(rest, "--out", "~/.relic-import/relic3"))
+        weeks = [w for w in (_opt(rest, "--weeks", "") or "").split(",") if w]
+        known = None
+        if "--all" not in rest:   # sessions some machine already holds are skipped (relic4-scan: import by session)
+            q = "COPY (SELECT DISTINCT sid FROM read_parquet('/home/nat/relic5/parts/*/meta/sessions.parquet')) TO '/dev/stdout' (FORMAT csv, HEADER false)"
+            known = set(sp.run(["ssh", "-o", "BatchMode=yes", "nat@white.follow-rankine.ts.net", f'duckdb -c "{q}"'],
+                               capture_output=True, text=True, check=True).stdout.split())
+            print(f"known sessions on the hub: {len(known):,}")
+        importer.convert(duckdb.connect(), idx, out, known, weeks=weeks or None)
     elif cmd == "embed":
         from .worker import main as wm
         wm(rest)
