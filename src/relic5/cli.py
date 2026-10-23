@@ -12,6 +12,7 @@
   relic5 search <words> [--with tools] [--limit 20] [--since 7d] [--repo R] [--json]     any machine, over tailscale
   relic5 recap <session> [--limit 20|0] [--json]   what happened: turns asked, tools, files edited, how it ended
   relic5 handoff <session> [--role user]   paste-ready block for a new session's first prompt (relic3 tail --handoff)
+  relic5 pending                  what is not searchable yet: stale months (BM25), chunks without vectors, push lag
   relic5 tail [--session S] [--machine M] [--n 50] [-f]   the newest messages as they land (-f: keep following)
   relic5 status [--json]
 
@@ -19,7 +20,7 @@ Client settings: RELIC5_URL (default http://white.follow-rankine.ts.net:8795), R
 (default ~/.config/relic5/token, 0600, the one line `relic5 token add` printed on the hub).
 Hub settings: RELIC5_ROOT (default ~/relic5), RELIC5_TOKENS (default ~/.config/relic5/tokens: `<machine> <token>` lines).
 """
-import json, os, re, secrets, sys, time, urllib.parse, urllib.request
+import json, os, re, secrets, sys, time, urllib.error, urllib.parse, urllib.request
 
 ROOT = os.environ.get("RELIC5_ROOT", "~/relic5")
 TOKENS = os.environ.get("RELIC5_TOKENS", "~/.config/relic5/tokens")
@@ -100,7 +101,25 @@ def _line(h, width=110):
     return f"{(h.get('ts') or '')[:16]}  {who:<7} {h.get('role') or '':<9} {(h.get('session_uuid') or '')[:8]}  {txt}"
 
 
+# Exit codes, as relic3: 0 ok · 1 error · 2 usage · 3 parity refused (embed) · 75 locked · 130 cancelled
+EXIT_ERROR, EXIT_USAGE, EXIT_LOCKED, EXIT_CANCELLED = 1, 2, 75, 130
+
+
 def main(argv=None):
+    try:
+        return _main(argv)
+    except KeyboardInterrupt:
+        sys.exit(EXIT_CANCELLED)
+    except urllib.error.HTTPError as ex:
+        body = ex.read().decode("utf-8", "replace")[:300]
+        print(f"relic5: {ex.code} {body}", file=sys.stderr)
+        sys.exit(EXIT_USAGE if ex.code in (400, 404) else EXIT_ERROR)
+    except urllib.error.URLError as ex:
+        print(f"relic5: hub unreachable ({URL}): {ex.reason}", file=sys.stderr)
+        sys.exit(EXIT_ERROR)
+
+
+def _main(argv=None):
     args = list(sys.argv[1:] if argv is None else argv)
     if not args or args[0] in ("-h", "--help"):
         print(__doc__)
@@ -207,6 +226,15 @@ def main(argv=None):
                 print(r["more"])
     elif cmd == "handoff" and rest:
         print(call("/api/handoff", {"id": rest[0], "user_only": "1" if "--role" in rest else "0"})["text"])
+    elif cmd == "pending":   # relic3 `pending`: what is not searchable yet, by lane
+        st = call("/api/status", {})
+        f, v = st.get("freshness", {}), st["watermarks"]["vectors"]
+        print(f"BM25: index {st['watermarks']['fts']['at']} ({(f.get('fts') or {}).get('age_s')} s ago); stale months: "
+              + (", ".join(w.split()[1].rstrip(":") for w in st["warnings"] if w.startswith("month ")) or "none"))
+        for model, per in (v.get("models") or {}).items():
+            print(f"vectors {model}: " + ", ".join(f"{m} {x['pending']:,} pending (embedded to {x['at']})" for m, x in sorted(per.items())))
+        for m, x in sorted(f.get("machines", {}).items()):
+            print(f"push {m}: newest row {x['newest_ts']}, pushed {x['pushed_at']}, {x['lag_s']} s behind now")
     elif cmd == "tail":
         import time as _t
         p = {k: v for k in ("session", "machine", "n") if (v := _opt(rest, "--" + k))}
@@ -226,7 +254,8 @@ def main(argv=None):
         r = call("/api/status", {})
         print(json.dumps(r, ensure_ascii=False, indent=1))
     else:
-        sys.exit(f"unknown command '{cmd}'\n  relic5 --help")
+        print(f"unknown command '{cmd}'\n  relic5 --help", file=sys.stderr)
+        sys.exit(EXIT_USAGE)
 
 
 if __name__ == "__main__":

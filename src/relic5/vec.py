@@ -133,30 +133,34 @@ class Matrix:
         self.n = n
 
     def search(self, q, f, limit):
-        """q: unit vector; f: {lo, hi, role, sid_prefix, sids, min_chars}. -> rows with _score = cosine."""
+        """q: unit vector; f: {lo, hi, role, sid_prefix, sids, min_chars}. -> rows with _score = cosine.
+        One matmul over every row, then the filters as a mask (no copy of the matrix: M[idx] copied 2.5 GB a query)."""
         import numpy as np
         c = self.cols
+        if not hasattr(self, "_ts"):
+            self._ts, self._sid = c["ts"].astype(str), c["sid"].astype(str)
+        s = self.M @ np.asarray(q, dtype=np.float32)
         mask = c["chars"] >= f.get("min_chars", MIN_CHARS)
         if f.get("lo"):
-            mask &= c["ts"].astype(str) >= f["lo"]
+            mask &= self._ts >= f["lo"]
         if f.get("hi"):
-            mask &= c["ts"].astype(str) <= f["hi"]
+            mask &= self._ts <= f["hi"]
         if f.get("role"):
             mask &= c["role"] == f["role"]
         if f.get("sid_prefix"):
-            mask &= np.char.startswith(c["sid"].astype(str), f["sid_prefix"])
+            mask &= np.char.startswith(self._sid, f["sid_prefix"])
         if f.get("sids") is not None:
-            mask &= np.isin(c["sid"], list(f["sids"]))
-        idx = np.flatnonzero(mask)
-        if not len(idx):
+            mask &= np.isin(self._sid, list(f["sids"]))
+        s = np.where(mask, s, -np.inf)
+        k = min(limit, int(mask.sum()))
+        if k <= 0:
             return []
-        s = self.M[idx] @ np.asarray(q, dtype=np.float32)
-        top = idx[np.argsort(-s)[:limit]] if len(idx) > limit else idx[np.argsort(-s)]
-        sc = dict(zip(idx, s)) if len(idx) <= limit * 50 else None
+        top = np.argpartition(-s, k - 1)[:k]
+        top = top[np.argsort(-s[top])]
         out = []
         for i in top:
-            r = {k: (v.item() if hasattr(v, "item") else v) for k, v in ((k, c[k][i]) for k in self.META)}
+            r = {k2: (v.item() if hasattr(v, "item") else v) for k2, v in ((k2, c[k2][i]) for k2 in self.META)}
             r["machines"] = self.machines[i]
-            r["_score"] = float(sc[i]) if sc is not None else float(self.M[i] @ np.asarray(q, dtype=np.float32))
+            r["_score"] = float(s[i])
             out.append(r)
         return out
