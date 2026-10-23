@@ -1,0 +1,32 @@
+# relic5 on Linux: `just up`. Host networking: serve binds white's loopback and tailnet address itself, and sees the
+# real client address, which doors.py needs for `tailscale whois` (a bridge network would hide it behind NAT).
+x-relic: &relic
+  build: { context: ., args: { UID: "${UID:-1001}", GID: "${GID:-1001}" } }
+  image: relic5:${RELIC5_TAG:-local}
+  network_mode: host
+  volumes:
+    - ${RELIC5_DATA:-~/relic5}:/data
+    - ${HOME}/.config/relic5/tokens:/config/tokens:ro
+    - /var/run/tailscale/tailscaled.sock:/var/run/tailscale/tailscaled.sock   # tailscale whois for the tailnet door
+    - /usr/bin/tailscale:/usr/local/bin/tailscale:ro                         # the host's static CLI, same version as tailscaled
+
+services:
+  serve:
+    <<: *relic
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-H", "Host: 127.0.0.1", "http://127.0.0.1:8795/health"]   # the loopback door
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  index:   # one shot: `just index` (relic-extract's after hook on white runs it too)
+    <<: *relic
+    profiles: [jobs]
+    command: ["relic5", "index", "--root", "/data"]
+
+  embed:   # its own service, for gb300 / white embed workers (embed milestone); not started by `just up`
+    <<: *relic
+    profiles: [embed]
+    command: ["relic5", "--help"]

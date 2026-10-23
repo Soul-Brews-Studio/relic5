@@ -573,8 +573,8 @@ dev = [
 requires-dist = [
     { name = "duckdb", specifier = "==1.5.5" },
     { name = "fastapi", specifier = ">=0.115" },
-    { name = "lancedb", specifier = ">=0.25" },
-    { name = "pylance", specifier = ">=0.20" },
+    { name = "lancedb", specifier = "==0.40.0" },
+    { name = "pylance", specifier = "==13.0.0" },
     { name = "uvicorn", specifier = ">=0.30" },
 ]
 

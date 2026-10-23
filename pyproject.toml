@@ -6,8 +6,8 @@ requires-python = ">=3.12"
 dependencies = [
     "duckdb==1.5.5",
     "fastapi>=0.115",
-    "lancedb>=0.25",
-    "pylance>=0.20",
+    "lancedb==0.40.0",
+    "pylance==13.0.0",
     "uvicorn>=0.30",
 ]
 
