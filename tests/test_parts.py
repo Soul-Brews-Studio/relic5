@@ -58,3 +58,11 @@ def test_a_part_pushed_late_with_an_old_mtime_is_still_indexed(root):
     assert p.stale() == ["2026-10"]
     assert p.index(con, log=lambda s: None, now=NOW) == ["2026-10"]
     assert json.load(open(os.path.join(root, "index/2026-10/manifest.json")))["streams"]["text"]["machines"]["mba"]["rows"] == 2
+
+
+def test_status_shows_sync_and_warns_on_mismatch(root):
+    json.dump({"line": "2026-10-23 23:10 SYNC OK text|1"}, open(os.path.join(root, "parts/m5/_sync.json"), "w"))
+    json.dump({"line": "2026-10-23 23:10 SYNC MISMATCH mba: text|2 hub: text|1"}, open(os.path.join(root, "parts/mba/_sync.json"), "w"))
+    s = status(root, now=NOW)
+    assert s["freshness"]["machines"]["m5"]["sync"].endswith("SYNC OK text|1")
+    assert any("SYNC MISMATCH" in w for w in s["warnings"])

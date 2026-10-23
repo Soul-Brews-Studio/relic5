@@ -82,6 +82,15 @@ printf '{"machine": "%s", "at": "%s", "relic-scan": "%s", "relic-extract": "%s",
   "$MACHINE" "$(date '+%FT%T%z')" "$(ver relic-scan)" "$(ver relic-extract)" "$here" "$(uname -sm)" > "${TMPDIR:-/tmp}/relic5-versions.$$"
 [ -z "$DRY" ] && rsync -a --timeout=60 "${TMPDIR:-/tmp}/relic5-versions.$$" "$R$target/_versions.json" >/dev/null 2>&1 || true
 rm -f "${TMPDIR:-/tmp}/relic5-versions.$$"
+# The newest SYNC line of this machine's relic-chain log (relic4-scan's loop), for the hub's Sync card.
+for L in "${RELIC5_CHAIN_LOG:-}" "$HOME/Library/Logs/relic-chain.log" "$HOME/.local/state/relic-chain.log"; do
+  [ -n "$L" ] && [ -f "$L" ] || continue
+  line=$(grep -E "SYNC (OK|MISMATCH)" "$L" | tail -1 | tr -d '"\\')
+  [ -n "$line" ] && [ -z "$DRY" ] && printf '{"line": "%s", "log": "%s"}\n' "$line" "$L" > "${TMPDIR:-/tmp}/relic5-sync.$$" \
+    && rsync -a --timeout=60 "${TMPDIR:-/tmp}/relic5-sync.$$" "$R$target/_sync.json" >/dev/null 2>&1
+  rm -f "${TMPDIR:-/tmp}/relic5-sync.$$"
+  break
+done
 if [ $rc -eq 0 ]; then jobev done "\"rc\": 0, \"done\": $sent_total, \"unit\": \"bytes\""; else jobev error "\"rc\": $rc"; fi
 printf '%s relic5 push %s -> %s:%s rc=%s %ss%s\n' "$(date '+%F %T')" "$MACHINE" "$HUB" "$target" "$rc" \
   "$(( $(date +%s) - t0 ))" "${DRY:+ (dry run)}"

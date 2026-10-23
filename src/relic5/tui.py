@@ -42,6 +42,7 @@ def status_lines(s):
         out.append(f"{m:<15} {(x.get('text') or {}).get('rows', 0):>9,} {(x.get('tools') or {}).get('rows', 0):>10,} "
                    f"{(x.get('text') or {}).get('newest_ts') or '?':<25} {ago(fr.get('lag_s')):>8} {ago(fr.get('push_age_s')):>9}  "
                    f"{v.get('relic-scan', '?')} / {v.get('relic-extract', '?')} / {v.get('relic5-push', '?')}")
+    out += [""] + [f"{m:<15} {x['sync']}" for m, x in sorted(f.items()) if x.get("sync")]
     w = s["watermarks"]
     out += ["", f"BM25 index {w['fts']['at']} · vectors {w['vectors']['at']} pending {w['vectors']['pending']:,}",
             f"months {s['months']['total']} (sealed {s['months']['sealed']}, open {s['months']['open']})"]

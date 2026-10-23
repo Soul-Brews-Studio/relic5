@@ -104,3 +104,12 @@ def test_an_http_hub_url_means_ssh_to_its_host(env):
     r = push(dict(e, RELIC5_HUB="http://hub:8795"))       # what relic-chain exports for its SYNC check
     assert r.returncode == 0, r.stderr
     assert "-> nat@hub:" in r.stdout and (hub / "relic5/parts/m5/text/2026-10.parquet").exists()
+
+
+def test_push_sends_the_chain_sync_line(env, tmp_path):
+    src, hub, e = env
+    log = tmp_path / "relic-chain.log"
+    log.write_text("x\n2026-10-23 23:10:15 SYNC OK  text|868825 thinking|1 tools|2\nchain start\n")
+    assert push(dict(e, RELIC5_CHAIN_LOG=str(log))).returncode == 0
+    import json as _j
+    assert _j.load(open(hub / "relic5/parts/m5/_sync.json"))["line"] == "2026-10-23 23:10:15 SYNC OK  text|868825 thinking|1 tools|2"

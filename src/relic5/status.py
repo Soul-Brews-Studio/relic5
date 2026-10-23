@@ -85,6 +85,16 @@ def status(root, now=None):
         age = fresh["machines"][m]["push_age_s"]
         if age is not None and age > 1800 and not m.endswith("-import"):
             warnings.append(f"machine {m}: last push {age // 60} min ago (relic-chain should push every 10 min)")
+    for m in p.machines():   # the chain's own verdict (relic-chain SYNC OK / MISMATCH), as last pushed
+        sp_ = os.path.join(p.dir, m, "_sync.json")
+        if os.path.isfile(sp_):
+            try:
+                line = __import__("json").load(open(sp_)).get("line", "")
+            except ValueError:
+                continue
+            fresh["machines"].setdefault(m, {})["sync"] = line
+            if "MISMATCH" in line:
+                warnings.append(f"machine {m}: {line}")
     ip = os.path.join(p.root, "index", "_search", "current.json")
     fresh["fts"]["age_s"] = round(t_now - os.path.getmtime(ip)) if os.path.exists(ip) else None
     from . import selfknow

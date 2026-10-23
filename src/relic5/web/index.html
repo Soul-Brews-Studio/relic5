@@ -158,9 +158,10 @@ async function queries() {
 }
 function fresh(s) {
   const f = s.freshness || {machines: {}}, secs = v => v == null ? '<span class="dim">unknown</span>' : v < 120 ? v + " s" : v < 7200 ? Math.round(v / 60) + " min" : Math.round(v / 3600) + " h";
-  $("#fresh").innerHTML = head(["machine", "newest row", "behind now", "last push", "push age"]) +
+  $("#fresh").innerHTML = head(["machine", "newest row", "behind now", "last push", "push age", "last SYNC (the machine's relic-chain)"]) +
     Object.entries(f.machines).map(([m, x]) => row([`<b>${esc(m)}</b>`, esc(x.newest_ts ?? "unknown"), secs(x.lag_s), esc(x.pushed_at ?? "unknown"),
-      `<span class="${x.push_age_s > 1800 ? "warn" : ""}">${secs(x.push_age_s)}</span>`])).join("") +
+      `<span class="${x.push_age_s > 1800 ? "warn" : ""}">${secs(x.push_age_s)}</span>`,
+      x.sync ? `<span class="${x.sync.includes("MISMATCH") ? "bad" : "ok"}">${esc(x.sync)}</span>` : '<span class="dim">no chain log</span>'])).join("") +
     row(["<b>BM25 index</b>", esc(f.fts?.at ?? "none"), "", "", secs(f.fts?.age_s)]) + row(["<b>vectors</b>", esc(f.vectors?.at ?? "none"), "", "", ""]);
 }
 async function tail() {
