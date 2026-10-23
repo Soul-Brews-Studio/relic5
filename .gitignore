@@ -4,3 +4,5 @@ __pycache__/
 .pytest_cache/
 tests/eval/generated/
 tests/eval/runs/
+feeder/.build/
+feeder/*.app/
