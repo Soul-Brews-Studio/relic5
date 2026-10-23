@@ -20,8 +20,9 @@ def test_without_cwd_the_filter_says_so(root, monkeypatch):
 
 def test_title_cwd_and_resume(root, monkeypatch):
     monkeypatch.setenv("RELIC5_NOW", "2026-10-23T14:00:00Z")
-    cols = META_COLS + ["cwd", "title", "branch", "version"]
-    rows = [meta("s1-aaaa") | {"cwd": "/opt/Code/github.com/x/relic5", "title": "Relic5 hub on white", "branch": "m1", "version": "2.1"},
+    cols = META_COLS + ["cwd", "title", "branch", "version", "via", "chat", "from_user"]
+    rows = [meta("s1-aaaa") | {"cwd": "/opt/Code/github.com/x/relic5", "title": "Relic5 hub on white", "branch": "m1", "version": "2.1",
+                               "via": "plugin:discord:discord", "chat": "1549083680352370748", "from_user": "nazt_"},
             meta("s2-bbbb") | {"cwd": "/tmp/elsewhere"}, meta("agent-1", tier="subagent", parent="s1-aaaa")]
     write_parquet(f"{root}/parts/m5/meta/sessions.parquet", cols, rows, types=T)   # mba keeps the old meta: like an import
     con = duckdb.connect()
@@ -37,3 +38,8 @@ def test_title_cwd_and_resume(root, monkeypatch):
 
     assert {h["session_uuid"] for h in r.search("hub", branch="m1", horizon="archive")["hits"]} == {"s1-aaaa"}
     assert {h["session_uuid"] for h in r.search("hub", title="HUB ON", horizon="archive")["hits"]} == {"s1-aaaa"}
+
+    assert {h["session_uuid"] for h in r.search("hub", via="DISCORD", horizon="archive")["hits"]} == {"s1-aaaa"}
+    assert {h["session_uuid"] for h in r.search("hub", from_user="nazt", horizon="archive")["hits"]} == {"s1-aaaa"}
+    assert r.search("hub", chat="000", horizon="archive")["hits"] == []
+    assert [x["uuid"] for x in r.sessions(via="discord")["sessions"]] == ["s1-aaaa"]

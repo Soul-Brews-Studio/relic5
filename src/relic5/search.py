@@ -79,7 +79,7 @@ def pick_model(index, model):
 
 def search(relic, index, query, since=None, until=None, horizon=None, repo=None, session=None, role=None, tier=None,
            with_=None, limit=20, cursor=None, vector=None, model=None, hybrid=False, sort=None, min_chars=None, cwd=None,
-           branch=None, title=None):
+           branch=None, title=None, via=None, chat=None, from_user=None):
     from .query import UsageError, like, repo_pattern
     if sort not in (None, "", "relevant", "newest"):
         raise UsageError("sort is relevant | newest")
@@ -108,10 +108,11 @@ def search(relic, index, query, since=None, until=None, horizon=None, repo=None,
         conds.append(f"sid LIKE {q_(session.replace('%', '') + '%')}")
     if cwd and not relic.meta_has("cwd"):
         raise UsageError("cwd is not in the index yet (needs relic-scan >= PR #37 on every machine)")
-    for col, v in (("branch", branch), ("title", title)):
+    channel = {"via": via, "chat": chat, "from_user": from_user}   # relic3 --via/--chat/--from-user: session-level substrings
+    for col, v in (("branch", branch), ("title", title), *channel.items()):
         if v and not relic.meta_has(col):
-            raise UsageError(f"{col} is not in the index yet (needs relic-scan >= PR #37 on every machine)")
-    if repo or tier or cwd or branch or title:
+            raise UsageError(f"{col} is not in the index yet (needs a newer relic-scan meta on some machine)")
+    if repo or tier or cwd or branch or title or any(channel.values()):
         meta = relic._meta()
         if not meta:
             raise UsageError("repo/tier need relic-scan's meta/sessions.parquet on the hub (push it)")
@@ -131,13 +132,17 @@ def search(relic, index, query, since=None, until=None, horizon=None, repo=None,
         if title:   # a substring of the host's session title, case-blind
             sub.append("title ILIKE ? ESCAPE '\\'")
             sp.append(like(title))
+        for col, v in channel.items():   # the session's first channel message: every row of the session matches
+            if v:
+                sub.append(f"{col} ILIKE ? ESCAPE '\\'")
+                sp.append(like(v))
         sids = [r["sid"] for r in relic._rows(f"SELECT DISTINCT sid FROM {meta} WHERE {' AND '.join(sub)}", sp)]
         if not sids:
             return {"hits": [], "next_cursor": None, "horizon": horizon or "archive", "horizons_tried": [], "widened": False,
                     "searched_weeks": [], "searched_months": [], "scope_empty": True}
         conds.append("sid IN (" + ",".join(q_(s) for s in sids) + ")")
         filt["sids"] = set(sids)
-    sig = hashlib.sha1(json.dumps([query, lo, hi, repo, session, role, tier, with_, sort, cwd, branch, title]).encode()).hexdigest()[:12]
+    sig = hashlib.sha1(json.dumps([query, lo, hi, repo, session, role, tier, with_, sort, cwd, branch, title, via, chat, from_user]).encode()).hexdigest()[:12]
     off, pinned = 0, None
     if cursor:
         try:

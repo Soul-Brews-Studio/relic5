@@ -27,8 +27,10 @@ SEARCH_PROPS = {
     "horizon": {**STR, "description": "7d | 15d | 1m | 3m | archive (default archive: every month); exclusive with since/until"},
     "since": {**STR, "description": "YYYY-MM-DD (from 00:00:00Z of that UTC day), an ISO time, or Nd/Nh/Nm before now (1m = one minute)"},
     "until": {**STR, "description": "YYYY-MM-DD (through 23:59:59Z of that UTC day), an ISO time, or Nd/Nh/Nm before now"},
-    "repo": STR, "session": {**STR, "description": "session uuid prefix"}, "role": STR, "tier": STR, "via": STR, "chat": STR,
-    "from_user": STR,
+    "repo": STR, "session": {**STR, "description": "session uuid prefix"}, "role": STR, "tier": STR,
+    "via": {**STR, "description": "channel the session came in by, substring, case-blind (discord matches plugin:discord:discord)"},
+    "chat": {**STR, "description": "the chat / room / thread id, substring"},
+    "from_user": {**STR, "description": "who sent the session's first channel message, substring, case-blind"},
     "cwd": {**STR, "description": "sessions that began in this folder or below it (relic-scan meta cwd)"},
     "branch": {**STR, "description": "sessions on this git branch"},
     "title": {**STR, "description": "sessions whose host title contains this (case-blind)"},
@@ -52,7 +54,8 @@ TOOLS = [
                      "additionalProperties": False}},
     {"name": "relic_sessions", "description": "List top-level sessions, newest first. Subagent and workflow-agent sessions are not listed: each folds "
                     "into its parent's `children` count, so `total` is smaller than relic-scan's session count (it counts every tier).",
-     "inputSchema": {"type": "object", "properties": {"repo": STR, "since": STR, "until": STR, "limit": INT}, "additionalProperties": False}},
+     "inputSchema": {"type": "object", "properties": {"repo": STR, "since": STR, "until": STR, "limit": INT,
+                     "via": SEARCH_PROPS["via"], "chat": SEARCH_PROPS["chat"], "from_user": SEARCH_PROPS["from_user"]}, "additionalProperties": False}},
     {"name": "relic_session", "description": "Resolve a session id prefix to its session record and subagent tree.",
      "inputSchema": {"type": "object", "properties": {"id": STR}, "required": ["id"], "additionalProperties": False}},
     {"name": "relic_status", "description": "Months, per-machine watermarks, totals, jobs and warnings (StatusReport).",
@@ -99,14 +102,12 @@ def run_tool(relic, name, a, door=None):
         note = None
         if a.get("semantic") and vec is None:   # the hub embeds nothing: no vector, answer by keyword and say so
             note = "semantic needs the query embedded by the client (relic5 mcp on a Mac adds `vector`): these are keyword hits"
-        for k in ("via", "chat", "from_user"):
-            if a.get(k) is not None:
-                raise UsageError(f"{k} is not in the index yet (relic-scan will carry channel fields next)")
         r = relic.search(_str(a, "query"), since=_str(a, "since"), until=_str(a, "until"), horizon=_str(a, "horizon"),
                          repo=_str(a, "repo"), session=_str(a, "session"), role=_str(a, "role"), tier=_str(a, "tier"),
                          with_=_str(a, "with"), limit=min(_int(a, "limit", 1) or DEFAULT_LIMIT, 100), cursor=_str(a, "cursor"),
                          vector=vec, model=_str(a, "model") if vec is not None else None,
                          hybrid=bool(a.get("hybrid")) and vec is not None, sort=_str(a, "sort"), cwd=_str(a, "cwd"), branch=_str(a, "branch"), title=_str(a, "title"),
+                         via=_str(a, "via"), chat=_str(a, "chat"), from_user=_str(a, "from_user"),
                          min_chars=_int(a, "min_chars") if vec is not None else None)
         return {"note": note, **r} if note else r
     if name == "relic_show":
@@ -115,8 +116,9 @@ def run_tool(relic, name, a, door=None):
         return relic.show(_str(a, "id"), seq=_int(a, "seq"), before=min(2 if before is None else before, 50),
                           after=min(2 if after is None else after, 50))
     if name == "relic_sessions":
-        _check(a, ["repo", "since", "until", "limit"])
-        return relic.sessions(repo=_str(a, "repo"), since=_str(a, "since"), until=_str(a, "until"), limit=min(_int(a, "limit") or DEFAULT_LIMIT, 500))
+        _check(a, ["repo", "since", "until", "limit", "via", "chat", "from_user"])
+        return relic.sessions(repo=_str(a, "repo"), since=_str(a, "since"), until=_str(a, "until"), limit=min(_int(a, "limit") or DEFAULT_LIMIT, 500),
+                              via=_str(a, "via"), chat=_str(a, "chat"), from_user=_str(a, "from_user"))
     if name == "relic_session":
         _check(a, ["id"])
         return relic.session(_str(a, "id"))

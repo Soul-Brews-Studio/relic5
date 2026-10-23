@@ -96,7 +96,7 @@ class Relic5:
 
     # ---- search ----
     def search(self, query, since=None, until=None, horizon=None, repo=None, session=None, role=None, tier=None,
-               with_=None, limit=DEFAULT_LIMIT, cursor=None, vector=None, model=None, hybrid=False, sort=None, min_chars=None, cwd=None, branch=None, title=None):
+               with_=None, limit=DEFAULT_LIMIT, cursor=None, vector=None, model=None, hybrid=False, sort=None, min_chars=None, cwd=None, branch=None, title=None, via=None, chat=None, from_user=None):
         """BM25 over the published index (search.py); ILIKE over the parts when none is built or FTS cannot parse
         the query (relic3 falls back the same way, query.ts:127-140)."""
         if not (query or "").split():
@@ -107,11 +107,12 @@ class Relic5:
             if not self.index.built():
                 raise UsageError("no index published yet")
             from . import search as S
-            return S.search(self, self.index, query, vector=vector, model=model, hybrid=hybrid, sort=sort, min_chars=min_chars, cwd=cwd, branch=branch, title=title, **kw)
+            return S.search(self, self.index, query, vector=vector, model=model, hybrid=hybrid, sort=sort, min_chars=min_chars, cwd=cwd, branch=branch, title=title, via=via, chat=chat, from_user=from_user, **kw)
         if self.index.built():
             from . import search as S
             try:
-                return S.search(self, self.index, query, sort=sort, cwd=cwd, branch=branch, title=title, **kw)
+                return S.search(self, self.index, query, sort=sort, cwd=cwd, branch=branch, title=title, via=via, chat=chat,
+                                from_user=from_user, **kw)
             except UsageError:
                 raise
             except NotFound:
@@ -335,7 +336,7 @@ class Relic5:
         return {"rows": rows, "newest": rows[0]["ts"] if rows else None}
 
     # ---- sessions ----
-    def sessions(self, repo=None, since=None, until=None, limit=None):
+    def sessions(self, repo=None, since=None, until=None, limit=None, via=None, chat=None, from_user=None):
         meta = self._meta()
         if not meta:
             raise NotFound("no sessions on the hub: push relic-scan's meta/sessions.parquet")
@@ -344,7 +345,12 @@ class Relic5:
         except ValueError as ex:
             raise UsageError(str(ex))
         where, params = ["parent_sid IS NULL"], []
-        for cond, v in (("proj ILIKE ? ESCAPE '\\'", repo and repo_pattern(repo)), ("last_ts >= ?", lo), ("first_ts <= ?", hi)):
+        for col, v in (("via", via), ("chat", chat), ("from_user", from_user)):
+            if v and not self.meta_has(col):
+                raise UsageError(f"{col} is not in the index yet (needs a newer relic-scan meta on some machine)")
+        for cond, v in (("proj ILIKE ? ESCAPE '\\'", repo and repo_pattern(repo)), ("last_ts >= ?", lo), ("first_ts <= ?", hi),
+                        ("via ILIKE ? ESCAPE '\\'", via and like(via)), ("chat ILIKE ? ESCAPE '\\'", chat and like(chat)),
+                        ("from_user ILIKE ? ESCAPE '\\'", from_user and like(from_user))):
             if v:
                 where.append(cond)
                 params.append(v)
