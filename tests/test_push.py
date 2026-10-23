@@ -5,7 +5,7 @@ import pytest
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FAKE_SSH = """#!/bin/sh
-while [ "$1" = "-o" ]; do shift 2; done
+while [ "$1" = "-o" ] || [ "$1" = "-l" ]; do shift 2; done
 shift   # host
 export HOME="$FAKE_HUB_HOME"
 cd "$HOME" && exec sh -c "$*"
