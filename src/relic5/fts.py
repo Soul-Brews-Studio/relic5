@@ -100,7 +100,8 @@ def build(root, con, log=print, now=None, force=False, lane="fts"):
                 plan[name] = ("vec:" + model, ms, sig)
     if not plan:
         return []
-    gen = time.strftime("%Y%m%d-%H%M%S") + f"-{os.getpid()}"   # unique even for two runs in one second
+    # UTC, always: the native venv and the container disagree on the local zone, and "newest" is by name
+    gen = time.strftime("%Y%m%d-%H%M%S", time.gmtime()) + f"-{os.getpid()}"   # unique even for two runs in one second
     gdir = os.path.join(sd, gen)
     db = lancedb.connect(gdir)
     cur = dict(current(root))
@@ -143,7 +144,8 @@ def build(root, con, log=print, now=None, force=False, lane="fts"):
 
 def _prune(sd, cur):
     live = {v.split("/")[0] for v in cur.values()}
-    gens = sorted(d for d in os.listdir(sd) if os.path.isdir(os.path.join(sd, d)) and d[:8].isdigit())
+    gens = sorted((d for d in os.listdir(sd) if os.path.isdir(os.path.join(sd, d)) and d[:8].isdigit()),
+                  key=lambda d: os.path.getmtime(os.path.join(sd, d)))   # by age on disk, not by name
     for g in gens[:-KEEP]:
         if g not in live:
             shutil.rmtree(os.path.join(sd, g))

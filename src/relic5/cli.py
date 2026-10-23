@@ -9,6 +9,7 @@
   relic5 tui [--token]            the hub in a terminal: status, live, search (+ show), jobs, queries
   relic5 mcp                      stdio MCP on a Mac: forwards to the hub, embeds semantic queries here
   relic5 embed [--probe] [--limit 5000] [--prefix 0,1] [--engine mps]   client: embed missing chunks, ship a shard
+  relic5 gc [--json]              on the hub: what could be reclaimed (dry run only; nothing is deleted)
   relic5 eval [tests/eval/semantic.json] [--semantic]   recall@10 of a query file against the hub
   relic5 log [-n 30]              on the hub: the last event of each job (logs/jobs.jsonl, relic3's JobEvent)
   relic5 serve [--root ~/relic5] [--host 127.0.0.1,100.103.52.67] [--port 8795]
@@ -222,6 +223,19 @@ def _main(argv=None):
     elif cmd == "embed":
         from .worker import main as wm
         wm(rest)
+    elif cmd == "gc":   # dry run only, on the hub
+        from .gc import report
+        r = report(os.path.expanduser(_opt(rest, "--root", ROOT)))
+        if as_json:
+            print(json.dumps(r, indent=1))
+        else:
+            for g in r["generations"]:
+                print(f"gen   {g['gen']:<28} {g['bytes'] / 1e9:6.2f} GB  {'live' if g['live'] else 'reclaimable'}")
+            for a in r["attic"]:
+                print(f"attic {a['item']:<28} {a['bytes'] / 1e9:6.2f} GB  " + (f"safe: other copy = {a['other_copy']}" if a["safe"] else "KEEP: no other copy known"))
+            for f, b in r["logs"].items():
+                print(f"log   {f:<28} {b / 1e6:6.1f} MB")
+            print(f"reclaimable {r['reclaimable_bytes'] / 1e9:.2f} GB (dry run: nothing deleted)")
     elif cmd == "eval":
         from .evaluate import main as ev
         ev(rest)
