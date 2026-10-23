@@ -6,7 +6,7 @@ import json, os, sys, urllib.parse, urllib.request
 def _post(url, q, vector, limit, hybrid=False):
     body = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "relic_search", "arguments": {
         "query": q, "semantic": True, "vector": vector, "limit": limit, **({"hybrid": True} if hybrid else {})}}}
-    req = urllib.request.Request(f"{url}/mcp", data=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
+    req = urllib.request.Request(f"{url}/mcp", data=json.dumps(body).encode(), headers={"Content-Type": "application/json", "X-Relic5-Client": "eval"})
     with urllib.request.urlopen(req, timeout=120) as r:
         res = json.load(r)["result"]
     if res.get("isError"):
@@ -27,7 +27,7 @@ def run(path, semantic=False, url=None, limit=10, model="unsloth--embeddinggemma
             hits = _post(url, item["q"], vecs[item["q"]], limit, hybrid)
         else:
             p = {"q": item["q"], "limit": limit, "horizon": "archive"}
-            with urllib.request.urlopen(f"{url}/api/search?{urllib.parse.urlencode(p)}", timeout=120) as r:
+            with urllib.request.urlopen(urllib.request.Request(f"{url}/api/search?{urllib.parse.urlencode(p)}", headers={"X-Relic5-Client": "eval"}), timeout=120) as r:
                 hits = json.load(r)["hits"]
         got = [h["session_uuid"] for h in hits]
         want = {spec["sessions"][w] for w in item["want"]}

@@ -35,3 +35,6 @@ def test_title_cwd_and_resume(root, monkeypatch):
     hits = r.search("hub", cwd="/opt/Code", horizon="archive")["hits"]
     assert hits and {h["session_uuid"] for h in hits} == {"s1-aaaa"}
     assert r.search("done", cwd="/opt/Code", horizon="archive")["hits"] == []     # s2 ran in /tmp
+
+    assert {h["session_uuid"] for h in r.search("hub", branch="m1", horizon="archive")["hits"]} == {"s1-aaaa"}
+    assert {h["session_uuid"] for h in r.search("hub", title="HUB ON", horizon="archive")["hits"]} == {"s1-aaaa"}

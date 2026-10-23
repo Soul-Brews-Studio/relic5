@@ -30,6 +30,8 @@ SEARCH_PROPS = {
     "repo": STR, "session": {**STR, "description": "session uuid prefix"}, "role": STR, "tier": STR, "via": STR, "chat": STR,
     "from_user": STR,
     "cwd": {**STR, "description": "sessions that began in this folder or below it (relic-scan meta cwd)"},
+    "branch": {**STR, "description": "sessions on this git branch"},
+    "title": {**STR, "description": "sessions whose host title contains this (case-blind)"},
     "with": {**STR, "enum": ["tools", "thinking", "vault", "all"], "description": "also search tool calls, thinking, ψ notes, or all"},
     "limit": {"type": "integer", "minimum": 1, "description": f"default {DEFAULT_LIMIT}"},
     "cursor": {**STR, "description": "next_cursor from a previous result"},
@@ -104,7 +106,7 @@ def run_tool(relic, name, a, door=None):
                          repo=_str(a, "repo"), session=_str(a, "session"), role=_str(a, "role"), tier=_str(a, "tier"),
                          with_=_str(a, "with"), limit=min(_int(a, "limit", 1) or DEFAULT_LIMIT, 100), cursor=_str(a, "cursor"),
                          vector=vec, model=_str(a, "model") if vec is not None else None,
-                         hybrid=bool(a.get("hybrid")) and vec is not None, sort=_str(a, "sort"), cwd=_str(a, "cwd"),
+                         hybrid=bool(a.get("hybrid")) and vec is not None, sort=_str(a, "sort"), cwd=_str(a, "cwd"), branch=_str(a, "branch"), title=_str(a, "title"),
                          min_chars=_int(a, "min_chars") if vec is not None else None)
         return {"note": note, **r} if note else r
     if name == "relic_show":

@@ -51,9 +51,9 @@ def make_app(root, tokens, doors=None):
 
     from . import selfknow
 
-    def logged(relic_, tool, args, door):
+    def logged(relic_, tool, args, door, client=None):
         """Every tool call, MCP or GET, goes through here: one line in logs/queries.jsonl (selfknow.py)."""
-        qid, t0 = selfknow.start(tool, door, args.get("query") or args.get("id") or "")
+        qid, t0 = selfknow.start(tool, door, args.get("query") or args.get("id") or "", client)
         ok, r = mcp.call_tool(relic_, tool, args, door)
         try:
             selfknow.finish(relic_.parts.root, qid, t0, r if ok else None, args, None if ok else r[1])
@@ -163,11 +163,12 @@ def make_app(root, tokens, doors=None):
             msg = json.loads(await request.body())
         except ValueError:
             return Response(dumps(mcp._err(None, -32700, "parse error")), media_type="application/json")
-        door = request.state.door
+        door, client = request.state.door, request.headers.get("x-relic5-client")
+        call = lambda r_, n, a, d: logged(r_, n, a, d, client)
         if isinstance(msg, list):
-            out = [r for r in (mcp.handle(relic, m, door, logged) for m in msg) if r is not None]
+            out = [r for r in (mcp.handle(relic, m, door, call) for m in msg) if r is not None]
         else:
-            out = mcp.handle(relic, msg, door, logged)
+            out = mcp.handle(relic, msg, door, call)
         if not out:
             return Response(status_code=202)   # notifications only: accepted, nothing to say
         return Response(dumps(out), media_type="application/json")
@@ -178,7 +179,7 @@ def make_app(root, tokens, doors=None):
 
     for path, tool in ROUTES.items():
         def route(request: Request, tool=tool):
-            ok, r = logged(relic, tool, args_of(request.query_params), request.state.door)
+            ok, r = logged(relic, tool, args_of(request.query_params), request.state.door, request.headers.get("x-relic5-client"))
             if ok:
                 return Response(dumps(r), media_type="application/json")
             return JSONResponse({"error": r[1]}, status_code=STATUS_OF[r[0]])

@@ -11,7 +11,7 @@ BUN, R3 = os.path.expanduser("~/.bun/bin/bun"), "/opt/Code/github.com/Soul-Brews
 
 
 def get(url):
-    with urllib.request.urlopen(url, timeout=120) as r:
+    with urllib.request.urlopen(urllib.request.Request(url, headers={"X-Relic5-Client": "eval"}), timeout=120) as r:
         return json.load(r)
 
 
@@ -20,7 +20,7 @@ def r5(q, mode, vec=None):
         return [h["session_uuid"] for h in get(f"{R5}/api/search?" + urllib.parse.urlencode({"q": q, "limit": 10, "horizon": "archive"}))["hits"]]
     args = {"query": q, "semantic": True, "vector": vec, "limit": 10, **({"hybrid": True} if mode == "hybrid" else {})}
     body = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "relic_search", "arguments": args}}
-    req = urllib.request.Request(f"{R5}/mcp", data=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
+    req = urllib.request.Request(f"{R5}/mcp", data=json.dumps(body).encode(), headers={"Content-Type": "application/json", "X-Relic5-Client": "eval"})
     res = json.load(urllib.request.urlopen(req, timeout=120))["result"]
     return [h["session_uuid"] for h in json.loads(res["content"][0]["text"])["hits"]]
 

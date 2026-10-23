@@ -19,7 +19,9 @@ def test_queries_are_logged_and_summarised(root):
     rows = [json.loads(l) for l in open(f"{root}/logs/queries.jsonl")]
     assert [r["query"] for r in rows] == ["hub", "hub", "nothingmatchesthis", "white"] and rows[0]["door"] == "token:m5"
     assert rows[0]["mode"] == "keyword" and rows[0]["hits"] > 0 and rows[2]["hits"] == 0 and rows[0]["vector"] is False
+    c.get("/api/search", params={"q": "evalonly"}, headers=H | {"X-Relic5-Client": "eval"})
     q = c.get("/api/queries", headers=H).json()
+    assert q["eval_logged"] == 1 and all(r["query"] != "evalonly" for r in q["last"])
     assert q["top"][0] == {"query": "hub", "n": 2} and q["zero_hits"][0]["query"] == "nothingmatchesthis" and q["running"] == []
 
 

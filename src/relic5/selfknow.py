@@ -19,10 +19,11 @@ def _log(root):
     return os.path.join(root, "logs", "queries.jsonl")
 
 
-def start(tool, door, query):
+def start(tool, door, query, client=None):
     qid = f"{time.time():.6f}-{threading.get_ident()}"
     with LOCK:
-        RUNNING[qid] = {"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "door": door, "tool": tool, "query": (query or "")[:200]}
+        RUNNING[qid] = {"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "door": door, "tool": tool, "query": (query or "")[:200],
+                        **({"client": client} if client else {})}
     return qid, time.time()
 
 
@@ -70,14 +71,15 @@ def queries(root):
             hours.setdefault(r["at"][:13], []).append(r["ms"])
     per_hour = {h: {"n": len(v), "p50_ms": round(statistics.median(v)), "p95_ms": round(sorted(v)[max(0, int(len(v) * 0.95) - 1)])}
                 for h, v in sorted(hours.items())}
+    real = [r for r in rows if r.get("client") != "eval"]   # eval runs say so (X-Relic5-Client: eval); keep them out of Nat's view
     counts = {}
-    for r in rows:
+    for r in real:
         if r.get("query"):
             counts[r["query"]] = counts.get(r["query"], 0) + 1
-    zero = [r for r in rows if r.get("hits") == 0 and r.get("query")]
+    zero = [r for r in real if r.get("hits") == 0 and r.get("query")]
     with LOCK:
         running = [v | {"for_s": round(now - time.mktime(time.strptime(v["at"], "%Y-%m-%dT%H:%M:%SZ")) + time.timezone)} for v in RUNNING.values()]
-    return {"running": running, "total_logged": len(rows), "last": rows[-20:][::-1], "per_hour": per_hour,
+    return {"running": running, "total_logged": len(rows), "eval_logged": len(rows) - len(real), "last": real[-20:][::-1], "per_hour": per_hour,
             "top": sorted(({"query": q, "n": n} for q, n in counts.items() if n > 1), key=lambda x: -x["n"])[:15],
             "zero_hits": [{"at": r["at"], "query": r["query"], "tool": r.get("tool")} for r in zero[-20:][::-1]]}
 
@@ -122,10 +124,10 @@ def store(root, ttl=120):
 
 
 def record_size(root):
-    """One line a day in logs/sizes.jsonl (called by `relic5 index`), for growth per day."""
+    """At most one line an hour in logs/sizes.jsonl (called by `relic5 index`), for growth per day."""
     p = os.path.join(root, "logs", "sizes.jsonl")
-    day = time.strftime("%Y-%m-%d")
-    rows = _tail(p, 400)
+    day = time.strftime("%Y-%m-%dT%H")
+    rows = _tail(p, 2000)
     if rows and rows[-1].get("day") == day:
         return
     os.makedirs(os.path.dirname(p), exist_ok=True)
@@ -136,12 +138,16 @@ def record_size(root):
 
 
 def growth(root, total_now):
-    rows = _tail(os.path.join(root, "logs", "sizes.jsonl"), 400)
+    """Bytes per day from the first and the newest size line; an estimate until a full day is covered (None before 6 h)."""
+    rows = _tail(os.path.join(root, "logs", "sizes.jsonl"), 2000)
     if len(rows) < 2:
         return {"per_day": None, "since": rows[0]["day"] if rows else None}
+    t = lambda d: time.mktime(time.strptime(d[:13], "%Y-%m-%dT%H" if "T" in d else "%Y-%m-%d"))
     a, b = rows[0], rows[-1]
-    days = max(1, (time.mktime(time.strptime(b["day"], "%Y-%m-%d")) - time.mktime(time.strptime(a["day"], "%Y-%m-%d"))) / 86400)
-    return {"per_day": round((b["total"] - a["total"]) / days), "since": a["day"]}
+    hours = (t(b["day"]) - t(a["day"])) / 3600
+    if hours < 6:
+        return {"per_day": None, "since": a["day"], "note": f"{hours:.0f} h of history; a rate needs 6 h"}
+    return {"per_day": round((b["total"] - a["total"]) / hours * 24), "since": a["day"], "estimate": hours < 24}
 
 
 def _read(p):
