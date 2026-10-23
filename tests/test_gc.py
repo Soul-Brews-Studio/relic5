@@ -26,3 +26,10 @@ def test_not_ours_is_reported_never_touched(tmp_path, monkeypatch):
     r = gc.not_ours(str(tmp_path))
     assert r[0]["what"] == "~/.relic3-gens" and r[0]["bytes"] == 1000
     assert (tmp_path / ".relic3-gens" / "g1" / "x").exists()
+
+
+def test_hardlinks_count_once(tmp_path):
+    from relic5.selfknow import _du
+    (tmp_path / "a").write_text("q" * 500)
+    os.link(tmp_path / "a", tmp_path / "b")
+    assert _du(str(tmp_path)) == 500

@@ -85,13 +85,20 @@ def queries(root):
 
 
 def _du(path):
-    total = 0
+    """Bytes under path, each inode once: relic3's generations are hardlinked copies (rsync --link-dest), and counting
+    every link reported ~/.relic3-gens as 254.7 GB where it uses ~80 GB (2026-10-24)."""
+    total, seen = 0, set()
     for d, _, fs in os.walk(path):
         for f in fs:
             try:
-                total += os.lstat(os.path.join(d, f)).st_size
+                st = os.lstat(os.path.join(d, f))
             except OSError:
-                pass
+                continue
+            if st.st_nlink > 1:
+                if (st.st_dev, st.st_ino) in seen:
+                    continue
+                seen.add((st.st_dev, st.st_ino))
+            total += st.st_size
     return total
 
 
