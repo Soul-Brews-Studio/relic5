@@ -12,7 +12,10 @@
 # and each machine lands in its own folder, so nothing from two machines ever shares a path.
 set -u
 STAMP=                                          # set by bin/relic5-install on a copy outside this checkout
-HUB="${RELIC5_HUB:-nat@white.follow-rankine.ts.net}"
+# The ssh target. RELIC5_HUB_SSH wins; RELIC5_HUB may be the hub's HTTP url (relic-chain sets it for its SYNC check):
+# then the ssh target is nat@<its host>, not the url.
+HUB="${RELIC5_HUB_SSH:-${RELIC5_HUB:-nat@white.follow-rankine.ts.net}}"
+case "$HUB" in http://*|https://*) h=${HUB#*://}; h=${h%%/*}; HUB="nat@${h%%:*}";; esac
 SRC="${RELIC5_SRC:-$HOME/.relic-extract}"
 DEST="${RELIC5_DEST:-relic5/parts}"            # relative to the hub user's home
 MACHINE="${RELIC5_MACHINE:-$(hostname -s | tr 'A-Z' 'a-z')}"

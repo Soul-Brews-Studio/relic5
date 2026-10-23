@@ -97,3 +97,10 @@ def test_local_hub_needs_no_ssh(env, tmp_path):
     r = push(e)
     assert r.returncode == 0, r.stderr
     assert (home / "relic5/parts/m5/text/2026-10.parquet").exists()
+
+
+def test_an_http_hub_url_means_ssh_to_its_host(env):
+    src, hub, e = env
+    r = push(dict(e, RELIC5_HUB="http://hub:8795"))       # what relic-chain exports for its SYNC check
+    assert r.returncode == 0, r.stderr
+    assert "-> nat@hub:" in r.stdout and (hub / "relic5/parts/m5/text/2026-10.parquet").exists()
