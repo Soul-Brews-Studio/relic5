@@ -236,6 +236,11 @@ def _main(argv=None):
             for f, b in r["logs"].items():
                 print(f"log   {f:<28} {b / 1e6:6.1f} MB")
             print(f"reclaimable {r['reclaimable_bytes'] / 1e9:.2f} GB (dry run: nothing deleted)")
+            if r["not_ours"]:
+                print("not relic5's, for Nat to decide (never touched):")
+                for o in r["not_ours"]:
+                    size = f"{o['bytes'] / 1e9:6.1f} GB" if o["bytes"] is not None else "        "
+                    print(f"  {o['what']:<24} {size}  {o['about']}")
     elif cmd == "eval":
         from .evaluate import main as ev
         ev(rest)

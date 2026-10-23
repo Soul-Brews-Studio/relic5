@@ -174,7 +174,8 @@ def resources():
 def warnings(st, res):
     w = []
     if st["disk"]["free_pct"] < 20:
-        w.append(f"disk: only {st['disk']['free_pct']}% free on the hub")
+        w.append(f"disk: only {st['disk']['free_pct']}% free on the hub (relic5 itself: {st.get('total', 0) / 1e9:.1f} GB; "
+                 "`relic5 gc` lists what else is big)")
     if res["load"][2] > (res["cpus"] or 1) * 0.8:
         w.append(f"load: {res['load'][2]:.1f} over 15 min on {res['cpus']} cpus")
     return w

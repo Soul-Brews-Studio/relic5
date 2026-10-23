@@ -6,10 +6,14 @@ of it is named (relic3-import: relic3's own index on m5; an import is rebuilt fr
   attic         ~/relic5/attic/<item>: moved there instead of deleted; which other copy exists
   logs          logs/*.jsonl sizes (queries, jobs, eval, sizes)
 """
-import json, os
+import json, os, subprocess
 
 from .fts import current, search_dir
 from .selfknow import _du
+
+# Big neighbours on the hub's disk that are NOT relic5's: reported so the disk warning says where the space is, never
+# touched (relic4-scan, 2026-10-24). Paths are relative to the hub user's home.
+NOT_OURS = {".relic3-gens": "relic3's index generations (hub/indexer.sh, still publishing)"}
 
 OTHER_COPY = {"relic3-import": "relic3's own index (m5 ~/.relic3-hub/index) + `relic5 import relic3`",
               "jsonl-truth-import": "~/jsonl-truth on m5 + `relic5 import jsonl-truth`"}
@@ -31,4 +35,23 @@ def report(root):
     logs = {f: os.path.getsize(os.path.join(root, "logs", f)) for f in sorted(os.listdir(os.path.join(root, "logs")))} \
         if os.path.isdir(os.path.join(root, "logs")) else {}
     reclaim = sum(g["bytes"] for g in gens if not g["live"]) + sum(a["bytes"] for a in attic if a["safe"])
-    return {"generations": gens, "attic": attic, "logs": logs, "reclaimable_bytes": reclaim, "dry_run": True}
+    return {"generations": gens, "attic": attic, "logs": logs, "reclaimable_bytes": reclaim, "dry_run": True,
+            "not_ours": not_ours()}
+
+
+def not_ours(home=None):
+    """Sizes of what else fills the disk: relic3's generations, Docker's reclaimable space. For Nat to decide."""
+    home = home or os.path.expanduser("~")
+    out = []
+    for rel, what in NOT_OURS.items():
+        p = os.path.join(home, rel)
+        if os.path.isdir(p):
+            out.append({"what": f"~/{rel}", "about": what, "bytes": _du(p)})
+    try:
+        r = subprocess.run(["docker", "system", "df", "--format", "{{json .}}"], capture_output=True, text=True, timeout=60)
+        for line in r.stdout.splitlines():
+            d = json.loads(line)
+            out.append({"what": f"docker {d.get('Type')}", "about": f"size {d.get('Size')}, reclaimable {d.get('Reclaimable')}", "bytes": None})
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        pass
+    return out
