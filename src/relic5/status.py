@@ -41,10 +41,11 @@ def status(root, now=None):
                 versions[m] = __import__("json").load(open(vp))
             except ValueError:
                 warnings.append(f"machine {m}: unreadable _versions.json")
+    live = {m: v for m, v in versions.items() if not m.endswith("-import")}   # an import is a one-off push, not a machine with a chain
     for tool in ("relic-scan", "relic-extract", "relic5-push"):
-        seen = {v.get(tool) for v in versions.values()}
+        seen = {v.get(tool) for v in live.values()}
         if len(seen) > 1:
-            warnings.append(f"{tool} differs between machines: " + ", ".join(f"{m} {v.get(tool)}" for m, v in sorted(versions.items())))
+            warnings.append(f"{tool} differs between machines: " + ", ".join(f"{m} {v.get(tool)}" for m, v in sorted(live.items())))
     rows = {s: sum(man["streams"].get(s, {}).get("rows", 0) for man in mans.values()) for s in MONTH_STREAMS}
     built = max((man["built"] for man in mans.values()), default=None)
     from .fts import current, search_dir
@@ -82,7 +83,7 @@ def status(root, now=None):
         fresh["machines"][m] = {"newest_ts": x.get("newest_ts"), "pushed_at": pushed, "lag_s": lag(x.get("newest_ts")),
                                 "push_age_s": lag(pushed.replace("+0700", "+07:00").replace("+0000", "+00:00")) if pushed else None}
         age = fresh["machines"][m]["push_age_s"]
-        if age is not None and age > 1800:
+        if age is not None and age > 1800 and not m.endswith("-import"):
             warnings.append(f"machine {m}: last push {age // 60} min ago (relic-chain should push every 10 min)")
     ip = os.path.join(p.root, "index", "_search", "current.json")
     fresh["fts"]["age_s"] = round(t_now - os.path.getmtime(ip)) if os.path.exists(ip) else None
