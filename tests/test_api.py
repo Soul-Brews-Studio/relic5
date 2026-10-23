@@ -84,3 +84,9 @@ def test_ui_login_cookie(client):
     assert "relic5 hub" in client.get("/").text                            # the cookie now opens the page
     assert client.get("/api/status").status_code == 200
     assert isinstance(client.get("/api/log").json(), list)
+
+
+def test_status_says_which_door(client):
+    assert client.get("/api/status", headers={"Authorization": "Bearer tok-mba"}).json()["you"] == "token:mba"
+    r = rpc(client, "tools/call", {"name": "relic_status", "arguments": {}}).json()["result"]
+    assert json.loads(r["content"][0]["text"])["you"] == "token:m5"

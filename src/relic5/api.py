@@ -112,9 +112,7 @@ def make_app(root, tokens, doors=None):
 
     for path, tool in ROUTES.items():
         def route(request: Request, tool=tool):
-            ok, r = mcp.call_tool(relic, tool, args_of(request.query_params))
-            if ok and tool == "relic_status":
-                r = {"you": request.state.door, **r}
+            ok, r = mcp.call_tool(relic, tool, args_of(request.query_params), request.state.door)
             if ok:
                 return Response(dumps(r), media_type="application/json")
             return JSONResponse({"error": r[1]}, status_code=STATUS_OF[r[0]])
