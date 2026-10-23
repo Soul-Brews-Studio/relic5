@@ -222,6 +222,15 @@ class Relic5:
                              [r["sid"], r["ts"], r["role"] if stream == "text" else ""])
             if hit:
                 return hit[0]["msgkey"], "relic3 uid -> (session, ts)"
+            # the row itself was cleaned out on purpose (harness turns, relayed messages): the nearest message of that
+            # session within 10 minutes, so the link still lands in its conversation
+            near = self._rows(f"""SELECT msgkey, ts FROM {src} WHERE sid = ? AND chunk = 0
+                                   AND abs(epoch(CAST(ts AS TIMESTAMP)) - epoch(CAST(? AS TIMESTAMP))) <= 600
+                                   ORDER BY abs(epoch(CAST(ts AS TIMESTAMP)) - epoch(CAST(? AS TIMESTAMP))) LIMIT 1""",
+                              [r["sid"], r["ts"], r["ts"]])
+            if near:
+                return near[0]["msgkey"], (f"relic3 uid -> nearest message in its session ({near[0]['ts']}); the linked "
+                                           f"{r['role']} row at {r['ts']} is not on the hub (relic-extract cleans such rows out)")
         return None
 
     def _parse_id(self, ident):
