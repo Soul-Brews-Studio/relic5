@@ -77,7 +77,7 @@ def _int(a, k, minimum=0):
     return v
 
 
-def run_tool(relic, name, a):
+def run_tool(relic, name, a, door=None):
     if name == "relic_search":
         _check(a, list(SEARCH_PROPS))
         if a.get("semantic"):
@@ -103,18 +103,18 @@ def run_tool(relic, name, a):
         return relic.session(_str(a, "id"))
     if name == "relic_status":
         _check(a, [])
-        return status(relic.parts.root)
+        return {"you": door, **status(relic.parts.root)}
     raise UsageError(f"unknown tool {json.dumps(name)}")
 
 
-def call_tool(relic, name, args):
+def call_tool(relic, name, args, door=None):
     """-> (ok, data | (kind, error))."""
     if name in UNAVAILABLE:
         return False, ("unavailable", UNAVAILABLE[name])
     if not isinstance(args, dict):
         return False, ("usage", "arguments must be an object")
     try:
-        return True, run_tool(relic, name, args)
+        return True, run_tool(relic, name, args, door)
     except UsageError as ex:
         return False, ("usage", str(ex))
     except NotFound as ex:
@@ -131,7 +131,7 @@ def _err(i, code, message):
     return {"jsonrpc": "2.0", "id": i, "error": {"code": code, "message": message}}
 
 
-def handle(relic, msg):
+def handle(relic, msg, door=None):
     """One JSON-RPC message -> its reply, or None for a notification."""
     if not isinstance(msg, dict) or msg.get("jsonrpc") != "2.0" or not isinstance(msg.get("method"), str):
         return _err(msg.get("id") if isinstance(msg, dict) else None, -32600, "invalid request")
@@ -150,7 +150,7 @@ def handle(relic, msg):
             return _err(i, -32602, "tools/call needs params.name")
         if name not in {t["name"] for t in TOOLS} and name not in UNAVAILABLE:
             return _err(i, -32602, f"unknown tool {json.dumps(name)}")
-        ok, r = call_tool(relic, name, params.get("arguments") or {})
+        ok, r = call_tool(relic, name, params.get("arguments") or {}, door)
         if ok:
             return _ok(i, {"content": [{"type": "text", "text": json.dumps(r, ensure_ascii=False, default=str)}]})
         return _ok(i, {"isError": True, "content": [{"type": "text", "text": r[1]}]})

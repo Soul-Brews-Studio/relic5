@@ -39,10 +39,12 @@ def dumps(v):
     return json.dumps(v, ensure_ascii=False, default=str)
 
 
-def make_app(root, tokens):
-    """tokens: {machine: token}. Refuses to build an app nobody could call."""
+def make_app(root, tokens, doors=None):
+    """tokens: {machine: token}; doors: who needs none (doors.py; default: loopback + Nat's own tailnet nodes)."""
+    from .doors import Doors
     if not tokens:
         raise SystemExit("no tokens: run `relic5 token add <machine>` first")
+    doors = doors if doors is not None else Doors(tokens)
     con = duckdb.connect(":memory:", config={"threads": min(os.cpu_count() or 4, 16)})
     relic = Relic5(root, con)
     app = FastAPI(title="relic5", docs_url=None, redoc_url=None, openapi_url=None)
@@ -50,19 +52,22 @@ def make_app(root, tokens):
     WEB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web", "index.html")
 
     def who(request):
+        """The door this request came through (doors.py), from the socket's addresses only."""
         h = request.headers.get("authorization", "")
         # a browser shows the token once at /login?t=..., then sends it as an HttpOnly, SameSite=Strict cookie
-        got = (h[7:] if h.startswith("Bearer ") else request.cookies.get("relic5_t", "")).encode()
-        # compare against every token, so the time taken does not tell which machine nearly matched
-        ok = [m for m, t in tokens.items() if hmac.compare_digest(got, t.encode())]
-        return ok[0] if got and ok else None
+        got = h[7:] if h.startswith("Bearer ") else request.cookies.get("relic5_t", "")
+        server = (request.scope.get("server") or ("",))[0]
+        client = request.client.host if request.client else ""
+        return doors.door(server, client, request.url.hostname, got)
 
     @app.middleware("http")
     async def auth(request: Request, call_next):
         if request.url.path == "/login":
             return await call_next(request)   # it checks the token itself
-        if who(request) is None:
+        d = who(request)
+        if d is None:
             return JSONResponse({"error": "missing or bad Authorization: Bearer token"}, status_code=401)
+        request.state.door = d
         return await call_next(request)
 
     @app.get("/login")
@@ -92,10 +97,11 @@ def make_app(root, tokens):
             msg = json.loads(await request.body())
         except ValueError:
             return Response(dumps(mcp._err(None, -32700, "parse error")), media_type="application/json")
+        door = request.state.door
         if isinstance(msg, list):
-            out = [r for r in (mcp.handle(relic, m) for m in msg) if r is not None]
+            out = [r for r in (mcp.handle(relic, m, door) for m in msg) if r is not None]
         else:
-            out = mcp.handle(relic, msg)
+            out = mcp.handle(relic, msg, door)
         if not out:
             return Response(status_code=202)   # notifications only: accepted, nothing to say
         return Response(dumps(out), media_type="application/json")
@@ -107,6 +113,8 @@ def make_app(root, tokens):
     for path, tool in ROUTES.items():
         def route(request: Request, tool=tool):
             ok, r = mcp.call_tool(relic, tool, args_of(request.query_params))
+            if ok and tool == "relic_status":
+                r = {"you": request.state.door, **r}
             if ok:
                 return Response(dumps(r), media_type="application/json")
             return JSONResponse({"error": r[1]}, status_code=STATUS_OF[r[0]])

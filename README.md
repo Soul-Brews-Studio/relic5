@@ -22,8 +22,12 @@ One hub on white for every machine's extracted history: push, month store, MCP. 
 | `deploy/systemd/relic5-serve.service` | the serve unit on white | agent-relic-v3 `hub/systemd/relic3-serve.service` |
 
 Changed on purpose from the ports:
-- No loopback exemption: the token is required from 127.0.0.1 too. A hub serves many machines, and a proxy on the
-  box would make every client look local (relic4's advice).
+- Who needs no token (`doors.py`, Nat 2026-10-23): loopback, and Nat's own follow-rankine nodes. The second is
+  checked with `tailscale whois` on the socket address (never X-Forwarded-For), and the Host must name the hub.
+  A node shared in from another tailnet, or anything else, needs a token: one per machine, also used by scripts.
+  `relic_status` says which door a request used (`you`). Honestly: **no password inside follow-rankine; anyone who
+  joins that tailnet can read everything.** No proxy may sit in front of the hub, because it would make every
+  client look local.
 - Ids are the `msgkey`, the same on every machine, with `:<chunk>` for later chunks. Links are
   `relic5://<YYYY-MM>/<msgkey>`.
 - The same message pushed by two machines is one hit. Its `machines` field lists every machine that sent it, and the

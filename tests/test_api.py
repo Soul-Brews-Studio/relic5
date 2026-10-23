@@ -4,13 +4,15 @@ import pytest
 from fastapi.testclient import TestClient
 
 from relic5.api import make_app
+from relic5.doors import Doors
 
 H = {"Authorization": "Bearer tok-m5"}
 
 
 @pytest.fixture
 def client(root):
-    return TestClient(make_app(root, {"m5": "tok-m5", "mba": "tok-mba"}))
+    tokens = {"m5": "tok-m5", "mba": "tok-mba"}
+    return TestClient(make_app(root, tokens, Doors(tokens, enabled=False)))
 
 
 def rpc(client, method, params=None, i=1, headers=H):
@@ -27,7 +29,7 @@ def test_token_on_every_route(client):
 
 
 def test_loopback_gets_no_exemption(root):
-    c = TestClient(make_app(root, {"m5": "t"}), base_url="http://127.0.0.1")
+    c = TestClient(make_app(root, {"m5": "t"}, Doors({"m5": "t"}, owner="nat@x", names={"white"})), base_url="http://127.0.0.1")
     assert c.get("/health").status_code == 401
 
 
@@ -71,7 +73,7 @@ def test_read_only(client):
 
 def test_refuses_no_tokens(root):
     with pytest.raises(SystemExit):
-        make_app(root, {})
+        make_app(root, {}, Doors({}, enabled=False))
 
 
 def test_ui_login_cookie(client):
