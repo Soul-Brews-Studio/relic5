@@ -48,7 +48,7 @@
 <body>
 <header>
   <h1>relic5 hub</h1><span class="sub" id="where">…</span>
-  <nav><button data-tab="overview" class="on">Overview</button><button data-tab="live">Live</button><button data-tab="jobs">Jobs &amp; log</button><button data-tab="search">Search</button><button data-tab="compare">Compare</button></nav>
+  <nav><button data-tab="overview" class="on">Overview</button><button data-tab="live">Live</button><button data-tab="jobs">Jobs &amp; log</button><button data-tab="search">Search</button><button data-tab="queries">Queries</button><button data-tab="compare">Compare</button></nav>
 </header>
 <main>
   <section id="overview" class="on">
@@ -56,6 +56,7 @@
     <h2>Machines</h2><table id="machines"></table>
     <h2>Months</h2><table id="months"></table>
     <h2>Watermarks</h2><table id="marks"></table>
+    <h2>Store &amp; resources</h2><table id="store"></table>
     <div class="prov" id="prov1"></div>
   </section>
   <section id="live">
@@ -74,6 +75,14 @@
       <select id="with"><option value="">prose</option><option value="tools">+ tools</option><option value="thinking">+ thinking</option><option value="all">all</option></select>
       <input id="repo" placeholder="repo (optional)" size="18"></form>
     <div id="sinfo" class="prov"></div><div id="hits"></div>
+  </section>
+  <section id="queries">
+    <h2>Running now</h2><table id="qrun"></table>
+    <h2>Last 20</h2><table id="qlast"></table>
+    <h2>Per hour (24 h)</h2><table id="qhour"></table>
+    <h2>Asked more than once</h2><table id="qtop"></table>
+    <h2>Zero hits (what search misses)</h2><table id="qzero"></table>
+    <div class="prov">GET /api/queries · logs/queries.jsonl on the hub only (0600), never in git</div>
   </section>
   <section id="compare">
     <h2>Search quality: relic3 vs relic4 vs relic5</h2><table id="cmp"></table>
@@ -118,10 +127,35 @@ async function overview() {
     row(["BM25 (fts)", esc(w.fts.at ?? "none"), Object.entries(w.fts.rows || {}).map(([k, v]) => `${esc(k)} ${num(v)}`).join("<br>") || "none"]) +
     row(["vectors", esc(w.vectors.at ?? "none — not embedded yet"), "pending " + num(w.vectors.pending)]);
   $("#prov1").textContent = `from GET /api/status (relic_status) at ${new Date().toLocaleTimeString()} · folded rows: a message pushed by two machines counts once`;
-  jobs(s.jobs); fresh(s);
+  jobs(s.jobs); fresh(s); store(s);
+  if ($("#queries").classList.contains("on")) queries();
   if ($("#live").classList.contains("on")) tail();
 }
 
+const gb = b => b == null ? '<span class="dim">unknown</span>' : b > 1e9 ? (b / 1e9).toFixed(2) + " GB" : (b / 1e6).toFixed(1) + " MB";
+function store(s) {
+  const st = s.store || {}, r = s.resources || {}, parts = Object.entries(st.parts || {});
+  $("#store").innerHTML = head(["what", "size", "detail"]) +
+    parts.map(([m, v]) => row([`parts ${esc(m)}`, gb(Object.values(v).reduce((a, b) => a + b, 0)), Object.entries(v).map(([k, x]) => `${esc(k)} ${gb(x)}`).join(" · ")])).join("") +
+    row(["BM25 + vector tables", gb(st.search_total), Object.entries(st.search || {}).map(([k, x]) => `${esc(k)} ${gb(x)}`).join("<br>")]) +
+    row(["vector shards", gb(Object.values(st.vectors || {}).reduce((a, b) => a + b, 0)), Object.keys(st.vectors || {}).map(esc).join(", ")]) +
+    row(["logs", gb(st.logs), ""]) + row(["<b>total</b>", gb(st.total), st.growth?.per_day != null ? `growth ${gb(st.growth.per_day)}/day since ${esc(st.growth.since)}` : "growth: measured from tomorrow"]) +
+    row(["disk", `${gb(st.disk?.free)} free`, `${st.disk?.free_pct}% of ${gb(st.disk?.total)}`]) +
+    row(["load", (r.load || []).map(x => x.toFixed(2)).join(" / "), `${r.cpus} cpus`]) +
+    row(["memory", r.memory ? `${gb(r.memory.available)} available` : "unknown", r.memory ? `of ${gb(r.memory.total)}` : ""]) +
+    row(["hub process", gb(r.process?.rss), `${r.process?.open_files ?? "?"} open files · ${r.process?.threads ?? "?"} threads` + (r.container ? ` · container ${gb(r.container.memory)}` : "")]);
+}
+async function queries() {
+  try {
+    const q = await get("/api/queries"), Q = ["at (UTC)", "door", "tool", "query", "mode", "horizon", "hits", "ms", "vector"];
+    const cells = r => [esc((r.at || "").slice(5, 19).replace("T", " ")), esc(r.door), esc(r.tool), esc(r.query), esc(r.mode ?? ""), esc(r.horizon ?? ""), r.hits ?? "", r.ms ?? "", r.vector ? "yes" : ""];
+    $("#qrun").innerHTML = q.running.length ? head(["at", "door", "tool", "query", "for"]) + q.running.map(r => row([esc(r.at), esc(r.door), esc(r.tool), esc(r.query), r.for_s + " s"])).join("") : '<tr><td class="dim">nothing running</td></tr>';
+    $("#qlast").innerHTML = head(Q) + q.last.map(r => row(cells(r))).join("");
+    $("#qhour").innerHTML = head(["hour (UTC)", "queries", "p50 ms", "p95 ms"]) + Object.entries(q.per_hour).reverse().map(([h, v]) => row([esc(h.replace("T", " ")), v.n, v.p50_ms, v.p95_ms])).join("");
+    $("#qtop").innerHTML = head(["query", "times"]) + q.top.map(r => row([esc(r.query), r.n])).join("");
+    $("#qzero").innerHTML = head(["at", "tool", "query"]) + q.zero_hits.map(r => row([esc(r.at), esc(r.tool), esc(r.query)])).join("");
+  } catch (e) { $("#qlast").innerHTML = `<tr><td class="err">${esc(e.message)}</td></tr>`; }
+}
 function fresh(s) {
   const f = s.freshness || {machines: {}}, secs = v => v == null ? '<span class="dim">unknown</span>' : v < 120 ? v + " s" : v < 7200 ? Math.round(v / 60) + " min" : Math.round(v / 3600) + " h";
   $("#fresh").innerHTML = head(["machine", "newest row", "behind now", "last push", "push age"]) +
@@ -203,6 +237,7 @@ document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
   if (b.dataset.tab === "search") $("#q").focus();
   if (b.dataset.tab === "live") tail();
   if (b.dataset.tab === "compare") compare();
+  if (b.dataset.tab === "queries") queries();
 });
 $("#sf").onsubmit = search;
 overview(); setInterval(overview, 15000);

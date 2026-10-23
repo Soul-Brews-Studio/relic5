@@ -49,6 +49,18 @@ def make_app(root, tokens, doors=None):
     relic = Relic5(root, con)
     app = FastAPI(title="relic5", docs_url=None, redoc_url=None, openapi_url=None)
 
+    from . import selfknow
+
+    def logged(relic_, tool, args, door):
+        """Every tool call, MCP or GET, goes through here: one line in logs/queries.jsonl (selfknow.py)."""
+        qid, t0 = selfknow.start(tool, door, args.get("query") or args.get("id") or "")
+        ok, r = mcp.call_tool(relic_, tool, args, door)
+        try:
+            selfknow.finish(relic_.parts.root, qid, t0, r if ok else None, args, None if ok else r[1])
+        except OSError:
+            pass
+        return ok, r
+
     WEB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web", "index.html")
 
     def who(request):
@@ -90,6 +102,10 @@ def make_app(root, tokens, doors=None):
     @app.get("/api/tail")
     def tail(n: int = 50, session: str = "", machine: str = "", since: str = ""):
         return relic.tail(min(max(n, 1), 500), session or None, machine or None, since or None)
+
+    @app.get("/api/queries")
+    def queries_route():
+        return selfknow.queries(relic.parts.root)
 
     @app.get("/api/recap")
     def recap_route(id: str, limit: int = 20):
@@ -149,9 +165,9 @@ def make_app(root, tokens, doors=None):
             return Response(dumps(mcp._err(None, -32700, "parse error")), media_type="application/json")
         door = request.state.door
         if isinstance(msg, list):
-            out = [r for r in (mcp.handle(relic, m, door) for m in msg) if r is not None]
+            out = [r for r in (mcp.handle(relic, m, door, logged) for m in msg) if r is not None]
         else:
-            out = mcp.handle(relic, msg, door)
+            out = mcp.handle(relic, msg, door, logged)
         if not out:
             return Response(status_code=202)   # notifications only: accepted, nothing to say
         return Response(dumps(out), media_type="application/json")
@@ -162,7 +178,7 @@ def make_app(root, tokens, doors=None):
 
     for path, tool in ROUTES.items():
         def route(request: Request, tool=tool):
-            ok, r = mcp.call_tool(relic, tool, args_of(request.query_params), request.state.door)
+            ok, r = logged(relic, tool, args_of(request.query_params), request.state.door)
             if ok:
                 return Response(dumps(r), media_type="application/json")
             return JSONResponse({"error": r[1]}, status_code=STATUS_OF[r[0]])

@@ -86,6 +86,10 @@ def status(root, now=None):
             warnings.append(f"machine {m}: last push {age // 60} min ago (relic-chain should push every 10 min)")
     ip = os.path.join(p.root, "index", "_search", "current.json")
     fresh["fts"]["age_s"] = round(t_now - os.path.getmtime(ip)) if os.path.exists(ip) else None
+    from . import selfknow
+    store, res = selfknow.store(p.root), selfknow.resources()
+    warnings += selfknow.warnings(store, res)
+    q = selfknow.queries(p.root)
     cur = this_month(now)
     sealed = [m for m in months if m != "undated" and m < cur]
     return {
@@ -98,6 +102,8 @@ def status(root, now=None):
                             for m in months]},
         "weeks": {"total": len(months), "sealed": len(sealed), "open": cur if cur in months else None, "quarantine_rows": 0},
         "freshness": fresh,
+        "store": store, "resources": res,
+        "queries": {"running": q["running"], "last": q["last"], "per_hour": q["per_hour"], "top": q["top"][:10], "zero_hits": q["zero_hits"][:10]},
         "machines": machines,
         "versions": versions,
         "rows": {"events": rows["text"] + rows["thinking"], "text": rows["text"], "thinking": rows["thinking"],

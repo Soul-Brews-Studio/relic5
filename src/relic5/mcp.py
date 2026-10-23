@@ -148,7 +148,7 @@ def _err(i, code, message):
     return {"jsonrpc": "2.0", "id": i, "error": {"code": code, "message": message}}
 
 
-def handle(relic, msg, door=None):
+def handle(relic, msg, door=None, call=None):
     """One JSON-RPC message -> its reply, or None for a notification."""
     if not isinstance(msg, dict) or msg.get("jsonrpc") != "2.0" or not isinstance(msg.get("method"), str):
         return _err(msg.get("id") if isinstance(msg, dict) else None, -32600, "invalid request")
@@ -167,7 +167,7 @@ def handle(relic, msg, door=None):
             return _err(i, -32602, "tools/call needs params.name")
         if name not in {t["name"] for t in TOOLS} and name not in UNAVAILABLE:
             return _err(i, -32602, f"unknown tool {json.dumps(name)}")
-        ok, r = call_tool(relic, name, params.get("arguments") or {}, door)
+        ok, r = (call or call_tool)(relic, name, params.get("arguments") or {}, door)
         if ok:
             return _ok(i, {"content": [{"type": "text", "text": json.dumps(r, ensure_ascii=False, default=str)}]})
         return _ok(i, {"isError": True, "content": [{"type": "text", "text": r[1]}]})

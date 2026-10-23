@@ -183,6 +183,8 @@ def _main(argv=None):
             j.progress(done=len(tabs), unit="tables", message="fts: " + (",".join(tabs) or "none changed"))
             from . import names as NM
             j.progress(done=NM.build(root, con, Parts(root)), unit="sessions", message="names")
+            from . import selfknow
+            selfknow.record_size(root)
     elif cmd == "mcp":
         from .shim import serve as shim
         shim(URL)
