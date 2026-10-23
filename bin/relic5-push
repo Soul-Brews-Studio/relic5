@@ -30,10 +30,12 @@ if [ -z "${RELIC5_LOCKED:-}" ] && [ -e "$SRC/.lock" ]; then
     exec @ARGV or die "exec: $!\n"' "$SRC/.lock" "$0" "$@"
 fi
 SSH="ssh -o BatchMode=yes -o ConnectTimeout=10"
+# RELIC5_HUB=local: this machine is the hub (white pushing its own parts): same rsync, no ssh to itself.
+if [ "$HUB" = local ]; then R=""; on_hub() { sh -c "$1"; }; else R="$HUB:"; on_hub() { $SSH "$HUB" "$1"; }; fi
 
-home=$($SSH "$HUB" 'printf %s "$HOME"') || { echo "cannot reach $HUB" >&2; exit 1; }
+home=$(on_hub 'printf %s "$HOME"') || { echo "cannot reach $HUB" >&2; exit 1; }
 target="$home/$DEST/$MACHINE"
-real=$($SSH "$HUB" "mkdir -p '$target' && realpath '$target'") || exit 1
+real=$(on_hub "mkdir -p '$target' && realpath '$target'") || exit 1
 [ "$real" = "$target" ] || { echo "refuse: on $HUB $target resolves to $real" >&2; exit 1; }
 
 # One line per stream from rsync --stats: GNU rsync says "Number of regular files transferred" / "Total bytes sent",
@@ -48,13 +50,13 @@ t0=$(date +%s)
 for s in $STREAMS; do
   [ -d "$SRC/$s" ] || continue
   # --stats is parsed into one line per stream: files sent, bytes sent.
-  out=$(rsync -a $DRY --timeout=120 --stats --exclude='.*' "$SRC/$s/" "$HUB:$target/$s/" 2>&1) || { echo "$out" >&2; rc=1; continue; }
+  out=$(rsync -a $DRY --timeout=120 --stats --exclude='.*' "$SRC/$s/" "$R$target/$s/" 2>&1) || { echo "$out" >&2; rc=1; continue; }
   report "$s" "$out"
 done
 # relic-scan's session table: repo, tier and the subagent tree for relic_sessions / relic_session.
 META="${RELIC5_SCAN:-$HOME/.relic-scan}/meta/sessions.parquet"
-if [ -f "$META" ] && $SSH "$HUB" "mkdir -p '$target/meta'"; then   # openrsync (macOS) has no --mkpath
-  out=$(rsync -a $DRY --timeout=120 --stats "$META" "$HUB:$target/meta/" 2>&1) || { echo "$out" >&2; rc=1; }
+if [ -f "$META" ] && on_hub "mkdir -p '$target/meta'"; then   # openrsync (macOS) has no --mkpath
+  out=$(rsync -a $DRY --timeout=120 --stats "$META" "$R$target/meta/" 2>&1) || { echo "$out" >&2; rc=1; }
   report meta "$out"
 fi
 # What this machine runs, so the hub can tell when machines differ (relic_status warns on a mismatch).
@@ -62,7 +64,7 @@ ver() { command -v "$1" >/dev/null 2>&1 && "$1" --version 2>/dev/null | head -1 
 here=${STAMP:-$(cd "$(dirname "$0")" && git rev-parse --short HEAD 2>/dev/null || echo unknown)}
 printf '{"machine": "%s", "at": "%s", "relic-scan": "%s", "relic-extract": "%s", "relic5-push": "%s", "os": "%s"}\n' \
   "$MACHINE" "$(date '+%FT%T%z')" "$(ver relic-scan)" "$(ver relic-extract)" "$here" "$(uname -sm)" > "${TMPDIR:-/tmp}/relic5-versions.$$"
-[ -z "$DRY" ] && rsync -a --timeout=60 "${TMPDIR:-/tmp}/relic5-versions.$$" "$HUB:$target/_versions.json" >/dev/null 2>&1 || true
+[ -z "$DRY" ] && rsync -a --timeout=60 "${TMPDIR:-/tmp}/relic5-versions.$$" "$R$target/_versions.json" >/dev/null 2>&1 || true
 rm -f "${TMPDIR:-/tmp}/relic5-versions.$$"
 printf '%s relic5 push %s -> %s:%s rc=%s %ss%s\n' "$(date '+%F %T')" "$MACHINE" "$HUB" "$target" "$rc" \
   "$(( $(date +%s) - t0 ))" "${DRY:+ (dry run)}"

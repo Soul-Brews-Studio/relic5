@@ -85,3 +85,13 @@ def test_waits_for_extract_lock(env):
     finally:
         holder.kill()
     assert push(e).returncode == 0
+
+
+def test_local_hub_needs_no_ssh(env, tmp_path):
+    src, _, e = env
+    home = tmp_path / "selfhome"
+    home.mkdir()
+    e = dict(e, RELIC5_HUB="local", HOME=str(home), PATH="/usr/bin:/bin:/opt/homebrew/bin")   # no fake ssh on PATH
+    r = push(e)
+    assert r.returncode == 0, r.stderr
+    assert (home / "relic5/parts/m5/text/2026-10.parquet").exists()
