@@ -42,10 +42,14 @@ def status(root, now=None):
             except ValueError:
                 warnings.append(f"machine {m}: unreadable _versions.json")
     live = {m: v for m, v in versions.items() if not m.endswith("-import")}   # an import is a one-off push, not a machine with a chain
-    for tool in ("relic-scan", "relic-extract", "relic5-push"):
-        seen = {v.get(tool) for v in live.values()}
+    # relic5-push is compared by its behaviour version (push-format), not its git hash; an old push without the field
+    # counts as format 0, so a machine that never got the new script still shows
+    for tool, key in (("relic-scan", "relic-scan"), ("relic-extract", "relic-extract"), ("relic5-push", "push-format")):
+        seen = {v.get(key, 0 if key == "push-format" else None) for v in live.values()}
         if len(seen) > 1:
-            warnings.append(f"{tool} differs between machines: " + ", ".join(f"{m} {v.get(tool)}" for m, v in sorted(live.items())))
+            warnings.append(f"{tool} differs between machines: " + ", ".join(
+                f"{m} {v.get(key, 0 if key == 'push-format' else None)}" + (f" ({v.get('relic5-push')})" if key == "push-format" else "")
+                for m, v in sorted(live.items())))
     rows = {s: sum(man["streams"].get(s, {}).get("rows", 0) for man in mans.values()) for s in MONTH_STREAMS}
     built = max((man["built"] for man in mans.values()), default=None)
     from .fts import current, search_dir

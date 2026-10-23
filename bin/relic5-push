@@ -12,6 +12,9 @@
 # and each machine lands in its own folder, so nothing from two machines ever shares a path.
 set -u
 STAMP=                                          # set by bin/relic5-install on a copy outside this checkout
+# What this push sends, as a number: bumped only when the behaviour changes (streams, meta files, _sync.json, local
+# hub...). relic_status compares this, not the git hash, which differs after every commit (relic4-scan, 2026-10-23).
+PUSH_FORMAT=4
 # The ssh target. RELIC5_HUB_SSH wins; RELIC5_HUB may be the hub's HTTP url (relic-chain sets it for its SYNC check):
 # then the ssh target is nat@<its host>, not the url.
 HUB="${RELIC5_HUB_SSH:-${RELIC5_HUB:-nat@white.follow-rankine.ts.net}}"
@@ -78,8 +81,8 @@ fi
 # What this machine runs, so the hub can tell when machines differ (relic_status warns on a mismatch).
 ver() { command -v "$1" >/dev/null 2>&1 && "$1" --version 2>/dev/null | head -1 | sed 's/^[^ ]* //' || echo none; }
 here=${STAMP:-$(cd "$(dirname "$0")" && git rev-parse --short HEAD 2>/dev/null || echo unknown)}
-printf '{"machine": "%s", "at": "%s", "relic-scan": "%s", "relic-extract": "%s", "relic5-push": "%s", "os": "%s"}\n' \
-  "$MACHINE" "$(date '+%FT%T%z')" "$(ver relic-scan)" "$(ver relic-extract)" "$here" "$(uname -sm)" > "${TMPDIR:-/tmp}/relic5-versions.$$"
+printf '{"machine": "%s", "at": "%s", "relic-scan": "%s", "relic-extract": "%s", "relic5-push": "%s", "push-format": %s, "os": "%s"}\n' \
+  "$MACHINE" "$(date '+%FT%T%z')" "$(ver relic-scan)" "$(ver relic-extract)" "$here" "$PUSH_FORMAT" "$(uname -sm)" > "${TMPDIR:-/tmp}/relic5-versions.$$"
 [ -z "$DRY" ] && rsync -a --timeout=60 "${TMPDIR:-/tmp}/relic5-versions.$$" "$R$target/_versions.json" >/dev/null 2>&1 || true
 rm -f "${TMPDIR:-/tmp}/relic5-versions.$$"
 # The newest SYNC line of this machine's relic-chain log (relic4-scan's loop), for the hub's Sync card.

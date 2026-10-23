@@ -44,6 +44,9 @@ def test_status_warns_on_version_mismatch(root):
     s = status(root, now=NOW)
     assert s["versions"]["mba"]["relic-scan"] == "26.10.23-alpha.1308"
     assert [w for w in s["warnings"] if w.startswith("relic-scan differs")] and not [w for w in s["warnings"] if w.startswith("relic-extract differs")]
+    for m, h in (("m5", "aaa111"), ("mba", "bbb222")):                     # two hashes, one behaviour: no warning
+        json.dump({"relic-scan": "x", "relic-extract": "x", "relic5-push": h, "push-format": 4}, open(os.path.join(root, f"parts/{m}/_versions.json"), "w"))
+    assert not [w for w in status(root, now=NOW)["warnings"] if "relic5-push" in w]
 
 
 def test_a_part_pushed_late_with_an_old_mtime_is_still_indexed(root):
