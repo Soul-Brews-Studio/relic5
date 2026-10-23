@@ -13,6 +13,8 @@ import base64, hashlib, json, re
 from .window import HORIZONS, window
 
 WIDEN = ["7d", "15d", "1m", "3m", "archive"]
+# Paths a temp janitor deletes (agent-relic-v3 src/search/ephemeral.ts): a hit that names one may point at nothing now.
+EPHEMERAL = re.compile(r"(?:/private)?/tmp/\S+|/var/folders/\S+|\bscratchpad/\S*|claude-\d+/\S*")
 CAP = 8192
 
 
@@ -76,8 +78,10 @@ def pick_model(index, model):
 
 
 def search(relic, index, query, since=None, until=None, horizon=None, repo=None, session=None, role=None, tier=None,
-           with_=None, limit=20, cursor=None, vector=None, model=None, hybrid=False):
+           with_=None, limit=20, cursor=None, vector=None, model=None, hybrid=False, sort=None):
     from .query import UsageError, repo_pattern
+    if sort not in (None, "", "relevant", "newest"):
+        raise UsageError("sort is relevant | newest")
     words = query.split()
     layers = ["prose"] + ([w for w in (with_ or "").split(",") if w] if with_ != "all" else ["tools", "thinking"])
     layers = ["prose" if l == "vault" else l for l in layers]
@@ -115,7 +119,7 @@ def search(relic, index, query, since=None, until=None, horizon=None, repo=None,
             return {"hits": [], "next_cursor": None, "horizon": horizon or "archive", "horizons_tried": [], "widened": False,
                     "searched_weeks": [], "searched_months": [], "scope_empty": True}
         conds.append("sid IN (" + ",".join(q_(s) for s in sids) + ")")
-    sig = hashlib.sha1(json.dumps([query, lo, hi, repo, session, role, tier, with_]).encode()).hexdigest()[:12]
+    sig = hashlib.sha1(json.dumps([query, lo, hi, repo, session, role, tier, with_, sort]).encode()).hexdigest()[:12]
     off, pinned = 0, None
     if cursor:
         try:
@@ -153,6 +157,10 @@ def search(relic, index, query, since=None, until=None, horizon=None, repo=None,
         chosen = hz
         if fixed or len(hits) >= min(10, limit):
             break
+    if sort == "newest":   # relic3: the most relevant 600, newest first (query.ts:106-107)
+        if len(hits) < min(600, off + limit + 1) and vector is None:
+            hits = run(index, query, layers, where, 600)
+        hits = sorted(hits[:600], key=lambda r: r["ts"] or "", reverse=True)
     page = hits[off:off + limit]
     more = len(hits) > off + limit
     repos = relic._repos({h["sid"] for h in page if h["sid"]})
@@ -162,7 +170,8 @@ def search(relic, index, query, since=None, until=None, horizon=None, repo=None,
         out.append({"uid": r["uid"], "partition": r["month"], "session_uuid": r["sid"], "role": r["role"], "ts": r["ts"],
                     "day": (r["ts_th"] or "")[:10] or None, "repo_key": repos.get(r["sid"]),
                     "session_name": names.get(r["sid"]), "text_snippet": snippet(r["text"] or "", words), "score": round(float(r["_score"]), 4),
-                    "layer": r["layer"], "source_present": False, "machines": r["machines"], "title": r.get("title"),
+                    "layer": r["layer"], "source_present": False,
+                    "ephemeral": sorted(set(EPHEMERAL.findall(r["text"] or "")))[:5] or None, "machines": r["machines"], "title": r.get("title"),
                     "link": f"relic5://{r['month']}/{r['uid']}",
                     "locator": {"month": r["month"], "stream": r["layer"], "key": r["key"], "chunk": r["chunk"]}})
     nxt = base64.urlsafe_b64encode(json.dumps({"o": off + limit, "q": sig, "h": chosen}).encode()).decode().rstrip("=") if more else None

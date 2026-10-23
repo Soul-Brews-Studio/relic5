@@ -82,3 +82,19 @@ def test_unparseable_query_falls_back(built):
     root, _ = built
     r = Relic5(root, duckdb.connect()).search('"unbalanced')
     assert "hits" in r
+
+
+def test_sort_newest_and_ephemeral(built):
+    root, _ = built
+    from conftest import row, write_parquet, COLS
+    write_parquet(os.path.join(root, "parts/m5/text/2026-10.parquet"), COLS, [
+        row("hub log at /tmp/claude-501/scratchpad/out.txt", "2026-10-23T12:00:00.000Z"),
+        row("hub hub hub hub very relevant hub", "2026-10-20T12:00:00.000Z")])
+    con = duckdb.connect()
+    Parts(root).index(con, log=lambda s: None)
+    fts.build(root, con, log=lambda s: None)
+    r = Relic5(root, duckdb.connect())
+    rel = r.search("hub", horizon="archive")["hits"]
+    new = r.search("hub", horizon="archive", sort="newest")["hits"]
+    assert [h["ts"] for h in new] == sorted((h["ts"] for h in new), reverse=True) and rel[0]["ts"] != new[0]["ts"]
+    assert new[0]["ephemeral"] == ["/tmp/claude-501/scratchpad/out.txt"] and rel[0]["ephemeral"] is None

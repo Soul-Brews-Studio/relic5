@@ -68,4 +68,9 @@ def main(args):
         print(f"parity {model} on mps vs stored: n={r['n']} min={r['min']} p05={r['p05']} mean={r['mean']} "
               f"({'OK, > 0.99' if r['p05'] > 0.99 else 'NOT OK: these vectors need their own model@hash'})")
         return
+    # an engine ships into a model@hash folder only when its vectors match the ones there (relic3 6a6d9d8: an --also
+    # engine is admitted at cos median >= 0.998, min >= 0.99); exit 3 = parity refused, as relic3 embed
+    r = probe(URL, model, 50)
+    if r["n"] and r["p05"] <= 0.99:
+        sys.exit(print(f"parity refused: {model} here p05={r['p05']} (want > 0.99); use a model@hash of its own", file=sys.stderr) or 3)
     run(URL, model, int(_opt(args, "--limit", "5000")), _opt(args, "--prefix", ""), _opt(args, "--engine", "mps"))

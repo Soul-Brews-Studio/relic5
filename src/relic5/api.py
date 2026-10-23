@@ -91,6 +91,20 @@ def make_app(root, tokens, doors=None):
     def tail(n: int = 50, session: str = "", machine: str = "", since: str = ""):
         return relic.tail(min(max(n, 1), 500), session or None, machine or None, since or None)
 
+    @app.get("/api/eval")
+    def eval_log(n: int = 200):
+        """The eval runs (tests/eval/compare.py appends them): newest last."""
+        p = os.path.join(relic.parts.root, "logs", "eval.jsonl")
+        if not os.path.exists(p):
+            return []
+        out = []
+        for line in open(p, encoding="utf-8").readlines()[-min(max(n, 1), 2000):]:
+            try:
+                out.append(json.loads(line))
+            except ValueError:
+                pass
+        return out
+
     @app.get("/api/probe")
     def probe(model: str = "", n: int = 200):
         """Texts the hub holds vectors for, with the vectors: another engine's parity probe (read-only)."""

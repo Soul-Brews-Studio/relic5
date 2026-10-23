@@ -39,10 +39,11 @@ def r3(q):
         return []
 
 
-def score(spec, fn):
+def score(spec, fn, until=None):
     ok = prec = mrr = 0
-    lat = []
-    for item in spec["queries"]:
+    lat, misses = [], []
+    qs = [i for i in spec["queries"] if not until or (i.get("ts") or "") <= until]
+    for item in qs:
         want = {spec["sessions"][w] for w in item["want"]}
         t = time.time()
         try:
@@ -54,12 +55,15 @@ def score(spec, fn):
         got = [g or "" for g in got][:10]
         rank = next((i + 1 for i, s in enumerate(got) if s in want), None)
         ok += rank is not None
+        if rank is None:
+            misses.append(item["q"])
         mrr += 1 / rank if rank else 0
         prec += sum(s in want for s in got) / 10
-    n = len(spec["queries"])
+    n = len(qs)
     lat.sort()
     return {"recall@10": round(ok / n, 3), "precision@10": round(prec / n, 3), "mrr": round(mrr / n, 3),
-            "p50_ms": round(statistics.median(lat)), "p95_ms": round(lat[int(len(lat) * 0.95) - 1]), "n": n}
+            "p50_ms": round(statistics.median(lat)), "p95_ms": round(lat[max(0, int(len(lat) * 0.95) - 1)]), "n": n,
+            "until": until, "misses": misses}
 
 
 def main(files):
@@ -80,11 +84,18 @@ def main(files):
         }
         print(f"\n## {f} ({len(spec['queries'])} queries; client encode ~{enc_ms:.0f} ms/query, batched)")
         print(f"{'method':<24} {'recall@10':>9} {'prec@10':>8} {'MRR':>6} {'p50 ms':>7} {'p95 ms':>7}")
-        for name, fn in methods.items():
-            r = score(spec, fn)
+        dated = any("ts" in i for i in spec["queries"])
+        # relic3 stops at 10-15: score every method on the same subset too, so relic3 is compared fairly
+        runs = [(n, f, None) for n, f in methods.items()] + ([(n + " ≤10-14", f, "2026-10-14T23:59:59Z") for n, f in methods.items()] if dated else [])
+        for name, fn, until in runs:
+            r = score(spec, fn, until)
             print(f"{name:<24} {r['recall@10']:>9} {r['precision@10']:>8} {r['mrr']:>6} {r['p50_ms']:>7} {r['p95_ms']:>7}", flush=True)
+            line = json.dumps({"at": time.strftime("%FT%T%z"), "file": os.path.basename(f), "method": name, **r}, ensure_ascii=False)
             with open("tests/eval/runs/compare.jsonl", "a") as out:
-                out.write(json.dumps({"at": time.strftime("%FT%T%z"), "file": f, "method": name, **r}) + "\n")
+                out.write(line + "\n")
+            # and the hub's logs/eval.jsonl, so relic_status and the UI's Compare tab show it (scores and misses only)
+            subprocess.run(["ssh", "-o", "BatchMode=yes", "nat@white.follow-rankine.ts.net", "cat >> ~/relic5/logs/eval.jsonl"],
+                           input=line + "\n", text=True, timeout=30)
 
 
 if __name__ == "__main__":

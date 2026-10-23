@@ -132,6 +132,15 @@ def main(argv=None):
         force, vectors = "--force" in rest, "--vectors" in rest
         rest = [a for a in rest if a not in ("--force", "--vectors")]
         from .jobs import job
+        import fcntl
+        # one index at a time, both lanes (relic3 hub/README.md:76: run one indexer at a time). A kernel flock: it goes
+        # away with the process, so a dead run never blocks the next one (relic4-scan LEARNED.md:53). Exit 75 = locked.
+        os.makedirs(fts.search_dir(root), exist_ok=True)
+        lockf = open(os.path.join(fts.search_dir(root), ".lock"), "w")
+        try:
+            fcntl.flock(lockf, fcntl.LOCK_EX | (0 if "--wait" in sys.argv else fcntl.LOCK_NB))
+        except BlockingIOError:
+            sys.exit(print("relic5 index: another index is running (exit 75; --wait to queue)", file=sys.stderr) or 75)
         con = duckdb.connect()
         if vectors:   # the slow lane, on its own: vector tables and watermarks only
             with job(root, "index-vectors") as j:

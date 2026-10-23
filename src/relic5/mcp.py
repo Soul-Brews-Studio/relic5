@@ -20,7 +20,10 @@ SUPPORTED = ["2025-06-18", "2025-03-26", "2024-11-05"]
 STR = {"type": "string"}
 INT = {"type": "integer", "minimum": 0}
 SEARCH_PROPS = {
-    "query": {**STR, "description": "keyword query: every word must occur (Thai substrings work)"},
+    "query": {**STR, "description": "BM25 (ICU tokens, Thai inside words works): ANY term matches and hits are ranked, so "
+              "every extra word widens the result. BM25 finds TOPICS, not facts: for 'did I already do X' search the most unique "
+              "literal string (an id, a filename, an error), not topic words (relic3's measured advice). With semantic: meaning."},
+    "sort": {**STR, "enum": ["relevant", "newest"], "description": "relevant (default) | newest: the most relevant 600, newest first"},
     "horizon": {**STR, "description": "7d | 15d | 1m | 3m | archive (default archive: every month); exclusive with since/until"},
     "since": {**STR, "description": "YYYY-MM-DD (from 00:00:00Z of that UTC day), an ISO time, or Nd/Nh/Nm before now (1m = one minute)"},
     "until": {**STR, "description": "YYYY-MM-DD (through 23:59:59Z of that UTC day), an ISO time, or Nd/Nh/Nm before now"},
@@ -37,7 +40,9 @@ SEARCH_PROPS = {
                "(same model@hash, unit length); `relic5 mcp` on a Mac adds it. Without it semantic answers by keyword and says so"},
 }
 TOOLS = [
-    {"name": "relic_search", "description": "Search every machine's history on the relic5 hub (keyword; Thai-aware), month partitions.",
+    {"name": "relic_search", "description": "Search every machine's history on the relic5 hub: BM25 over ICU tokens (Thai-aware), widening "
+     "7d → 15d → 1m → 3m → archive until 10 hits; semantic=true is a separate mode (never blended unless hybrid=true). "
+     "Hits flag `ephemeral` paths (/tmp, scratchpad, claude-<pid>) that may be gone.",
      "inputSchema": {"type": "object", "properties": SEARCH_PROPS, "required": ["query"], "additionalProperties": False}},
     {"name": "relic_show", "description": "Show one message (msgkey | relic5:// link | session id + seq) with its neighbours in the session.",
      "inputSchema": {"type": "object", "properties": {"id": STR, "seq": INT, "before": INT, "after": INT}, "required": ["id"],
@@ -98,7 +103,7 @@ def run_tool(relic, name, a, door=None):
                          repo=_str(a, "repo"), session=_str(a, "session"), role=_str(a, "role"), tier=_str(a, "tier"),
                          with_=_str(a, "with"), limit=min(_int(a, "limit", 1) or DEFAULT_LIMIT, 100), cursor=_str(a, "cursor"),
                          vector=vec, model=_str(a, "model") if vec is not None else None,
-                         hybrid=bool(a.get("hybrid")) and vec is not None)
+                         hybrid=bool(a.get("hybrid")) and vec is not None, sort=_str(a, "sort"))
         return {"note": note, **r} if note else r
     if name == "relic_show":
         _check(a, ["id", "seq", "before", "after"])

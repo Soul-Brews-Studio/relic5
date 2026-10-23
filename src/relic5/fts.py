@@ -99,7 +99,7 @@ def build(root, con, log=print, now=None, force=False, lane="fts"):
                 plan[name] = ("vec:" + model, ms, sig)
     if not plan:
         return []
-    gen = time.strftime("%Y%m%d-%H%M%S")
+    gen = time.strftime("%Y%m%d-%H%M%S") + f"-{os.getpid()}"   # unique even for two runs in one second
     gdir = os.path.join(sd, gen)
     db = lancedb.connect(gdir)
     cur = dict(current(root))

@@ -96,13 +96,35 @@ class Parts:
             man["streams"][s] = {"rows": folded, "machines": per}
         return man
 
+    def file_sig(self, mon):
+        """{stream: {machine: [bytes, mtime]}} of one month as it is on disk now."""
+        out = {}
+        for s in MONTH_STREAMS:
+            for m, _, f in self.files(s, mon):
+                st = os.stat(f)
+                out.setdefault(s, {})[m] = [st.st_size, int(st.st_mtime)]
+        return out
+
+    def recorded_sig(self, mon):
+        """The same, as the month's manifest recorded it (None when there is no manifest)."""
+        p = self.manifest_path(mon)
+        if not os.path.exists(p):
+            return None
+        st = json.load(open(p))["streams"]
+        return {s: {m: [v.get("bytes"), v.get("mtime")] for m, v in st[s]["machines"].items() if "bytes" in v} for s in st if st[s]["machines"]}
+
+    def changed(self, mon):
+        """A month is stale when any part was added, removed or changed (size or mtime) since its manifest. Not by
+        clock order: rsync -a keeps the SENDING machine's mtimes, so a part pushed late can be older than the manifest
+        (relic4-scan docs/LEARNED.md:52: compare each file's own size and mtime, never the index's clock)."""
+        return self.recorded_sig(mon) != self.file_sig(mon)
+
     def index(self, con, months=None, log=print, now=None):
         """Rewrite the manifest of every month whose parts changed since its manifest (or the ones named)."""
         done = []
         for mon in months or self.months():
             p = self.manifest_path(mon)
-            newest = max((os.path.getmtime(f) for s in MONTH_STREAMS for _, _, f in self.files(s, mon)), default=0)
-            if months is None and os.path.exists(p) and os.path.getmtime(p) >= newest:
+            if months is None and not self.changed(mon):
                 continue
             t = time.time()
             man = self.build_manifest(con, mon, now)
@@ -124,11 +146,5 @@ class Parts:
         return out
 
     def stale(self):
-        """Months whose parts are newer than their manifest (or have none): `relic5 index` has not seen them."""
-        out = []
-        for mon in self.months():
-            p = self.manifest_path(mon)
-            newest = max((os.path.getmtime(f) for s in MONTH_STREAMS for _, _, f in self.files(s, mon)), default=0)
-            if not os.path.exists(p) or os.path.getmtime(p) < newest:
-                out.append(mon)
-        return out
+        """Months whose parts differ from what their manifest recorded (or have none): `relic5 index` has not seen them."""
+        return [mon for mon in self.months() if self.changed(mon)]

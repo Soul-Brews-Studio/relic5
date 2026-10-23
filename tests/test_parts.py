@@ -44,3 +44,17 @@ def test_status_warns_on_version_mismatch(root):
     s = status(root, now=NOW)
     assert s["versions"]["mba"]["relic-scan"] == "26.10.23-alpha.1308"
     assert [w for w in s["warnings"] if w.startswith("relic-scan differs")] and not [w for w in s["warnings"] if w.startswith("relic-extract differs")]
+
+
+def test_a_part_pushed_late_with_an_old_mtime_is_still_indexed(root):
+    p = Parts(root)
+    con = duckdb.connect()
+    p.index(con, log=lambda s: None, now=NOW)
+    assert p.stale() == []
+    from conftest import COLS, row, write_parquet
+    f = os.path.join(root, "parts/mba/text/2026-10.parquet")
+    write_parquet(f, COLS, [row("a late mba row", "2026-10-23T08:00:00.000Z"), row("another", "2026-10-23T08:01:00.000Z")])
+    os.utime(f, (1_600_000_000, 1_600_000_000))                 # rsync -a: the sender's (old) mtime
+    assert p.stale() == ["2026-10"]
+    assert p.index(con, log=lambda s: None, now=NOW) == ["2026-10"]
+    assert json.load(open(os.path.join(root, "index/2026-10/manifest.json")))["streams"]["text"]["machines"]["mba"]["rows"] == 2

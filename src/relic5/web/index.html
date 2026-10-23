@@ -48,7 +48,7 @@
 <body>
 <header>
   <h1>relic5 hub</h1><span class="sub" id="where">…</span>
-  <nav><button data-tab="overview" class="on">Overview</button><button data-tab="live">Live</button><button data-tab="jobs">Jobs &amp; log</button><button data-tab="search">Search</button></nav>
+  <nav><button data-tab="overview" class="on">Overview</button><button data-tab="live">Live</button><button data-tab="jobs">Jobs &amp; log</button><button data-tab="search">Search</button><button data-tab="compare">Compare</button></nav>
 </header>
 <main>
   <section id="overview" class="on">
@@ -74,6 +74,11 @@
       <select id="with"><option value="">prose</option><option value="tools">+ tools</option><option value="thinking">+ thinking</option><option value="all">all</option></select>
       <input id="repo" placeholder="repo (optional)" size="18"></form>
     <div id="sinfo" class="prov"></div><div id="hits"></div>
+  </section>
+  <section id="compare">
+    <h2>Search quality: relic3 vs relic4 vs relic5</h2><table id="cmp"></table>
+    <h2>Misses of the selected run</h2><div id="misses" class="dim">click a row</div>
+    <div class="prov" id="prov4"></div>
   </section>
 </main>
 <script>
@@ -177,11 +182,27 @@ async function show(uid, month, box) {
       <div class="prov">relic_show ${esc(r.link)} · session ${esc(r.target.sid || "")}</div></div>`;
   } catch (e) { box.innerHTML = `<div class="show err">${esc(e.message)}</div>`; }
 }
+async function compare() {
+  try {
+    const all = await get("/api/eval?n=500"), last = {};
+    for (const r of all) last[r.file + "|" + r.method] = r;     // the newest run of each method on each file
+    const rows = Object.values(last).sort((a, b) => a.file.localeCompare(b.file) || b["recall@10"] - a["recall@10"]);
+    $("#cmp").innerHTML = head(["file", "method", "n", "recall@10", "precision@10", "MRR", "p50 ms", "p95 ms", "misses", "at"], ["", "", "n", "n", "n", "n", "n", "n", "n", ""]) +
+      rows.map((r, i) => `<tr data-i="${i}" style="cursor:pointer">` + [esc(r.file), `<b>${esc(r.method)}</b>`, r.n, r["recall@10"], r["precision@10"], r.mrr, r.p50_ms, r.p95_ms,
+        (r.misses || []).length, esc((r.at || "").slice(5, 16))].map((c, j) => `<td class="${j > 1 && j < 9 ? "n" : ""}">${c}</td>`).join("") + "</tr>").join("");
+    document.querySelectorAll("#cmp tr[data-i]").forEach(tr => tr.onclick = () => {
+      const r = rows[tr.dataset.i];
+      $("#misses").innerHTML = `<b>${esc(r.method)}</b> on ${esc(r.file)}: ${(r.misses || []).length} misses<br>` + (r.misses || []).map(m => `<div class="msg">${esc(m)}</div>`).join("");
+    });
+    $("#prov4").textContent = `GET /api/eval (logs/eval.jsonl, appended by tests/eval/compare.py) · newest run per method · a hit = a top-10 result from the wanted session`;
+  } catch (e) { $("#cmp").innerHTML = `<tr><td class="err">${esc(e.message)}</td></tr>`; }
+}
 document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
   document.querySelectorAll("nav button, section").forEach(x => x.classList.remove("on"));
   b.classList.add("on"); $("#" + b.dataset.tab).classList.add("on");
   if (b.dataset.tab === "search") $("#q").focus();
   if (b.dataset.tab === "live") tail();
+  if (b.dataset.tab === "compare") compare();
 });
 $("#sf").onsubmit = search;
 overview(); setInterval(overview, 15000);
