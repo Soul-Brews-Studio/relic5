@@ -245,6 +245,30 @@ class Relic5:
         link = lambda r: r | {"uid": r["msgkey"], "link": f"relic5://{r['month']}/{r['msgkey']}"}
         return [link(r) for r in reversed(b)], [link(r) for r in a]
 
+    # ---- tail ----
+    def tail(self, n=50, session=None, machine=None, since=None):
+        """The newest messages as they land (open month first), every machine or one session: chunk 0 of each."""
+        from .parts import this_month
+        mons = sorted(self.parts.months(), reverse=True)[:2]   # the open month, and the last one across a rollover
+        src = self.parts.source("text", months=set(mons))
+        if not src:
+            return {"rows": []}
+        where, params = ["chunk = 0"], []
+        for cond, v in (("starts_with(sid, ?)", session), ("ts > ?", since)):
+            if v:
+                where.append(cond)
+                params.append(v)
+        if machine:
+            where.append("machine = ?")
+            params.append(machine)
+        rows = self._rows(f"""SELECT msgkey, month, sid, ts, ts_th, role, engine, cat, machines, substr(text, 1, 600) AS text
+                              FROM {folded(src, ' AND '.join(where))} ORDER BY ts DESC LIMIT ?""", params + [int(n)])
+        names = self._names({r["sid"] for r in rows if r["sid"]})
+        for r in rows:
+            r["session_name"] = names.get(r["sid"])
+            r["link"] = f"relic5://{r['month']}/{r['msgkey']}"
+        return {"rows": rows, "newest": rows[0]["ts"] if rows else None}
+
     # ---- sessions ----
     def sessions(self, repo=None, since=None, until=None, limit=None):
         meta = self._meta()

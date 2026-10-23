@@ -65,6 +65,27 @@ def status(root, now=None):
     vs = _json.load(open(vp)) if os.path.exists(vp) else {"at": None, "models": {}}
     vectors = {"at": vs["at"], "pending": sum(v["pending"] for w in vs["models"].values() for v in w.values()) if vs["models"] else rows["text"],
                "models": vs["models"], "tables": {k: v["rows"] for k, v in fst.items() if k in live and k.startswith("vec_")}}
+    # freshness: how far behind each machine and each index is (relic-chain runs every 10 min on m5, 2026-10-23)
+    t_now = time.time()
+    def lag(iso):
+        if not iso:
+            return None
+        try:
+            from datetime import datetime
+            return round(t_now - datetime.fromisoformat(iso.replace("Z", "+00:00")).timestamp())
+        except ValueError:
+            return None
+    fresh = {"machines": {}, "fts": {"at": fts["at"]}, "vectors": {"at": vectors["at"]}}
+    for m in p.machines():
+        x, v = machines.get(m, {}).get("text", {}), versions.get(m, {})
+        pushed = v.get("at")
+        fresh["machines"][m] = {"newest_ts": x.get("newest_ts"), "pushed_at": pushed, "lag_s": lag(x.get("newest_ts")),
+                                "push_age_s": lag(pushed.replace("+0700", "+07:00").replace("+0000", "+00:00")) if pushed else None}
+        age = fresh["machines"][m]["push_age_s"]
+        if age is not None and age > 1800:
+            warnings.append(f"machine {m}: last push {age // 60} min ago (relic-chain should push every 10 min)")
+    ip = os.path.join(p.root, "index", "_search", "current.json")
+    fresh["fts"]["age_s"] = round(t_now - os.path.getmtime(ip)) if os.path.exists(ip) else None
     cur = this_month(now)
     sealed = [m for m in months if m != "undated" and m < cur]
     return {
@@ -76,6 +97,7 @@ def status(root, now=None):
                    "list": [{"month": m, "sealed": m in sealed, "rows": {s: v["rows"] for s, v in mans.get(m, {}).get("streams", {}).items()}}
                             for m in months]},
         "weeks": {"total": len(months), "sealed": len(sealed), "open": cur if cur in months else None, "quarantine_rows": 0},
+        "freshness": fresh,
         "machines": machines,
         "versions": versions,
         "rows": {"events": rows["text"] + rows["thinking"], "text": rows["text"], "thinking": rows["thinking"],

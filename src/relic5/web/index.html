@@ -48,7 +48,7 @@
 <body>
 <header>
   <h1>relic5 hub</h1><span class="sub" id="where">…</span>
-  <nav><button data-tab="overview" class="on">Overview</button><button data-tab="jobs">Jobs &amp; log</button><button data-tab="search">Search</button></nav>
+  <nav><button data-tab="overview" class="on">Overview</button><button data-tab="live">Live</button><button data-tab="jobs">Jobs &amp; log</button><button data-tab="search">Search</button></nav>
 </header>
 <main>
   <section id="overview" class="on">
@@ -57,6 +57,11 @@
     <h2>Months</h2><table id="months"></table>
     <h2>Watermarks</h2><table id="marks"></table>
     <div class="prov" id="prov1"></div>
+  </section>
+  <section id="live">
+    <h2>Freshness</h2><table id="fresh"></table>
+    <h2>Newest messages</h2><table id="tail"></table>
+    <div class="prov" id="prov3"></div>
   </section>
   <section id="jobs">
     <h2>Running</h2><table id="running"></table>
@@ -108,7 +113,24 @@ async function overview() {
     row(["BM25 (fts)", esc(w.fts.at ?? "none"), Object.entries(w.fts.rows || {}).map(([k, v]) => `${esc(k)} ${num(v)}`).join("<br>") || "none"]) +
     row(["vectors", esc(w.vectors.at ?? "none — not embedded yet"), "pending " + num(w.vectors.pending)]);
   $("#prov1").textContent = `from GET /api/status (relic_status) at ${new Date().toLocaleTimeString()} · folded rows: a message pushed by two machines counts once`;
-  jobs(s.jobs);
+  jobs(s.jobs); fresh(s);
+  if ($("#live").classList.contains("on")) tail();
+}
+
+function fresh(s) {
+  const f = s.freshness || {machines: {}}, secs = v => v == null ? '<span class="dim">unknown</span>' : v < 120 ? v + " s" : v < 7200 ? Math.round(v / 60) + " min" : Math.round(v / 3600) + " h";
+  $("#fresh").innerHTML = head(["machine", "newest row", "behind now", "last push", "push age"]) +
+    Object.entries(f.machines).map(([m, x]) => row([`<b>${esc(m)}</b>`, esc(x.newest_ts ?? "unknown"), secs(x.lag_s), esc(x.pushed_at ?? "unknown"),
+      `<span class="${x.push_age_s > 1800 ? "warn" : ""}">${secs(x.push_age_s)}</span>`])).join("") +
+    row(["<b>BM25 index</b>", esc(f.fts?.at ?? "none"), "", "", secs(f.fts?.age_s)]) + row(["<b>vectors</b>", esc(f.vectors?.at ?? "none"), "", "", ""]);
+}
+async function tail() {
+  try {
+    const r = await get("/api/tail?n=60");
+    $("#tail").innerHTML = head(["time (+07)", "machine", "role", "session", "text"]) + r.rows.map(x => row([`<span class="mono">${esc((x.ts_th || "").slice(5, 16).replace("T", " "))}</span>`,
+      esc((x.machines || []).join(",")), esc(x.role), esc((x.session_name || x.sid || "").slice(0, 40)), esc((x.text || "").replace(/\s+/g, " ").slice(0, 160))])).join("");
+    $("#prov3").textContent = `GET /api/tail · newest ${r.newest || "none"} · refreshed ${new Date().toLocaleTimeString()} · rows arrive with each machine's push (relic-chain, every 10 min)`;
+  } catch (e) { $("#tail").innerHTML = `<tr><td class="err">${esc(e.message)}</td></tr>`; }
 }
 
 function jobs(j) {
@@ -159,6 +181,7 @@ document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
   document.querySelectorAll("nav button, section").forEach(x => x.classList.remove("on"));
   b.classList.add("on"); $("#" + b.dataset.tab).classList.add("on");
   if (b.dataset.tab === "search") $("#q").focus();
+  if (b.dataset.tab === "live") tail();
 });
 $("#sf").onsubmit = search;
 overview(); setInterval(overview, 15000);

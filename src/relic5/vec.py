@@ -19,6 +19,10 @@ from .parts import Parts, sql_list
 VDIR = "vectors"
 MODEL_DIR = re.compile(r"^[A-Za-z0-9._-]+--[A-Za-z0-9._-]+@[0-9a-f]{8}$")
 DEFAULT = "unsloth--embeddinggemma-300m@806f5f90"
+# Rows shorter than this are not searched by vector: tiny texts ("Let me count the words.") sit near every short query.
+# relic3 used 24 (src/vectors/select.ts:22-26); measured here on tests/eval/semantic.json, 2026-10-23: 0 and 24 -> 0/6,
+# 80 -> 2/6, 160 -> 2/6. They are still searchable by keyword.
+MIN_CHARS = int(os.environ.get("RELIC5_VEC_MIN_CHARS", "80"))
 
 
 def models(root):
@@ -97,4 +101,4 @@ def table_sql(parts, root, model, months):
                  list(machine) OVER (PARTITION BY msgkey, chunk ORDER BY machine
                    ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS machines,
                  row_number() OVER (PARTITION BY msgkey, chunk ORDER BY machine) AS rn
-               FROM {src} t JOIN {have} v USING (key)) WHERE rn = 1 ORDER BY ts, msgkey, chunk"""
+               FROM {src} t JOIN {have} v USING (key) WHERE length(t.text) >= {MIN_CHARS}) WHERE rn = 1 ORDER BY ts, msgkey, chunk"""

@@ -2,11 +2,13 @@
 
   relic5 token add <machine>      on the hub: make a token for one machine, print it once (file 0600)
   relic5 token list               on the hub: machines that hold a token (never the tokens)
-  relic5 index [--root ~/relic5] [--force] [YYYY-MM ...]   on the hub: month manifests, then the BM25 tables that changed
+  relic5 index [--root ~/relic5] [--force] [YYYY-MM ...]   on the hub: month manifests, BM25 tables, names (fast lane)
+  relic5 index --vectors                     on the hub: vector tables and watermarks only (slow lane, after shards land)
   relic5 eval [tests/eval/semantic.json] [--semantic]   recall@10 of a query file against the hub
   relic5 log [-n 30]              on the hub: the last event of each job (logs/jobs.jsonl, relic3's JobEvent)
   relic5 serve [--root ~/relic5] [--host 127.0.0.1,100.103.52.67] [--port 8795]
   relic5 search <words> [--with tools] [--limit 20] [--since 7d] [--repo R] [--json]     any machine, over tailscale
+  relic5 tail [--session S] [--machine M] [--n 50] [-f]   the newest messages as they land (-f: keep following)
   relic5 status [--json]
 
 Client settings: RELIC5_URL (default http://white.follow-rankine.ts.net:8795), RELIC5_TOKEN_FILE
@@ -108,10 +110,23 @@ def main(argv=None):
         from .parts import Parts
         root = os.path.expanduser(_opt(rest, "--root", ROOT))
         from . import fts
-        force = "--force" in rest
-        rest = [a for a in rest if a != "--force"]
+        force, vectors = "--force" in rest, "--vectors" in rest
+        rest = [a for a in rest if a not in ("--force", "--vectors")]
         from .jobs import job
         con = duckdb.connect()
+        if vectors:   # the slow lane, on its own: vector tables and watermarks only
+            with job(root, "index-vectors") as j:
+                tabs = fts.build(root, con, force=force, lane="vectors", log=lambda m: (print(m), j.progress(message=m)))
+                j.progress(done=len(tabs), unit="tables", message="vectors: " + (",".join(tabs) or "none changed"))
+                from . import vec as V
+                marks = {m: V.watermarks(root, con, m) for m in V.models(root)}
+                p = os.path.join(fts.search_dir(root), "vectors.json")
+                with open(p + ".tmp", "w") as f:
+                    json.dump({"at": time.strftime("%FT%T%z"), "models": marks}, f, indent=1)
+                os.replace(p + ".tmp", p)
+                for m, w in marks.items():
+                    print(f"vectors {m}: " + ", ".join(f"{k} pending {v['pending']:,} at {v['at']}" for k, v in sorted(w.items())))
+            return
         with job(root, "index") as j:
             done = Parts(root).index(con, months=rest or None)
             j.progress(done=len(done), unit="months", message="manifests: " + (",".join(done) or "none changed"))
@@ -119,14 +134,6 @@ def main(argv=None):
             j.progress(done=len(tabs), unit="tables", message="fts: " + (",".join(tabs) or "none changed"))
             from . import names as NM
             j.progress(done=NM.build(root, con, Parts(root)), unit="sessions", message="names")
-            from . import vec as V
-            marks = {m: V.watermarks(root, con, m) for m in V.models(root)}
-            p = os.path.join(fts.search_dir(root), "vectors.json")
-            with open(p + ".tmp", "w") as f:
-                json.dump({"at": time.strftime("%FT%T%z"), "models": marks}, f, indent=1)
-            os.replace(p + ".tmp", p)
-            for m, w in marks.items():
-                print(f"vectors {m}: " + ", ".join(f"{k} pending {v['pending']:,} at {v['at']}" for k, v in sorted(w.items())))
     elif cmd == "eval":
         from .evaluate import main as ev
         ev(rest)
@@ -147,6 +154,21 @@ def main(argv=None):
             for h in r["hits"]:
                 print(_line(h))
             print(f"{len(r['hits'])} hits" + (" (more: next_cursor)" if r.get("next_cursor") else ""))
+    elif cmd == "tail":
+        import time as _t
+        p = {k: v for k in ("session", "machine", "n") if (v := _opt(rest, "--" + k))}
+        follow, seen = "-f" in rest, set()
+        while True:
+            r = call("/api/tail", p)
+            for x in reversed(r["rows"]):
+                if x["msgkey"] in seen:
+                    continue
+                seen.add(x["msgkey"])
+                txt = " ".join((x["text"] or "").split())[:110]
+                print(f"{x['ts_th'][:16]} {','.join(x['machines']):<9} {x['role']:<9} {(x['session_name'] or x['sid'] or '')[:24]:<24} {txt}")
+            if not follow:
+                break
+            _t.sleep(30)
     elif cmd == "status":
         r = call("/api/status", {})
         print(json.dumps(r, ensure_ascii=False, indent=1))

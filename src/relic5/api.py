@@ -87,6 +87,10 @@ def make_app(root, tokens, doors=None):
         from .jobs import read
         return read(root)[0][:min(max(n, 1), 1000)]
 
+    @app.get("/api/tail")
+    def tail(n: int = 50, session: str = "", machine: str = "", since: str = ""):
+        return relic.tail(min(max(n, 1), 500), session or None, machine or None, since or None)
+
     @app.get("/api/missing")
     def missing(model: str = "", limit: int = 1000, prefix: str = ""):
         """Keys with no vector yet, for an embed worker (read-only; vectors come back over ssh)."""

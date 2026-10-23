@@ -64,8 +64,10 @@ def _sig(parts, layer, months):
     return sig
 
 
-def build(root, con, log=print, now=None, force=False):
-    """Rebuild every table whose months changed; publish one new generation. Returns the tables rebuilt."""
+def build(root, con, log=print, now=None, force=False, lane="fts"):
+    """Rebuild every table of one lane whose inputs changed; publish one new generation. Returns the tables rebuilt.
+    lane = "fts" (BM25, fast: every push) or "vectors" (vector tables: after an embed worker ships shards). The two never
+    run together (Nat, 2026-10-23: "collect icu / fts search first / vector index embed later not same time")."""
     import lancedb
     from lancedb.index import FTS
 
@@ -79,7 +81,7 @@ def build(root, con, log=print, now=None, force=False):
     state = json.load(open(state_p)) if os.path.exists(state_p) else {}
     vault = [p for _, _, p in parts.files("vault")]
     plan = {}
-    for layer in LAYERS:
+    for layer in (LAYERS if lane == "fts" else ()):
         for part, ms in groups.items():
             name = f"{layer}_{part}"
             sig = _sig(parts, layer, ms) | ({"vault": [os.path.getmtime(p) for p in vault]} if layer == "prose" and part == "history" else {})
@@ -87,7 +89,7 @@ def build(root, con, log=print, now=None, force=False):
             if force or state.get(name, {}).get("sig") != sig or name not in current(root):
                 plan[name] = (layer, ms + (["history"] if part == "history" else []), sig)
     from . import vec as V
-    for model in V.models(root):
+    for model in (V.models(root) if lane == "vectors" else ()):
         layer = "vec_" + V.slug(model)
         shard_sig = [[os.path.basename(f), os.path.getsize(f)] for f in V.shards(root, model)]
         for part, ms in groups.items():
@@ -126,6 +128,10 @@ def build(root, con, log=print, now=None, force=False):
         state[name] = {"sig": sig, "rows": tab.num_rows, "built": gen, "seconds": round(time.time() - t, 1)}
         done.append(name)
         log(f"fts {name}: {tab.num_rows:,} rows ({time.time() - t:.1f}s)")
+    # the other lane may have published meanwhile: merge on the newest files, keep only this lane's tables from us
+    cur = {k: v for k, v in current(root).items() if (k.startswith("vec_")) != (lane == "vectors")} | {k: v for k, v in cur.items() if (k.startswith("vec_")) == (lane == "vectors")}
+    if os.path.exists(state_p):
+        state = {k: v for k, v in json.load(open(state_p)).items() if (k.startswith("vec_")) != (lane == "vectors")} | {k: v for k, v in state.items() if (k.startswith("vec_")) == (lane == "vectors")}
     for p, obj in ((state_p, state), (os.path.join(sd, "current.json"), cur)):   # current.json last: the publish point
         with open(p + ".tmp", "w") as f:
             json.dump(obj, f, indent=1)

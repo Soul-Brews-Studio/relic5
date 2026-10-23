@@ -104,3 +104,13 @@ def test_session(relic):
     assert s["uuid"] == "s1-aaaa" and [k["uuid"] for k in s["subagents"]] == ["agent-1"]
     with pytest.raises(NotFound):
         relic.session("zz")
+
+
+def test_tail_newest_first(relic):
+    r = relic.tail(n=3)
+    ts = [x["ts"] for x in r["rows"]]
+    assert ts == sorted(ts, reverse=True) and r["newest"] == ts[0]
+    assert all(x["sid"].startswith("s1") for x in relic.tail(session="s1")["rows"])
+    assert [x["machines"] for x in relic.tail(n=50) if False] == []
+    shared = [x for x in relic.tail(n=50)["rows"] if x["msgkey"] == SHARED["msgkey"]]
+    assert len(shared) == 1 and shared[0]["machines"] == ["m5", "mba"]

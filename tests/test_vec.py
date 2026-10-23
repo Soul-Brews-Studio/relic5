@@ -18,6 +18,7 @@ def unit(v):
 @pytest.fixture
 def withvec(root, monkeypatch):
     monkeypatch.setenv("RELIC5_NOW", "2026-10-23T14:00:00Z")
+    monkeypatch.setattr(vec, "MIN_CHARS", 0)            # the fixture's texts are short
     con = duckdb.connect()
     keys = [k for (k,) in con.execute(f"SELECT DISTINCT key FROM read_parquet('{root}/parts/*/text/*.parquet') ORDER BY key").fetchall()]
     texts = dict(con.execute(f"SELECT key, any_value(text) FROM read_parquet('{root}/parts/*/text/*.parquet') GROUP BY key").fetchall())
@@ -28,6 +29,7 @@ def withvec(root, monkeypatch):
     con.execute(f"COPY (SELECT * FROM (VALUES {rows}) t(key, vector)) TO '{d}/seed-test.parquet' (FORMAT parquet)")
     Parts(root).index(con, log=lambda s: None)
     fts.build(root, con, log=lambda s: None)
+    fts.build(root, con, log=lambda s: None, lane="vectors")
     return root, keys, have
 
 
@@ -59,8 +61,19 @@ def test_vector_tables_and_semantic_search(withvec):
 def test_vector_tables_rebuild_when_shards_change(withvec):
     root, keys, have = withvec
     con = duckdb.connect()
-    assert fts.build(root, con, log=lambda s: None) == []
+    assert fts.build(root, con, log=lambda s: None) == [] and fts.build(root, con, log=lambda s: None, lane="vectors") == []
     left = [k for k in keys if k not in have][:1]
     con.execute(f"COPY (SELECT '{left[0]}' AS key, {unit([0.0, 0.0, 1.0])}::FLOAT[] AS vector) TO '{root}/vectors/{M}/m5-run2.parquet' (FORMAT parquet)")
-    done = fts.build(root, con, log=lambda s: None)
-    assert done and all(n.startswith("vec_") for n in done)                             # BM25 tables untouched
+    assert fts.build(root, con, log=lambda s: None) == []                               # the fast lane ignores vectors
+    done = fts.build(root, con, log=lambda s: None, lane="vectors")
+    assert done and all(n.startswith("vec_") for n in done)
+    assert {"prose_open", "vec_unsloth_embeddinggemma_300m_806f5f90_open"} <= set(fts.current(root))   # both lanes published
+
+
+def test_short_rows_are_left_out_of_vector_tables(withvec, monkeypatch):
+    root, _, have = withvec
+    monkeypatch.setattr(vec, "MIN_CHARS", 20)
+    con = duckdb.connect()
+    sql = vec.table_sql(Parts(root), root, M, {"2026-10", "2026-09"})
+    texts = [t for (t,) in con.execute(f"SELECT text FROM ({sql})").fetchall()]
+    assert texts and all(len(t) >= 20 for t in texts) and "hub from the mba" not in texts   # 16 chars: keyword only
