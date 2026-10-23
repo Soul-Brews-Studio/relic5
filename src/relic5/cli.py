@@ -6,6 +6,7 @@
   relic5 index --vectors                     on the hub: vector tables and watermarks only (slow lane, after shards land)
   relic5 import relic3 [--weeks 2026W40-2026-09-28,...] [--all] [--out ~/.relic-import/relic3]
                                   old relic3 weeks -> relic-scan month files of the sessions no machine holds
+  relic5 tui [--token]            the hub in a terminal: status, live, search (+ show), jobs, queries
   relic5 mcp                      stdio MCP on a Mac: forwards to the hub, embeds semantic queries here
   relic5 embed [--probe] [--limit 5000] [--prefix 0,1] [--engine mps]   client: embed missing chunks, ship a shard
   relic5 eval [tests/eval/semantic.json] [--semantic]   recall@10 of a query file against the hub
@@ -187,6 +188,10 @@ def _main(argv=None):
             j.progress(done=NM.build(root, con, Parts(root)), unit="sessions", message="names")
             from . import selfknow
             selfknow.record_size(root)
+    elif cmd == "tui":
+        from .tui import main as tui
+        tok = os.path.expanduser(TOKEN_FILE)
+        tui(URL, open(tok).read().strip() if "--token" in rest and os.path.exists(tok) else None)
     elif cmd == "mcp":
         from .shim import serve as shim
         shim(URL)
