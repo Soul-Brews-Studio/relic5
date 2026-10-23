@@ -10,6 +10,8 @@
   relic5 log [-n 30]              on the hub: the last event of each job (logs/jobs.jsonl, relic3's JobEvent)
   relic5 serve [--root ~/relic5] [--host 127.0.0.1,100.103.52.67] [--port 8795]
   relic5 search <words> [--with tools] [--limit 20] [--since 7d] [--repo R] [--json]     any machine, over tailscale
+  relic5 recap <session> [--limit 20|0] [--json]   what happened: turns asked, tools, files edited, how it ended
+  relic5 handoff <session> [--role user]   paste-ready block for a new session's first prompt (relic3 tail --handoff)
   relic5 tail [--session S] [--machine M] [--n 50] [-f]   the newest messages as they land (-f: keep following)
   relic5 status [--json]
 
@@ -188,6 +190,23 @@ def main(argv=None):
             for h in r["hits"]:
                 print(_line(h))
             print(f"{len(r['hits'])} hits" + (" (more: next_cursor)" if r.get("next_cursor") else ""))
+    elif cmd == "recap" and rest:
+        r = call("/api/recap", {"id": rest[0], "limit": _opt(rest, "--limit", "20")})
+        if as_json:
+            print(json.dumps(r, ensure_ascii=False, indent=1))
+        else:
+            print(f"{r['uuid']}  {r.get('name') or ''}\n{r.get('repo') or ''}  {r['startedAt']} .. {r['endedAt']}  "
+                  f"{r['turns']['user']} turns asked, {r['turns']['shown']} shown")
+            for t in r["asked"]:
+                print(f"  {t['ts'][:16]}  {' '.join(t['text'].split())[:160]}")
+            print("tools: " + ", ".join(f"{k} {v}" for k, v in list(r["tools"].items())[:12]))
+            print("files edited: " + (", ".join(list(r["files_edited"])[:12]) or "none"))
+            if r["ended"]:
+                print(f"ended {r['ended']['ts'][:16]}: {' '.join(r['ended']['text'].split())[:300]}")
+            if r["more"]:
+                print(r["more"])
+    elif cmd == "handoff" and rest:
+        print(call("/api/handoff", {"id": rest[0], "user_only": "1" if "--role" in rest else "0"})["text"])
     elif cmd == "tail":
         import time as _t
         p = {k: v for k in ("session", "machine", "n") if (v := _opt(rest, "--" + k))}

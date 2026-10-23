@@ -91,6 +91,24 @@ def make_app(root, tokens, doors=None):
     def tail(n: int = 50, session: str = "", machine: str = "", since: str = ""):
         return relic.tail(min(max(n, 1), 500), session or None, machine or None, since or None)
 
+    @app.get("/api/recap")
+    def recap_route(id: str, limit: int = 20):
+        from .recap import recap
+        from .query import NotFound, UsageError
+        try:
+            return recap(relic, id, max(limit, 0))
+        except (NotFound, UsageError) as ex:
+            return JSONResponse({"error": str(ex)}, status_code=404 if isinstance(ex, NotFound) else 400)
+
+    @app.get("/api/handoff")
+    def handoff_route(id: str, user_only: int = 0):
+        from .recap import handoff
+        from .query import NotFound, UsageError
+        try:
+            return handoff(relic, id, bool(user_only))
+        except (NotFound, UsageError) as ex:
+            return JSONResponse({"error": str(ex)}, status_code=404 if isinstance(ex, NotFound) else 400)
+
     @app.get("/api/eval")
     def eval_log(n: int = 200):
         """The eval runs (tests/eval/compare.py appends them): newest last."""
