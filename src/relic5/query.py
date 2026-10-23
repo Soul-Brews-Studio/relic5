@@ -229,7 +229,8 @@ class Relic5:
         total, events = self._rows(f"SELECT count(*) AS n, coalesce(sum(n_rows), 0) AS e FROM {meta} WHERE {w}", params)[0].values()
         rows = self._rows(f"""SELECT s.*, (SELECT count(*) FROM {meta} c WHERE c.parent_sid = s.sid) AS children
                               FROM {meta} s WHERE {w} ORDER BY last_ts DESC NULLS LAST LIMIT ?""", params + [limit or DEFAULT_LIMIT])
-        return {"total": total, "events": int(events), "sessions": [self._session_row(r) for r in rows]}
+        return {"total": total, "counted": "top-level sessions only (no parent_sid); subagents fold into children",
+                "events": int(events), "sessions": [self._session_row(r) for r in rows]}
 
     def _session_row(self, r):
         return {"uuid": r["sid"], "name": None, "home": r["machine"], "tenant": r["cat"], "source": r["engine"],

@@ -39,7 +39,8 @@ TOOLS = [
     {"name": "relic_show", "description": "Show one message (msgkey | relic5:// link | session id + seq) with its neighbours in the session.",
      "inputSchema": {"type": "object", "properties": {"id": STR, "seq": INT, "before": INT, "after": INT}, "required": ["id"],
                      "additionalProperties": False}},
-    {"name": "relic_sessions", "description": "List sessions, newest first (subagents folded into their parent).",
+    {"name": "relic_sessions", "description": "List top-level sessions, newest first. Subagent and workflow-agent sessions are not listed: each folds "
+                    "into its parent's `children` count, so `total` is smaller than relic-scan's session count (it counts every tier).",
      "inputSchema": {"type": "object", "properties": {"repo": STR, "since": STR, "until": STR, "limit": INT}, "additionalProperties": False}},
     {"name": "relic_session", "description": "Resolve a session id prefix to its session record and subagent tree.",
      "inputSchema": {"type": "object", "properties": {"id": STR}, "required": ["id"], "additionalProperties": False}},
