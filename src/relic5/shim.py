@@ -29,12 +29,19 @@ def add_vector(msg, encode=None):
     a = p.get("arguments") or {}
     if msg.get("method") != "tools/call" or p.get("name") != "relic_search" or not a.get("semantic") or "vector" in a:
         return msg
-    if encode is None:
-        from .encode import encode
-    try:
+    vec = None
+    if encode is not None:
         vec = encode([a.get("query", "")], a.get("model") or MODEL)[0]
-    except Exception as ex:   # no local engine: let the hub answer by keyword, it says so in `note`
-        print(f"relic5 mcp: no local embedding ({type(ex).__name__}: {ex})", file=sys.stderr)
+    else:   # query engines in policy order (Nat: "can we do query embed ane too?"): ANE, then MPS, then keyword
+        from .encode import encode as enc
+        from .worker import policy
+        for eng in policy()["query"]:
+            try:
+                vec = enc([a.get("query", "")], a.get("model") or MODEL, engine=eng)[0]
+                break
+            except Exception as ex:
+                print(f"relic5 mcp: query embedding on {eng} failed ({type(ex).__name__}: {ex})", file=sys.stderr)
+    if vec is None:   # no engine answered: the hub answers by keyword and says so in `note`
         return msg
     a = {k: v for k, v in a.items() if k != "model"} | {"vector": vec}
     return msg | {"params": p | {"arguments": a}}

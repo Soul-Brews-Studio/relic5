@@ -33,3 +33,12 @@ def test_serve_forwards_and_reports_an_unreachable_hub(monkeypatch):
     out = io.StringIO()
     shim.serve("http://hub", io.StringIO('{"jsonrpc":"2.0","id":5,"method":"tools/list"}\n'), out, fake_encode)
     assert "hub unreachable" in json.loads(out.getvalue())["error"]["message"]
+
+
+def test_policy_chooses_by_backlog(tmp_path, monkeypatch):
+    from relic5 import worker
+    assert worker.choose(810_000)[0] == "gb300" and worker.choose(1_200)[0] == "ane"
+    cfg = tmp_path / "config.toml"
+    cfg.write_text('[embed]\nbacklog_gb300 = 1000\nsmall = "mps"\n')
+    monkeypatch.setattr(worker, "CONFIG", str(cfg))
+    assert worker.choose(1_200) == ("gb300", "backlog 1,200 > 1,000: gb300") and worker.choose(10)[0] == "mps"
