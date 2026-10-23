@@ -27,8 +27,32 @@ def _model(model):
     return _cache[model]
 
 
-def encode(texts, model, kind="query"):
-    """-> list of unit vectors (lists of float). kind = query | document."""
+ANE_URL = os.environ.get("RELIC5_ANE_URL", "http://127.0.0.1:11435")   # ANEEmbedBar (ane-oracle/tools/ane-embed-app)
+ANE_MODEL = {"unsloth--embeddinggemma-300m@806f5f90": "embeddinggemma:ane-w8a16"}
+PROMPT = {"query": "task: search result | query: ", "document": "title: none | text: "}   # gemma's own prompt strings
+
+
+def encode_ane(texts, model, kind="query", batch=64):
+    """The same model on the Neural Engine, over ANEEmbedBar's /api/embed. The prompt is sent in the text (the engine
+    takes raw input); w8a16 weights, so whether these vectors may share model@hash is decided by `relic5 embed --probe
+    --engine ane`, never assumed."""
+    import json, math, urllib.request
+    out = []
+    for i in range(0, len(texts), batch):
+        body = {"model": ANE_MODEL[model], "input": [PROMPT[kind] + t for t in texts[i:i + batch]]}
+        req = urllib.request.Request(f"{ANE_URL}/api/embed", data=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
+        for v in json.load(urllib.request.urlopen(req, timeout=300))["embeddings"]:
+            n = math.sqrt(sum(x * x for x in v)) or 1.0
+            out.append([x / n for x in v])
+    return out
+
+
+def encode(texts, model, kind="query", engine=None):
+    """-> list of unit vectors (lists of float). kind = query | document; engine = mps (sentence-transformers here,
+    the default) | ane (ANEEmbedBar on this Mac). RELIC5_ENGINE sets the default."""
+    engine = engine or os.environ.get("RELIC5_ENGINE", "mps")
+    if engine == "ane":
+        return encode_ane(list(texts), model, kind)
     m = _model(model)
     p = MODELS[model][f"{'query' if kind == 'query' else 'doc'}_prompt"]
     kw = {"prompt_name": p} if p in (m.prompts or {}) else {}

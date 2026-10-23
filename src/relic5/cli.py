@@ -150,8 +150,8 @@ def _main(argv=None):
         from .parts import Parts
         root = os.path.expanduser(_opt(rest, "--root", ROOT))
         from . import fts
-        force, vectors = "--force" in rest, "--vectors" in rest
-        rest = [a for a in rest if a not in ("--force", "--vectors")]
+        force, vectors, wait = "--force" in rest, "--vectors" in rest, "--wait" in rest
+        rest = [a for a in rest if a not in ("--force", "--vectors", "--wait")]
         from .jobs import job
         import fcntl
         # one index at a time, both lanes (relic3 hub/README.md:76: run one indexer at a time). A kernel flock: it goes
@@ -159,7 +159,7 @@ def _main(argv=None):
         os.makedirs(fts.search_dir(root), exist_ok=True)
         lockf = open(os.path.join(fts.search_dir(root), ".lock"), "w")
         try:
-            fcntl.flock(lockf, fcntl.LOCK_EX | (0 if "--wait" in sys.argv else fcntl.LOCK_NB))
+            fcntl.flock(lockf, fcntl.LOCK_EX | (0 if wait else fcntl.LOCK_NB))
         except BlockingIOError:
             sys.exit(print("relic5 index: another index is running (exit 75; --wait to queue)", file=sys.stderr) or 75)
         con = duckdb.connect()

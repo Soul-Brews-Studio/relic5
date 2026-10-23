@@ -22,13 +22,15 @@ def _get(url, path, **q):
         return json.load(r)
 
 
-def probe(url, model, n=200):
+def probe(url, model, n=200, engine="mps"):
     """Re-embed n texts whose vectors the hub holds (from the seed); compare. -> {min, p05, mean}."""
-    import duckdb
     rows = _get(url, "/api/probe", model=model, n=n)["rows"]
-    mine = encode([r["text"] for r in rows], model, kind="document")
+    t = time.time()
+    mine = encode([r["text"] for r in rows], model, kind="document", engine=engine)
+    secs = time.time() - t
     cos = sorted(sum(a * b for a, b in zip(m, r["vector"])) for m, r in zip(mine, rows))
-    return {"n": len(cos), "min": round(cos[0], 4), "p05": round(cos[len(cos) // 20], 4), "mean": round(sum(cos) / len(cos), 4)}
+    return {"n": len(cos), "min": round(cos[0], 4), "p05": round(cos[len(cos) // 20], 4), "mean": round(sum(cos) / len(cos), 4),
+            "texts_per_s": round(len(cos) / secs, 1) if secs else None}
 
 
 def run(url, model, limit=5000, prefixes="", engine="mps", log=print):
@@ -41,7 +43,7 @@ def run(url, model, limit=5000, prefixes="", engine="mps", log=print):
     if not rows:
         log("embed: nothing missing")
         return 0
-    vecs = encode([r["text"] for r in rows], model, kind="document")
+    vecs = encode([r["text"] for r in rows], model, kind="document", engine=engine)
     me = socket.gethostname().split(".")[0].lower()
     run_id = time.strftime("%Y%m%d-%H%M%S")
     name = f"{me}-{engine}-{run_id}.parquet"
@@ -63,14 +65,15 @@ def run(url, model, limit=5000, prefixes="", engine="mps", log=print):
 def main(args):
     from .cli import URL, _opt
     model = _opt(args, "--model", "unsloth--embeddinggemma-300m@806f5f90")
+    engine = _opt(args, "--engine", "mps")
     if "--probe" in args:
-        r = probe(URL, model, int(_opt(args, "--n", "200")))
-        print(f"parity {model} on mps vs stored: n={r['n']} min={r['min']} p05={r['p05']} mean={r['mean']} "
+        r = probe(URL, model, int(_opt(args, "--n", "200")), engine)
+        print(f"parity {model} on {engine} ({r['texts_per_s']} texts/s) vs stored: n={r['n']} min={r['min']} p05={r['p05']} mean={r['mean']} "
               f"({'OK, > 0.99' if r['p05'] > 0.99 else 'NOT OK: these vectors need their own model@hash'})")
         return
     # an engine ships into a model@hash folder only when its vectors match the ones there (relic3 6a6d9d8: an --also
     # engine is admitted at cos median >= 0.998, min >= 0.99); exit 3 = parity refused, as relic3 embed
-    r = probe(URL, model, 50)
+    r = probe(URL, model, 50, engine)
     if r["n"] and r["p05"] <= 0.99:
         sys.exit(print(f"parity refused: {model} here p05={r['p05']} (want > 0.99); use a model@hash of its own", file=sys.stderr) or 3)
-    run(URL, model, int(_opt(args, "--limit", "5000")), _opt(args, "--prefix", ""), _opt(args, "--engine", "mps"))
+    run(URL, model, int(_opt(args, "--limit", "5000")), _opt(args, "--prefix", ""), engine)
