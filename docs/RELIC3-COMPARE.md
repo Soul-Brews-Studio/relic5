@@ -28,7 +28,7 @@ Gap: **none** (at parity or better), **port** (worth bringing), **later**, **no*
 | semantic | separate mode, never blended (measured: FTS 0.890 vs 0.600 known-item; semantic 0.140 vs 0.046 paraphrase) | separate mode; hybrid RRF opt-in, measured worse on paraphrase (1/6 vs 2/6) | none: keep it opt-in, score per query type |
 | query embedding | the hub calls an engine (tunnel to m5; down today) | the client embeds (`relic5 mcp` shim), the hub embeds nothing | no (better: no tunnel) |
 | engine parity | `--also` engine admitted at cos median ≥ 0.998, min ≥ 0.99 | `relic5 embed --probe`: MPS vs stored, min 0.998 | none |
-| ANN | IVF_PQ from 65,536 vectors, used at 20,000+, recall@10 0.90, ~20x faster | exact flat scan | port (M), measure recall first |
+| ANN | IVF_PQ from 65,536 vectors, used at 20,000+, recall@10 0.90, ~20x faster | exact, in memory (one float32 matmul): measured 2026-10-23 on white over 1,015,946 x 768 (3.12 GB): p50 150 ms server-side; float16 copy rejected (2,529 ms, recall@10 0.912, min 0); relic4's IVF_HNSW_SQ failed its 0.95 recall gate (0.53) | none: exact until ~3 M vectors, then ANN with the same recall gate |
 | short texts | not embedded under 24 chars | not searched by vector under 80 chars (measured) | none |
 | filters | repo, bank, org, project, dir, worktree, path, tier, source, cwd, role, via/chat/from_user | repo, session, role, tier, cwd, branch, title, since/until/horizon, with | via/chat/from_user: when relic-scan carries channel fields |
 | ephemeral paths | flags /tmp, scratchpad, claude-<pid> in hits | `ephemeral` on every hit | none |
