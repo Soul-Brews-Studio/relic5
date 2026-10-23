@@ -35,12 +35,21 @@ def status(root, now=None):
             warnings.append(f"machine {m}: no meta/sessions.parquet (sessions and repo filters miss it)")
     rows = {s: sum(man["streams"].get(s, {}).get("rows", 0) for man in mans.values()) for s in MONTH_STREAMS}
     built = max((man["built"] for man in mans.values()), default=None)
+    from .fts import current, search_dir
+    import json as _json
+    sp = os.path.join(search_dir(p.root), "state.json")
+    fst = _json.load(open(sp)) if os.path.exists(sp) else {}
+    live = current(p.root)
+    fts = {"at": max((v["built"] for k, v in fst.items() if k in live), default=None),
+           "rows": {k: v["rows"] for k, v in fst.items() if k in live}}
+    if not live:
+        warnings.append("no BM25 index published: search answers by substring (run relic5 index)")
     cur = this_month(now)
     sealed = [m for m in months if m != "undated" and m < cur]
     return {
         "api": 1, "home": p.root, "layout": {"version": 1, "unit": "month", "schema": 1} if months else None,
         "code": {"name": "relic5", "version": __version__},
-        "watermarks": {"archive": {"at": None}, "index": {"at": built, "rows": rows["text"]}, "fts": {"at": None},
+        "watermarks": {"archive": {"at": None}, "index": {"at": built, "rows": rows["text"]}, "fts": fts,
                        "vectors": {"at": None, "pending": rows["text"]}},
         "months": {"total": len(months), "sealed": len(sealed), "open": cur if cur in months else None,
                    "list": [{"month": m, "sealed": m in sealed, "rows": {s: v["rows"] for s, v in mans.get(m, {}).get("streams", {}).items()}}

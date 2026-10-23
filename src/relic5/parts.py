@@ -23,7 +23,8 @@ BKK = timezone(timedelta(hours=7))
 
 
 def this_month(now=None):
-    return (now or datetime.now(timezone.utc)).astimezone(BKK).strftime("%Y-%m")
+    from .window import utcnow
+    return (now or utcnow()).astimezone(BKK).strftime("%Y-%m")
 
 
 def sql_list(files):

@@ -2,7 +2,7 @@
 
   relic5 token add <machine>      on the hub: make a token for one machine, print it once (file 0600)
   relic5 token list               on the hub: machines that hold a token (never the tokens)
-  relic5 index [--root ~/relic5] [YYYY-MM ...]   on the hub: rewrite the manifest of every month whose parts changed
+  relic5 index [--root ~/relic5] [--force] [YYYY-MM ...]   on the hub: month manifests, then the BM25 tables that changed
   relic5 serve [--root ~/relic5] [--host 127.0.0.1,100.103.52.67] [--port 8795]
   relic5 search <words> [--with tools] [--limit 20] [--since 7d] [--repo R] [--json]     any machine, over tailscale
   relic5 status [--json]
@@ -105,7 +105,12 @@ def main(argv=None):
         import duckdb
         from .parts import Parts
         root = os.path.expanduser(_opt(rest, "--root", ROOT))
-        Parts(root).index(duckdb.connect(), months=rest or None)
+        from . import fts
+        force = "--force" in rest
+        rest = [a for a in rest if a != "--force"]
+        con = duckdb.connect()
+        Parts(root).index(con, months=rest or None)
+        fts.build(root, con, force=force)
     elif cmd == "serve":
         serve(rest)
     elif cmd == "search":

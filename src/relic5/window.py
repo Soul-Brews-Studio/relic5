@@ -8,7 +8,7 @@ horizon (7d | 15d | 1m | 3m | archive) is a window that starts N before now; arc
 of a horizon are 30 and 90 days. Every bound comes back as UTC ISO text with milliseconds and Z, the form of the
 parts' ts column, so a bound compares as text.
 """
-import re
+import os, re
 from datetime import datetime, timedelta, timezone
 
 HORIZONS = {"7d": 7, "15d": 15, "1m": 30, "3m": 90, "archive": None}
@@ -16,6 +16,12 @@ HORIZONS = {"7d": 7, "15d": 15, "1m": 30, "3m": 90, "archive": None}
 
 class WindowError(ValueError):
     pass
+
+
+def utcnow():
+    """Now, or RELIC5_NOW (an ISO time) for tests and replays, as relic3's RELIC_NOW."""
+    v = os.environ.get("RELIC5_NOW")
+    return datetime.fromisoformat(v.replace("Z", "+00:00")) if v else datetime.now(timezone.utc)
 
 
 def iso(dt):
@@ -26,7 +32,7 @@ def bound(v, end=False, now=None):
     """One since/until value -> UTC ISO text, or None when v is empty. Raises WindowError for unreadable text."""
     if v is None or v == "":
         return None
-    now = now or datetime.now(timezone.utc)
+    now = now or utcnow()
     m = re.fullmatch(r"(\d+)([dhm])", v)
     if m:
         n, u = int(m.group(1)), m.group(2)
@@ -54,6 +60,6 @@ def window(since=None, until=None, horizon=None, now=None):
         if horizon not in HORIZONS:
             raise WindowError(f"horizon {horizon}: one of {' | '.join(HORIZONS)}")
         days = HORIZONS[horizon]
-        now = now or datetime.now(timezone.utc)
+        now = now or utcnow()
         return (iso(now - timedelta(days=days)) if days else None), None, horizon
     return bound(since, False, now), bound(until, True, now), ("window" if since or until else "archive")

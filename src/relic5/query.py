@@ -49,8 +49,10 @@ def folded(src, where="TRUE"):
 
 class Relic5:
     def __init__(self, root, con):
+        from .fts import Index
         self.parts = Parts(root)
         self.con = con
+        self.index = Index(root)
 
     def _rows(self, sql, params=()):
         cur = self.con.cursor()   # a cursor per call: the HTTP handlers run in threads
@@ -77,6 +79,26 @@ class Relic5:
     # ---- search ----
     def search(self, query, since=None, until=None, horizon=None, repo=None, session=None, role=None, tier=None,
                with_=None, limit=DEFAULT_LIMIT, cursor=None):
+        """BM25 over the published index (search.py); ILIKE over the parts when none is built or FTS cannot parse
+        the query (relic3 falls back the same way, query.ts:127-140)."""
+        if not (query or "").split():
+            raise UsageError("search needs a query")
+        kw = dict(since=since, until=until, horizon=horizon, repo=repo, session=session, role=role, tier=tier, with_=with_,
+                  limit=limit, cursor=cursor)
+        if self.index.built():
+            from . import search as S
+            try:
+                return S.search(self, self.index, query, **kw)
+            except UsageError:
+                raise
+            except Exception as ex:   # an FTS parse error: answer by substring, and say so
+                r = self.search_ilike(query, **kw)
+                r["fallback"] = f"substring match ({type(ex).__name__})"
+                return r
+        return self.search_ilike(query, **kw)
+
+    def search_ilike(self, query, since=None, until=None, horizon=None, repo=None, session=None, role=None, tier=None,
+                     with_=None, limit=DEFAULT_LIMIT, cursor=None):
         words = (query or "").split()
         if not words:
             raise UsageError("search needs a query")
