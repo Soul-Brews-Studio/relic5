@@ -76,7 +76,7 @@ def pick_model(index, model):
 
 
 def search(relic, index, query, since=None, until=None, horizon=None, repo=None, session=None, role=None, tier=None,
-           with_=None, limit=20, cursor=None, vector=None, model=None):
+           with_=None, limit=20, cursor=None, vector=None, model=None, hybrid=False):
     from .query import UsageError, repo_pattern
     words = query.split()
     layers = ["prose"] + ([w for w in (with_ or "").split(",") if w] if with_ != "all" else ["tools", "thinking"])
@@ -134,7 +134,19 @@ def search(relic, index, query, since=None, until=None, horizon=None, repo=None,
         start = lo if hz == "window" else window(horizon=hz)[0]
         where = " AND ".join(conds + ([f"ts >= {q_(start)}"] if start else [])) or None
         tried.append(hz)
-        if vector is not None:
+        if vector is not None and hybrid:   # reciprocal-rank fusion (k = 60) of the BM25 and the vector lists
+            k = int(want * 1.5) + 8
+            lists = [run(index, query, ["prose"], where, k), fold(index.vector(slug, vector, where, k), set())]
+            fused = {}
+            for lst in lists:
+                for rank, r in enumerate(lst):
+                    f = fused.setdefault(r["uid"], [0.0, r])
+                    f[0] += 1 / (60 + rank + 1)
+            hits = []
+            for sc, r in sorted(fused.values(), key=lambda x: -x[0]):
+                hits.append(r | {"_score": sc})
+            hits = fold(hits, set())
+        elif vector is not None:
             hits = fold(index.vector(slug, vector, where, int(want * 1.5) + 8), set())
         else:
             hits = run(index, query, layers, where, want)
@@ -155,6 +167,6 @@ def search(relic, index, query, since=None, until=None, horizon=None, repo=None,
                     "locator": {"month": r["month"], "stream": r["layer"], "key": r["key"], "chunk": r["chunk"]}})
     nxt = base64.urlsafe_b64encode(json.dumps({"o": off + limit, "q": sig, "h": chosen}).encode()).decode().rstrip("=") if more else None
     months = sorted({h["month"] for h in hits if h.get("month")})
-    extra = {"semantic": True, "model": slug} if vector is not None else {}
+    extra = {"semantic": True, "model": slug, "hybrid": bool(hybrid)} if vector is not None else {}
     return {**extra, "hits": out, "next_cursor": nxt, "horizon": chosen, "horizons_tried": tried, "widened": len(tried) > 1,
             "searched_weeks": months, "searched_months": months}

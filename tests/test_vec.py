@@ -77,3 +77,9 @@ def test_short_rows_are_left_out_of_vector_tables(withvec, monkeypatch):
     sql = vec.table_sql(Parts(root), root, M, {"2026-10", "2026-09"})
     texts = [t for (t,) in con.execute(f"SELECT text FROM ({sql})").fetchall()]
     assert texts and all(len(t) >= 20 for t in texts) and "hub from the mba" not in texts   # 16 chars: keyword only
+
+
+def test_hybrid_fuses_both_lists(withvec):
+    root, _, _ = withvec
+    r = Relic5(root, duckdb.connect()).search("hub", vector=unit([1.0, 0.0, 0.0]), hybrid=True)
+    assert r["hybrid"] and r["hits"] and "white" in r["hits"][0]["text_snippet"]   # in both lists: ranked first

@@ -32,6 +32,7 @@ SEARCH_PROPS = {
     "cursor": {**STR, "description": "next_cursor from a previous result"},
     "semantic": {"type": "boolean", "description": "route to semantic search (errors if unavailable)"},
     "model": {"type": "string", "description": "with semantic: which vector table (its model or slug), when the root holds more than one"},
+    "hybrid": {"type": "boolean", "description": "with semantic + vector: fuse BM25 and vector ranks (reciprocal-rank fusion)"},
     "vector": {"type": "array", "items": {"type": "number"}, "description": "with semantic: the query embedded by the client "
                "(same model@hash, unit length); `relic5 mcp` on a Mac adds it. Without it semantic answers by keyword and says so"},
 }
@@ -96,7 +97,8 @@ def run_tool(relic, name, a, door=None):
         r = relic.search(_str(a, "query"), since=_str(a, "since"), until=_str(a, "until"), horizon=_str(a, "horizon"),
                          repo=_str(a, "repo"), session=_str(a, "session"), role=_str(a, "role"), tier=_str(a, "tier"),
                          with_=_str(a, "with"), limit=min(_int(a, "limit", 1) or DEFAULT_LIMIT, 100), cursor=_str(a, "cursor"),
-                         vector=vec, model=_str(a, "model") if vec is not None else None)
+                         vector=vec, model=_str(a, "model") if vec is not None else None,
+                         hybrid=bool(a.get("hybrid")) and vec is not None)
         return {"note": note, **r} if note else r
     if name == "relic_show":
         _check(a, ["id", "seq", "before", "after"])

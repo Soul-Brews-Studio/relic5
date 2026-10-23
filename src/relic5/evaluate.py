@@ -3,9 +3,9 @@ hub, over HTTP like any client. A query passes when any session it wants is amon
 import json, os, sys, urllib.parse, urllib.request
 
 
-def _post(url, q, vector, limit):
+def _post(url, q, vector, limit, hybrid=False):
     body = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "relic_search", "arguments": {
-        "query": q, "semantic": True, "vector": vector, "limit": limit}}}
+        "query": q, "semantic": True, "vector": vector, "limit": limit, **({"hybrid": True} if hybrid else {})}}}
     req = urllib.request.Request(f"{url}/mcp", data=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=120) as r:
         res = json.load(r)["result"]
@@ -14,7 +14,7 @@ def _post(url, q, vector, limit):
     return json.loads(res["content"][0]["text"])["hits"]
 
 
-def run(path, semantic=False, url=None, limit=10, model="unsloth--embeddinggemma-300m@806f5f90"):
+def run(path, semantic=False, url=None, limit=10, model="unsloth--embeddinggemma-300m@806f5f90", hybrid=False):
     spec = json.load(open(path))
     url = (url or os.environ.get("RELIC5_URL", "http://white.follow-rankine.ts.net:8795")).rstrip("/")
     ok, rows = 0, []
@@ -24,7 +24,7 @@ def run(path, semantic=False, url=None, limit=10, model="unsloth--embeddinggemma
         vecs = dict(zip([i["q"] for i in spec["queries"]], encode([i["q"] for i in spec["queries"]], model)))
     for item in spec["queries"]:
         if semantic:
-            hits = _post(url, item["q"], vecs[item["q"]], limit)
+            hits = _post(url, item["q"], vecs[item["q"]], limit, hybrid)
         else:
             p = {"q": item["q"], "limit": limit, "horizon": "archive"}
             with urllib.request.urlopen(f"{url}/api/search?{urllib.parse.urlencode(p)}", timeout=120) as r:
@@ -36,13 +36,13 @@ def run(path, semantic=False, url=None, limit=10, model="unsloth--embeddinggemma
         rows.append({"q": item["q"], "rank": rank})
     mrr = sum(1 / x["rank"] for x in rows if x["rank"]) / len(rows)
     return {"recall@10": round(ok / len(spec["queries"]), 3), "mrr": round(mrr, 3), "passed": ok, "queries": len(spec["queries"]),
-            "mode": "semantic" if semantic else "keyword", "rows": rows}
+            "mode": ("hybrid" if hybrid else "semantic") if semantic else "keyword", "rows": rows}
 
 
 def main(args):
-    sem = "--semantic" in args
-    args = [a for a in args if a != "--semantic"]
-    r = run(args[0] if args else "tests/eval/semantic.json", semantic=sem)
+    sem, hyb = "--semantic" in args or "--hybrid" in args, "--hybrid" in args
+    args = [a for a in args if a not in ("--semantic", "--hybrid")]
+    r = run(args[0] if args else "tests/eval/semantic.json", semantic=sem, hybrid=hyb)
     for x in r["rows"]:
         print(f"  {'rank ' + str(x['rank']) if x['rank'] else 'miss':<8} {x['q']}")
     print(f"{r['mode']} recall@10 = {r['recall@10']} ({r['passed']}/{r['queries']}) · MRR {r['mrr']}")
