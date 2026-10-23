@@ -17,7 +17,8 @@ import json, os, shutil, time
 
 from .parts import Parts, sql_list, this_month
 
-FTS_SETTINGS = dict(base_tokenizer="icu", stem=False, remove_stop_words=False, max_token_length=128)
+FTS_SETTINGS = dict(base_tokenizer="icu", stem=False, remove_stop_words=False, max_token_length=128,
+                    with_position=True)   # positions: exact-phrase hits rank first (eval 2026-10-23: common-word misses)
 LAYERS = {"prose": ("text", "vault"), "tools": ("tools",), "thinking": ("thinking",)}
 COLS = ["uid", "msgkey", "chunk", "key", "month", "sid", "ts", "ts_th", "role", "engine", "cat", "layer", "machines", "text", "title"]
 KEEP = 3
@@ -191,8 +192,7 @@ class Index:
     def vector_models(self):
         return sorted({n[4:].rsplit("_", 1)[0] for n in self._load() if n.startswith("vec_")})
 
-    def query(self, layer, q, where, limit):
-        """BM25 hits of one layer (history + open), best first."""
+    def _fts(self, layer, q, where, limit):
         out = []
         for part in ("open", "history"):
             tb = self._load().get(f"{layer}_{part}")
@@ -202,5 +202,22 @@ class Index:
             if where:
                 qb = qb.where(where, prefilter=True)
             out += qb.select(COLS + ["_score"]).to_list()
-        out.sort(key=lambda r: (-r["_score"], r["ts"] or ""), reverse=False)
+        out.sort(key=lambda r: (-r["_score"], r["ts"] or ""))
         return out[:limit]
+
+    def query(self, layer, q, where, limit):
+        """BM25 hits of one layer (history + open), best first. A query of two or more words also runs as an exact
+        phrase, and those hits come first: with any-term ranking, common words ("to use ego browser to") let longer
+        texts outrank the one that says it (12 of 22 known-item misses, eval 2026-10-23). A quoted query is a phrase
+        only; a table built without positions falls back to any-term."""
+        q = q.strip()
+        if q.startswith('"') and q.endswith('"') and len(q) > 2:
+            return self._fts(layer, q, where, limit)
+        if len(q.split()) < 2:
+            return self._fts(layer, q, where, limit)
+        try:
+            phrase = self._fts(layer, '"' + q.replace('"', " ") + '"', where, limit)
+        except Exception:
+            phrase = []
+        seen = {r["uid"] for r in phrase}
+        return (phrase + [r for r in self._fts(layer, q, where, limit) if r["uid"] not in seen])[:limit]

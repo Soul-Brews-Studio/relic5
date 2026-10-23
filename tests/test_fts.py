@@ -98,3 +98,16 @@ def test_sort_newest_and_ephemeral(built):
     new = r.search("hub", horizon="archive", sort="newest")["hits"]
     assert [h["ts"] for h in new] == sorted((h["ts"] for h in new), reverse=True) and rel[0]["ts"] != new[0]["ts"]
     assert new[0]["ephemeral"] == ["/tmp/claude-501/scratchpad/out.txt"] and rel[0]["ephemeral"] is None
+
+
+def test_exact_phrase_ranks_first(built):
+    root, _ = built
+    from conftest import row, write_parquet, COLS
+    write_parquet(os.path.join(root, "parts/m5/text/2026-10.parquet"), COLS, [
+        row("I want to use ego browser to test it", "2026-10-21T12:00:00.000Z", sid="p1"),
+        row("use the browser to want ego things to to to to to", "2026-10-22T12:00:00.000Z", sid="p2")])
+    con = duckdb.connect()
+    Parts(root).index(con, log=lambda s: None)
+    fts.build(root, con, log=lambda s: None)
+    hits = Relic5(root, duckdb.connect()).search("to use ego browser to", horizon="archive")["hits"]
+    assert hits[0]["session_uuid"] == "p1" and {h["session_uuid"] for h in hits} >= {"p1", "p2"}
