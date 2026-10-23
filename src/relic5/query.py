@@ -71,12 +71,13 @@ class Relic5:
                    FROM read_parquet([{lst}], union_by_name = true, filename = true))) WHERE rn = 1)"""
 
     def meta_has(self, col):
-        """Does every machine's sessions.parquet carry this column (relic-scan PR #37 added cwd, title, branch, version)?"""
+        """Does any machine's sessions.parquet carry this column (relic-scan PR #37 added cwd, title, branch, version)?
+        Machines without it read NULL there (union_by_name), so one is enough: an import's meta never has them."""
         fs = self.parts.meta()
         if not fs:
             return False
         try:
-            return all(col in {r[0] for r in self.con.cursor().execute(f"DESCRIBE SELECT * FROM read_parquet('{f}')").fetchall()} for f in fs)
+            return any(col in {r[0] for r in self.con.cursor().execute(f"DESCRIBE SELECT * FROM read_parquet('{f}')").fetchall()} for f in fs)
         except Exception:
             return False
 

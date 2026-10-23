@@ -23,8 +23,7 @@ def test_title_cwd_and_resume(root, monkeypatch):
     cols = META_COLS + ["cwd", "title", "branch", "version"]
     rows = [meta("s1-aaaa") | {"cwd": "/opt/Code/github.com/x/relic5", "title": "Relic5 hub on white", "branch": "m1", "version": "2.1"},
             meta("s2-bbbb") | {"cwd": "/tmp/elsewhere"}, meta("agent-1", tier="subagent", parent="s1-aaaa")]
-    for m in ("m5", "mba"):
-        write_parquet(f"{root}/parts/{m}/meta/sessions.parquet", cols, rows, types=T)
+    write_parquet(f"{root}/parts/m5/meta/sessions.parquet", cols, rows, types=T)   # mba keeps the old meta: like an import
     con = duckdb.connect()
     Parts(root).index(con, log=lambda s: None)
     fts.build(root, con, log=lambda s: None)
