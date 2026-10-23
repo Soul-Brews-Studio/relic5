@@ -1234,6 +1234,7 @@ dependencies = [
     { name = "duckdb" },
     { name = "fastapi" },
     { name = "lancedb" },
+    { name = "numpy" },
     { name = "pylance" },
     { name = "uvicorn" },
 ]
@@ -1257,6 +1258,7 @@ requires-dist = [
     { name = "duckdb", specifier = "==1.5.5" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "lancedb", specifier = "==0.40.0" },
+    { name = "numpy", specifier = ">=2" },
     { name = "pylance", specifier = "==13.0.0" },
     { name = "sentence-transformers", marker = "extra == 'embed'", specifier = "==6.2.0" },
     { name = "torch", marker = "extra == 'embed'", specifier = "==2.14.1" },

@@ -78,7 +78,7 @@ def pick_model(index, model):
 
 
 def search(relic, index, query, since=None, until=None, horizon=None, repo=None, session=None, role=None, tier=None,
-           with_=None, limit=20, cursor=None, vector=None, model=None, hybrid=False, sort=None):
+           with_=None, limit=20, cursor=None, vector=None, model=None, hybrid=False, sort=None, min_chars=None):
     from .query import UsageError, repo_pattern
     if sort not in (None, "", "relevant", "newest"):
         raise UsageError("sort is relevant | newest")
@@ -97,7 +97,9 @@ def search(relic, index, query, since=None, until=None, horizon=None, repo=None,
         raise UsageError("horizon and since/until each set the window - pick one.")
     if horizon and horizon not in HORIZONS:
         raise UsageError(f"horizon {horizon}: one of {' | '.join(HORIZONS)}")
-    conds = []
+    conds, filt = [], {"hi": hi, "role": role, "sid_prefix": session}
+    if min_chars is not None:
+        filt["min_chars"] = min_chars
     for c, v in (("ts <= {}", hi), ("role = {}", role)):
         if v:
             conds.append(c.format(q_(v)))
@@ -119,6 +121,7 @@ def search(relic, index, query, since=None, until=None, horizon=None, repo=None,
             return {"hits": [], "next_cursor": None, "horizon": horizon or "archive", "horizons_tried": [], "widened": False,
                     "searched_weeks": [], "searched_months": [], "scope_empty": True}
         conds.append("sid IN (" + ",".join(q_(s) for s in sids) + ")")
+        filt["sids"] = set(sids)
     sig = hashlib.sha1(json.dumps([query, lo, hi, repo, session, role, tier, with_, sort]).encode()).hexdigest()[:12]
     off, pinned = 0, None
     if cursor:
@@ -137,10 +140,11 @@ def search(relic, index, query, since=None, until=None, horizon=None, repo=None,
     for hz in ([fixed] if fixed else WIDEN):
         start = lo if hz == "window" else window(horizon=hz)[0]
         where = " AND ".join(conds + ([f"ts >= {q_(start)}"] if start else [])) or None
+        vf = filt | {"lo": start}
         tried.append(hz)
         if vector is not None and hybrid:   # reciprocal-rank fusion (k = 60) of the BM25 and the vector lists
             k = int(want * 1.5) + 8
-            lists = [run(index, query, ["prose"], where, k), fold(index.vector(slug, vector, where, k), set())]
+            lists = [run(index, query, ["prose"], where, k), fold(index.vector(slug, vector, vf, k), set())]
             fused = {}
             for lst in lists:
                 for rank, r in enumerate(lst):
@@ -151,7 +155,7 @@ def search(relic, index, query, since=None, until=None, horizon=None, repo=None,
                 hits.append(r | {"_score": sc})
             hits = fold(hits, set())
         elif vector is not None:
-            hits = fold(index.vector(slug, vector, where, int(want * 1.5) + 8), set())
+            hits = fold(index.vector(slug, vector, vf, int(want * 1.5) + 8), set())
         else:
             hits = run(index, query, layers, where, want)
         chosen = hz

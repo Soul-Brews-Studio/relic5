@@ -70,13 +70,12 @@ def test_vector_tables_rebuild_when_shards_change(withvec):
     assert {"prose_open", "vec_unsloth_embeddinggemma_300m_806f5f90_open"} <= set(fts.current(root))   # both lanes published
 
 
-def test_short_rows_are_left_out_of_vector_tables(withvec, monkeypatch):
-    root, _, have = withvec
-    monkeypatch.setattr(vec, "MIN_CHARS", 20)
-    con = duckdb.connect()
-    sql = vec.table_sql(Parts(root), root, M, {"2026-10", "2026-09"})
-    texts = [t for (t,) in con.execute(f"SELECT text FROM ({sql})").fetchall()]
-    assert texts and all(len(t) >= 20 for t in texts) and "hub from the mba" not in texts   # 16 chars: keyword only
+def test_short_rows_are_skipped_per_query(withvec):
+    root, _, _ = withvec
+    r = Relic5(root, duckdb.connect())
+    allrows = r.search("x", vector=unit([0.0, 1.0, 0.0]), min_chars=0)["hits"]
+    longer = r.search("x", vector=unit([0.0, 1.0, 0.0]), min_chars=20)["hits"]
+    assert any("mba" in h["text_snippet"] for h in allrows) and not any("mba" in h["text_snippet"] for h in longer)
 
 
 def test_hybrid_fuses_both_lists(withvec):

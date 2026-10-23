@@ -7,7 +7,7 @@ dependencies = [
     "duckdb==1.5.5",
     "fastapi>=0.115",
     "lancedb==0.40.0",
-    "pylance==13.0.0",
+    "pylance==13.0.0", "numpy>=2",
     "uvicorn>=0.30",
 ]
 

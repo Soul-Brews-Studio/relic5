@@ -171,20 +171,20 @@ class Index:
     def built(self):
         return bool(self._load())
 
-    def vector(self, model, vector, where, limit):
-        """Nearest prose rows to a unit query vector (exact flat scan, cosine), best first; _score = cosine."""
+    def vector(self, model, vector, filt, limit):
+        """Nearest prose rows to a unit query vector: exact, in memory (vec.Matrix), best first; _score = cosine."""
         from . import vec as V
+        tabs = self._load()
+        if getattr(self, "_mx_seen", None) != self.seen:
+            self._mx, self._mx_seen = {}, self.seen
         out = []
         for part in ("open", "history"):
-            tb = self._load().get(f"vec_{V.slug(model)}_{part}")
-            if tb is None:
+            name = f"vec_{V.slug(model)}_{part}"
+            if name not in tabs:
                 continue
-            qb = tb.search(vector, vector_column_name="vector").distance_type("cosine").limit(limit)
-            if where:
-                qb = qb.where(where, prefilter=True)
-            for r in qb.select(COLS + ["_distance"]).to_list():
-                r["_score"] = 1 - r.pop("_distance")
-                out.append(r)
+            if name not in self._mx:
+                self._mx[name] = V.Matrix(tabs[name])
+            out += self._mx[name].search(vector, filt, limit)
         out.sort(key=lambda r: -r["_score"])
         return out[:limit]
 
