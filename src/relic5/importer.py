@@ -5,6 +5,8 @@ else and it is pushed as its own machine ("relic3-import"). The contract is reli
     err (bool), red, machines (list<str>), sources (list<str>), model, msg_id, out_tokens (int64)
   month = the Bangkok month of ts; ts = UTC "YYYY-MM-DDTHH:MM:SS.mmmZ"; ts_th = the same instant "...+07:00"
   s = 'text' (user, assistant), 'tools' (calls and results: kind call/result, name, body)
+  type = 'relic3-merged' on assistant rows: relic3 stored thinking and the reply as ONE row, so thinking may be inline
+    (relic4-scan, 2026-10-23: tag, never split by guessing; measured on 2026W38, 1,207 of 2,040 fold misses)
   h = a stable 64-bit hash of the row's content (no source line to hash); machines = ["relic3-import"]
   sources = ["relic3:<bank>/<rel>:<lineno>", "relic3-uid:<uid>"]  (the uid lets an old relic3:// link be resolved)
 
@@ -52,7 +54,8 @@ MONTH = "strftime((ts AT TIME ZONE 'UTC') + INTERVAL 7 HOUR, '%Y-%m')"
 def select_sql(files, known_table=None):
     keep = f"AND session_uuid NOT IN (SELECT sid FROM {known_table})" if known_table else ""
     ev = f"""SELECT 'text' AS s, (hash(text_hash, uid) & 9223372036854775807)::BIGINT AS h, 0::BIGINT AS idx, coalesce(source, 'claude') AS engine,
-               role, role AS type, session_uuid AS sid, {TS} AS ts, {TS_TH} AS ts_th, text,
+               role, CASE WHEN role = 'assistant' THEN 'relic3-merged' ELSE role END AS type,
+               session_uuid AS sid, {TS} AS ts, {TS_TH} AS ts_th, text,
                NULL::VARCHAR AS kind, NULL::VARCHAR AS call_id, NULL::VARCHAR AS name, NULL::VARCHAR AS body, NULL::BOOLEAN AS err,
                NULL::VARCHAR AS red, ['relic3-import'] AS machines,
                ['relic3:' || coalesce(bank, '') || '/' || coalesce(rel, '') || ':' || coalesce(lineno, 0), 'relic3-uid:' || uid] AS sources,

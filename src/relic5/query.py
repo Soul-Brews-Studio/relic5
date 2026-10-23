@@ -241,7 +241,10 @@ class Relic5:
         target = next((p for p in parts if p["chunk"] == chunk), parts[0])
         before_rows, after_rows = self._neighbours(target, before, after)
         clean = lambda r: {k: v for k, v in r.items() if k not in ("machine",)} | {"uid": uid(r), "link": f"relic5://{r['month']}/{uid(r)}"}
-        return {"link": f"relic5://{target['month']}/{uid(target)}", "target": clean(target),
+        notes = []
+        if target.get("type") == "relic3-merged":
+            notes.append("imported from relic3: this assistant row may carry its thinking inline (relic3 stored them as one row)")
+        return {"link": f"relic5://{target['month']}/{uid(target)}", "target": clean(target), "notes": notes,
                 "parts": [clean(p) for p in parts], "before": before_rows, "after": after_rows, "raw": None, "layer": layer}
 
     def _neighbours(self, t, before, after):

@@ -198,7 +198,9 @@ def _main(argv=None):
         weeks = [w for w in (_opt(rest, "--weeks", "") or "").split(",") if w]
         known = None
         if "--all" not in rest:   # sessions some machine already holds are skipped (relic4-scan: import by session)
-            q = "COPY (SELECT DISTINCT sid FROM read_parquet('/home/nat/relic5/parts/*/meta/sessions.parquet')) TO '/dev/stdout' (FORMAT csv, HEADER false)"
+            # every LIVE machine's sessions; the import's own parts/relic3-import must not count, or a re-run skips everything
+            q = ("COPY (SELECT DISTINCT sid FROM read_parquet('/home/nat/relic5/parts/*/meta/sessions.parquet', filename = true) "
+                 "WHERE sid IS NOT NULL AND filename NOT LIKE '%/parts/relic3-import/%') TO '/dev/stdout' (FORMAT csv, HEADER false)")
             known = set(sp.run(["ssh", "-o", "BatchMode=yes", "nat@white.follow-rankine.ts.net", f'duckdb -c "{q}"'],
                                capture_output=True, text=True, check=True).stdout.split())
             print(f"known sessions on the hub: {len(known):,}")

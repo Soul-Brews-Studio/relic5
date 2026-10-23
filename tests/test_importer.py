@@ -37,6 +37,8 @@ def test_convert_by_session_into_bangkok_months(tmp_path):
     assert r[0][:4] == ("text", "user", "2026-09-14T10:00:00.123Z", "2026-09-14T17:00:00.123+07:00")
     assert r[0][4] == ["relic3:projects/x/y.jsonl:7", "relic3-uid:u1"] and r[0][5] == ["relic3-import"]
     assert r[2][0] == "tools" and r[2][6] == "Bash" and r[2][7] == "call"
+    types = dict(con.execute(f"SELECT role, any_value(type) FROM '{out}/2026-09.parquet' WHERE s = 'text' GROUP BY 1").fetchall())
+    assert types == {"user": "user", "assistant": "relic3-merged"}
     cols = [c[0] for c in con.execute(f"DESCRIBE SELECT * FROM '{out}/2026-10.parquet'").fetchall()]
     assert cols == [c.split()[0] for c in importer.SCHEMA.split(", ")]
     assert os.path.exists(f"{out}/meta/sessions.parquet")
