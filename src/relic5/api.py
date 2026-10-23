@@ -15,7 +15,7 @@ import hmac, json, os
 
 import duckdb
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from . import mcp
 from .query import Relic5
@@ -47,18 +47,40 @@ def make_app(root, tokens):
     relic = Relic5(root, con)
     app = FastAPI(title="relic5", docs_url=None, redoc_url=None, openapi_url=None)
 
+    WEB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web", "index.html")
+
     def who(request):
         h = request.headers.get("authorization", "")
-        got = h[7:].encode() if h.startswith("Bearer ") else b""
+        # a browser shows the token once at /login?t=..., then sends it as an HttpOnly, SameSite=Strict cookie
+        got = (h[7:] if h.startswith("Bearer ") else request.cookies.get("relic5_t", "")).encode()
         # compare against every token, so the time taken does not tell which machine nearly matched
         ok = [m for m, t in tokens.items() if hmac.compare_digest(got, t.encode())]
         return ok[0] if got and ok else None
 
     @app.middleware("http")
     async def auth(request: Request, call_next):
+        if request.url.path == "/login":
+            return await call_next(request)   # it checks the token itself
         if who(request) is None:
             return JSONResponse({"error": "missing or bad Authorization: Bearer token"}, status_code=401)
         return await call_next(request)
+
+    @app.get("/login")
+    def login(t: str = ""):
+        if not any(hmac.compare_digest(t.encode(), v.encode()) for v in tokens.values()) or not t:
+            return JSONResponse({"error": "bad token"}, status_code=401)
+        r = RedirectResponse("/", status_code=303)
+        r.set_cookie("relic5_t", t, httponly=True, samesite="strict", max_age=90 * 86400)
+        return r
+
+    @app.get("/")
+    def ui():
+        return HTMLResponse(open(WEB, encoding="utf-8").read())
+
+    @app.get("/api/log")
+    def log(n: int = 100):
+        from .jobs import read
+        return read(root)[0][:min(max(n, 1), 1000)]
 
     @app.get("/health")
     def health():

@@ -65,9 +65,11 @@ for s in $STREAMS; do
   report "$s" "$out"
 done
 # relic-scan's session table: repo, tier and the subagent tree for relic_sessions / relic_session.
-META="${RELIC5_SCAN:-$HOME/.relic-scan}/meta/sessions.parquet"
-if [ -f "$META" ] && on_hub "mkdir -p '$target/meta'"; then   # openrsync (macOS) has no --mkpath
-  out=$(rsync -a $DRY --timeout=120 --stats "$META" "$R$target/meta/" 2>&1) || { echo "$out" >&2; rc=1; }
+# Plus months.json, relic-scan's per-month manifest (rows, first/max ts, keys, late rows; relic4-scan PR #35).
+SCAN="${RELIC5_SCAN:-$HOME/.relic-scan}/meta"
+META=$(for f in sessions.parquet months.json; do [ -f "$SCAN/$f" ] && printf '%s ' "$SCAN/$f"; done)
+if [ -n "$META" ] && on_hub "mkdir -p '$target/meta'"; then   # openrsync (macOS) has no --mkpath
+  out=$(rsync -a $DRY --timeout=120 --stats $META "$R$target/meta/" 2>&1) || { echo "$out" >&2; rc=1; }
   report meta "$out"
 fi
 # What this machine runs, so the hub can tell when machines differ (relic_status warns on a mismatch).

@@ -72,3 +72,13 @@ def test_read_only(client):
 def test_refuses_no_tokens(root):
     with pytest.raises(SystemExit):
         make_app(root, {})
+
+
+def test_ui_login_cookie(client):
+    assert client.get("/").status_code == 401                              # no token, no page
+    assert client.get("/login", params={"t": "nope"}).status_code == 401
+    r = client.get("/login", params={"t": "tok-mba"}, follow_redirects=False)
+    assert r.status_code == 303 and "httponly" in r.headers["set-cookie"].lower() and "samesite=strict" in r.headers["set-cookie"].lower()
+    assert "relic5 hub" in client.get("/").text                            # the cookie now opens the page
+    assert client.get("/api/status").status_code == 200
+    assert isinstance(client.get("/api/log").json(), list)
