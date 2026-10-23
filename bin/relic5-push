@@ -35,22 +35,26 @@ target="$home/$DEST/$MACHINE"
 real=$($SSH "$HUB" "mkdir -p '$target' && realpath '$target'") || exit 1
 [ "$real" = "$target" ] || { echo "refuse: on $HUB $target resolves to $real" >&2; exit 1; }
 
+# One line per stream from rsync --stats: GNU rsync says "Number of regular files transferred" / "Total bytes sent",
+# macOS openrsync "Number of files transferred" / "Total sent: 159 B".
+report() {
+  files=$(printf '%s\n' "$2" | sed -n -E 's/^Number of (regular )?files transferred: ([0-9,]+).*/\2/p' | tr -d ',')
+  sent=$(printf '%s\n' "$2" | sed -n -E 's/^Total (bytes )?sent: ([0-9,]+).*/\2/p' | tr -d ',')
+  printf 'stream %-8s files=%s sent=%s\n' "$1" "${files:-0}" "${sent:-0}"
+}
 rc=0
 t0=$(date +%s)
 for s in $STREAMS; do
   [ -d "$SRC/$s" ] || continue
   # --stats is parsed into one line per stream: files sent, bytes sent.
   out=$(rsync -a $DRY --timeout=120 --stats --exclude='.*' "$SRC/$s/" "$HUB:$target/$s/" 2>&1) || { echo "$out" >&2; rc=1; continue; }
-  files=$(printf '%s\n' "$out" | sed -n 's/^Number of regular files transferred: //p' | tr -d ',')
-  sent=$(printf '%s\n' "$out" | sed -n 's/^Total bytes sent: //p' | tr -d ',')
-  printf 'stream %-8s files=%s sent=%s\n' "$s" "${files:-0}" "${sent:-0}"
+  report "$s" "$out"
 done
 # relic-scan's session table: repo, tier and the subagent tree for relic_sessions / relic_session.
 META="${RELIC5_SCAN:-$HOME/.relic-scan}/meta/sessions.parquet"
-if [ -f "$META" ]; then
-  out=$(rsync -a $DRY --timeout=120 --stats --mkpath "$META" "$HUB:$target/meta/" 2>&1) || { echo "$out" >&2; rc=1; }
-  printf 'stream %-8s files=%s sent=%s\n' meta "$(printf '%s\n' "$out" | sed -n 's/^Number of regular files transferred: //p' | tr -d ',')" \
-    "$(printf '%s\n' "$out" | sed -n 's/^Total bytes sent: //p' | tr -d ',')"
+if [ -f "$META" ] && $SSH "$HUB" "mkdir -p '$target/meta'"; then   # openrsync (macOS) has no --mkpath
+  out=$(rsync -a $DRY --timeout=120 --stats "$META" "$HUB:$target/meta/" 2>&1) || { echo "$out" >&2; rc=1; }
+  report meta "$out"
 fi
 printf '%s relic5 push %s -> %s:%s rc=%s %ss%s\n' "$(date '+%F %T')" "$MACHINE" "$HUB" "$target" "$rc" \
   "$(( $(date +%s) - t0 ))" "${DRY:+ (dry run)}"
