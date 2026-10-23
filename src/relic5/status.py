@@ -56,6 +56,11 @@ def status(root, now=None):
            "rows": {k: v["rows"] for k, v in fst.items() if k in live}}
     if not live:
         warnings.append("no BM25 index published: search answers by substring (run relic5 index)")
+    from .jobs import read as read_jobs
+    evs, running = read_jobs(p.root)
+    last_error = next((e for e in evs if e.get("state") == "error"), None)
+    if last_error and not any(e["verb"] == last_error["verb"] and e.get("state") == "done" and e["at"] > last_error["at"] for e in evs):
+        warnings.append(f"last {last_error['verb']} failed at {last_error['at']}: {last_error.get('message', '')[:200]}")
     cur = this_month(now)
     sealed = [m for m in months if m != "undated" and m < cur]
     return {
@@ -71,6 +76,6 @@ def status(root, now=None):
         "versions": versions,
         "rows": {"events": rows["text"] + rows["thinking"], "text": rows["text"], "thinking": rows["thinking"],
                  "tools": rows["tools"], "sessions": None, "files": sum(len(p.files(s)) for s in MONTH_STREAMS)},
-        "jobs": {"running": []},
+        "jobs": {"running": running, "recent": evs[:10], "last_error": last_error},
         "warnings": warnings,
     }

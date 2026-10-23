@@ -3,6 +3,7 @@
   relic5 token add <machine>      on the hub: make a token for one machine, print it once (file 0600)
   relic5 token list               on the hub: machines that hold a token (never the tokens)
   relic5 index [--root ~/relic5] [--force] [YYYY-MM ...]   on the hub: month manifests, then the BM25 tables that changed
+  relic5 log [-n 30]              on the hub: the last event of each job (logs/jobs.jsonl, relic3's JobEvent)
   relic5 serve [--root ~/relic5] [--host 127.0.0.1,100.103.52.67] [--port 8795]
   relic5 search <words> [--with tools] [--limit 20] [--since 7d] [--repo R] [--json]     any machine, over tailscale
   relic5 status [--json]
@@ -108,9 +109,19 @@ def main(argv=None):
         from . import fts
         force = "--force" in rest
         rest = [a for a in rest if a != "--force"]
+        from .jobs import job
         con = duckdb.connect()
-        Parts(root).index(con, months=rest or None)
-        fts.build(root, con, force=force)
+        with job(root, "index") as j:
+            done = Parts(root).index(con, months=rest or None)
+            j.progress(done=len(done), unit="months", message="manifests: " + (",".join(done) or "none changed"))
+            tabs = fts.build(root, con, force=force, log=lambda m: (print(m), j.progress(message=m)))
+            j.progress(done=len(tabs), unit="tables", message="fts: " + (",".join(tabs) or "none changed"))
+    elif cmd == "log":
+        from .jobs import read
+        root = os.path.expanduser(_opt(rest, "--root", ROOT))
+        evs, _ = read(root)
+        for e in reversed(evs[:int(_opt(rest, "-n", "30"))]):
+            print(f"{e['at']}  {e['verb']:<7} {e['state']:<8} rc={e.get('rc', '')!s:<2} {e.get('host', '')[:12]:<12} {(e.get('message') or '')[:90]}")
     elif cmd == "serve":
         serve(rest)
     elif cmd == "search":

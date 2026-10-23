@@ -45,6 +45,8 @@ def test_push_streams_only(env):
     assert "stream text     files=1" in r.stdout
     v = __import__("json").load(open(base / "_versions.json"))
     assert v["machine"] == "m5" and "relic-scan" in v and v["relic5-push"]
+    evs = [__import__("json").loads(l) for l in open(hub / "relic5/logs/jobs.jsonl")]
+    assert [e["state"] for e in evs] == ["start", "done"] and evs[1]["unit"] == "bytes" and evs[1]["done"] > 0
 
 
 def test_second_push_sends_nothing_and_never_deletes(env):
