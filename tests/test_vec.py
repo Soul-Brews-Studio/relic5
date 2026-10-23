@@ -83,3 +83,9 @@ def test_hybrid_fuses_both_lists(withvec):
     root, _, _ = withvec
     r = Relic5(root, duckdb.connect()).search("hub", vector=unit([1.0, 0.0, 0.0]), hybrid=True)
     assert r["hybrid"] and r["hits"] and "white" in r["hits"][0]["text_snippet"]   # in both lists: ranked first
+
+
+def test_probe_rows_carry_stored_vectors(withvec):
+    root, _, have = withvec
+    rows = vec.probe_rows(root, duckdb.connect(), M, n=50)
+    assert rows and all(r["key"] in have and len(r["vector"]) == 3 for r in rows)

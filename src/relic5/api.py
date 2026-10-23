@@ -91,6 +91,12 @@ def make_app(root, tokens, doors=None):
     def tail(n: int = 50, session: str = "", machine: str = "", since: str = ""):
         return relic.tail(min(max(n, 1), 500), session or None, machine or None, since or None)
 
+    @app.get("/api/probe")
+    def probe(model: str = "", n: int = 200):
+        """Texts the hub holds vectors for, with the vectors: another engine's parity probe (read-only)."""
+        from . import vec as V
+        return {"model": model or V.DEFAULT, "rows": V.probe_rows(relic.parts.root, con.cursor(), model or V.DEFAULT, min(max(n, 1), 2000))}
+
     @app.get("/api/missing")
     def missing(model: str = "", limit: int = 1000, prefix: str = ""):
         """Keys with no vector yet, for an embed worker (read-only; vectors come back over ssh)."""

@@ -4,6 +4,7 @@
   relic5 token list               on the hub: machines that hold a token (never the tokens)
   relic5 index [--root ~/relic5] [--force] [YYYY-MM ...]   on the hub: month manifests, BM25 tables, names (fast lane)
   relic5 index --vectors                     on the hub: vector tables and watermarks only (slow lane, after shards land)
+  relic5 embed [--probe] [--limit 5000] [--prefix 0,1] [--engine mps]   client: embed missing chunks, ship a shard
   relic5 eval [tests/eval/semantic.json] [--semantic]   recall@10 of a query file against the hub
   relic5 log [-n 30]              on the hub: the last event of each job (logs/jobs.jsonl, relic3's JobEvent)
   relic5 serve [--root ~/relic5] [--host 127.0.0.1,100.103.52.67] [--port 8795]
@@ -134,6 +135,9 @@ def main(argv=None):
             j.progress(done=len(tabs), unit="tables", message="fts: " + (",".join(tabs) or "none changed"))
             from . import names as NM
             j.progress(done=NM.build(root, con, Parts(root)), unit="sessions", message="names")
+    elif cmd == "embed":
+        from .worker import main as wm
+        wm(rest)
     elif cmd == "eval":
         from .evaluate import main as ev
         ev(rest)

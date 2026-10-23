@@ -102,3 +102,15 @@ def table_sql(parts, root, model, months):
                    ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS machines,
                  row_number() OVER (PARTITION BY msgkey, chunk ORDER BY machine) AS rn
                FROM {src} t JOIN {have} v USING (key) WHERE length(t.text) >= {MIN_CHARS}) WHERE rn = 1 ORDER BY ts, msgkey, chunk"""
+
+
+def probe_rows(root, con, model=DEFAULT, n=200):
+    """n random text chunks (>= MIN_CHARS) with their stored vector: a parity probe for another engine."""
+    src, have = text_sql(Parts(root)), vectors_sql(root, model)
+    if src is None or have is None:
+        return []
+    rows = con.execute(f"""SELECT key, any_value(substr(text, 1, 6000)) AS text FROM {src} WHERE length(text) >= {MIN_CHARS}
+                           GROUP BY key USING SAMPLE reservoir({int(n)} ROWS) REPEATABLE (23)""").fetchall()
+    keys = [k for k, _ in rows]
+    vec = dict(con.execute(f"SELECT key, vector FROM {have} WHERE key IN (SELECT unnest(?))", [keys]).fetchall())
+    return [{"key": k, "text": t, "vector": list(vec[k])} for k, t in rows if k in vec]
