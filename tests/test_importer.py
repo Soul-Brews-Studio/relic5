@@ -42,3 +42,19 @@ def test_convert_by_session_into_bangkok_months(tmp_path):
     cols = [c[0] for c in con.execute(f"DESCRIBE SELECT * FROM '{out}/2026-10.parquet'").fetchall()]
     assert cols == [c.split()[0] for c in importer.SCHEMA.split(", ")]
     assert os.path.exists(f"{out}/meta/sessions.parquet")
+
+
+def test_convert_truth_keeps_unknown_sessions(tmp_path):
+    d = tmp_path / "truth"
+    d.mkdir()
+    cols = [c.split()[0] for c in importer.SCHEMA.split(", ")][:18]
+    con = duckdb.connect(str(d / "2026-07-July.duckdb"))
+    con.execute("CREATE TABLE truth(s VARCHAR, h BIGINT, idx BIGINT, engine VARCHAR, role VARCHAR, type VARCHAR, sid VARCHAR, ts VARCHAR, ts_th VARCHAR, text VARCHAR, "
+                "kind VARCHAR, call_id VARCHAR, name VARCHAR, body VARCHAR, err BOOLEAN, red VARCHAR, machines VARCHAR[], sources VARCHAR[])")
+    con.execute("INSERT INTO truth VALUES ('text', 1, 0, 'claude', 'user', 'user', 'gone-1', '2026-07-01T00:00:00.000Z', '2026-07-01T07:00:00.000+07:00', 'hi', NULL, NULL, NULL, NULL, NULL, NULL, ['black'], ['a@black:/x.jsonl:3']), "
+                "('text', 2, 0, 'claude', 'user', 'user', 'live-1', '2026-07-31T20:00:00.000Z', '2026-08-01T03:00:00.000+07:00', 'yo', NULL, NULL, NULL, NULL, NULL, NULL, ['m5'], ['b@m5:/y.jsonl:1'])")
+    con.close()
+    out = str(tmp_path / "out")
+    assert importer.convert_truth(duckdb.connect(), str(d), out, known={"live-1"}, log=lambda s: None) == {"2026-07": 1}
+    r = duckdb.connect().execute(f"SELECT sid, machines, sources, model FROM '{out}/2026-07.parquet'").fetchall()
+    assert r == [("gone-1", ["jsonl-truth-import"], ["a@black:/x.jsonl:3"], None)]

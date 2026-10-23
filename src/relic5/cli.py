@@ -190,7 +190,7 @@ def _main(argv=None):
     elif cmd == "mcp":
         from .shim import serve as shim
         shim(URL)
-    elif cmd == "import" and rest[:1] == ["relic3"]:
+    elif cmd == "import" and rest[:1] in (["relic3"], ["jsonl-truth"]):
         import duckdb, subprocess as sp
         from . import importer
         idx = os.path.expanduser(_opt(rest, "--index", "~/.relic3-hub/index"))
@@ -200,11 +200,15 @@ def _main(argv=None):
         if "--all" not in rest:   # sessions some machine already holds are skipped (relic4-scan: import by session)
             # every LIVE machine's sessions; the import's own parts/relic3-import must not count, or a re-run skips everything
             q = ("COPY (SELECT DISTINCT sid FROM read_parquet('/home/nat/relic5/parts/*/meta/sessions.parquet', filename = true) "
-                 "WHERE sid IS NOT NULL AND filename NOT LIKE '%/parts/relic3-import/%') TO '/dev/stdout' (FORMAT csv, HEADER false)")
+                 "WHERE sid IS NOT NULL AND filename NOT LIKE '%-import/%') TO '/dev/stdout' (FORMAT csv, HEADER false)")
             known = set(sp.run(["ssh", "-o", "BatchMode=yes", "nat@white.follow-rankine.ts.net", f'duckdb -c "{q}"'],
                                capture_output=True, text=True, check=True).stdout.split())
             print(f"known sessions on the hub: {len(known):,}")
-        importer.convert(duckdb.connect(), idx, out, known, weeks=weeks or None)
+        if rest[0] == "jsonl-truth":
+            importer.convert_truth(duckdb.connect(), os.path.expanduser(_opt(rest, "--truth", "~/jsonl-truth/nat")),
+                                   os.path.expanduser(_opt(rest, "--out", "~/.relic-import/jsonl-truth")) if "--out" not in sys.argv else out, known)
+        else:
+            importer.convert(duckdb.connect(), idx, out, known, weeks=weeks or None)
     elif cmd == "embed":
         from .worker import main as wm
         wm(rest)

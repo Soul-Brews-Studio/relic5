@@ -111,3 +111,39 @@ def msgkey_sql():
     """relic-extract's MSGKEY (agent-relic-v4 src/relic4/sql.py, byte-identical in relic-extract): no sid in it."""
     return ("CASE WHEN s = 'tools' THEN md5(to_json([s, ts, CAST(idx AS VARCHAR), kind, call_id, name, body, CAST(err AS VARCHAR)])) "
             "ELSE md5(to_json([s, role, ts, text])) END")
+
+
+def convert_truth(con, truth_dir, out_dir, known=None, log=print):
+    """jsonl-truth (~/jsonl-truth/<tenant>/YYYY-MM-Month.duckdb, table `truth`) is relic-scan's month schema already,
+    minus model / msg_id / out_tokens: keep the sessions no live machine holds, add those three as NULL, mark the rows'
+    machines ["jsonl-truth-import"] and keep its own sources (agent@machine:path:line). Months are re-derived from ts_th."""
+    import glob
+    files = sorted(glob.glob(os.path.join(truth_dir, "*.duckdb")))
+    if known is not None:
+        con.execute("CREATE OR REPLACE TEMP TABLE known(sid VARCHAR)")
+        con.executemany("INSERT INTO known VALUES (?)", [(s,) for s in known])
+    cols = [c.split()[0] for c in SCHEMA.split(", ")]
+    os.makedirs(out_dir, exist_ok=True)
+    t, total, sessions = time.time(), {}, set()
+    parts = []
+    for i, f in enumerate(files):
+        con.execute(f"ATTACH '{f}' AS t{i} (READ_ONLY)")
+        keep = "AND sid NOT IN (SELECT sid FROM known)" if known is not None else ""
+        parts.append(f"""SELECT s, h, idx, engine, role, type, sid, ts, ts_th, text, kind, call_id, name, body, err, red,
+                         ['jsonl-truth-import'] AS machines, sources, NULL::VARCHAR AS model, NULL::VARCHAR AS msg_id,
+                         NULL::BIGINT AS out_tokens, substr(ts_th, 1, 7) AS month FROM t{i}.truth WHERE ts_th IS NOT NULL {keep}""")
+    con.execute("CREATE OR REPLACE TEMP TABLE imp AS " + " UNION ALL ".join(parts))
+    rows = dict(con.execute("SELECT month, count(*) FROM imp GROUP BY 1 ORDER BY 1").fetchall())
+    for mon in rows:
+        p = os.path.join(out_dir, f"{mon}.parquet")
+        con.execute(f"COPY (SELECT {', '.join(cols)} FROM imp WHERE month = '{mon}' ORDER BY ts, sid, s, idx) TO '{p}.tmp' (FORMAT parquet, COMPRESSION zstd)")
+        os.replace(p + ".tmp", p)
+    os.makedirs(os.path.join(out_dir, "meta"), exist_ok=True)
+    mp = os.path.join(out_dir, "meta", "sessions.parquet")
+    con.execute(f"""COPY (SELECT sid, 'main' AS tier, NULL::VARCHAR AS parent_sid, any_value(engine) AS engine, NULL::VARCHAR AS proj,
+                    'jsonl-truth-import' AS cat, false AS probe, min(ts) AS first_ts, max(ts) AS last_ts, count(*)::BIGINT AS n_rows,
+                    list(DISTINCT month) AS months FROM imp GROUP BY sid) TO '{mp}.tmp' (FORMAT parquet, COMPRESSION zstd)""")
+    os.replace(mp + ".tmp", mp)
+    n_s = con.execute("SELECT count(DISTINCT sid) FROM imp").fetchone()[0]
+    log(f"import jsonl-truth: {sum(rows.values()):,} rows, {n_s:,} sessions, {len(rows)} months -> {out_dir} ({time.time() - t:.0f}s)")
+    return rows
