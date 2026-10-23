@@ -1,0 +1,17 @@
+{
+  "about": "Acceptance test for semantic search (relic4-scan, 2026-10-23, from Nat: 'find the wordcloud image and map that I posted to Facebook'). Queries avoid the words wordcloud / word cloud / semantic map. Ground truth = the sessions relic4-scan found with the keyword 'wordcloud|word cloud|semantic map' (23 text rows). A query passes when ANY of its sessions appears in the top 10; recall@10 = passed / queries.",
+  "sessions": {
+    "neo-0923": "1719c605-9e17-4e1d-984b-42a2ff2dd9d1",
+    "neo-0918": "04d1d650-031a-44f6-9c22-3e400e68390f",
+    "ajfon-0715": "20cf7c44-5a99-4108-a80d-356c4b5d848c",
+    "extract-1023": "008db2b3-17a7-47f4-b118-742ebc7ae6e7"
+  },
+  "queries": [
+    {"q": "picture of words sized by how often I said them", "want": ["neo-0923", "neo-0918", "ajfon-0715"]},
+    {"q": "scatter of my prompts by meaning", "want": ["neo-0923", "neo-0918"]},
+    {"q": "the charts I shared on Facebook about my sessions", "want": ["neo-0923", "neo-0918", "extract-1023"]},
+    {"q": "image of my most used words for a facebook post", "want": ["neo-0923", "neo-0918", "ajfon-0715"]},
+    {"q": "plot every message as a dot grouped by topic", "want": ["neo-0923", "neo-0918"]},
+    {"q": "who made the three charts in my screenshots", "want": ["extract-1023"]}
+  ]
+}

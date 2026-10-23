@@ -3,6 +3,7 @@
   relic5 token add <machine>      on the hub: make a token for one machine, print it once (file 0600)
   relic5 token list               on the hub: machines that hold a token (never the tokens)
   relic5 index [--root ~/relic5] [--force] [YYYY-MM ...]   on the hub: month manifests, then the BM25 tables that changed
+  relic5 eval [tests/eval/semantic.json] [--semantic]   recall@10 of a query file against the hub
   relic5 log [-n 30]              on the hub: the last event of each job (logs/jobs.jsonl, relic3's JobEvent)
   relic5 serve [--root ~/relic5] [--host 127.0.0.1,100.103.52.67] [--port 8795]
   relic5 search <words> [--with tools] [--limit 20] [--since 7d] [--repo R] [--json]     any machine, over tailscale
@@ -116,6 +117,9 @@ def main(argv=None):
             j.progress(done=len(done), unit="months", message="manifests: " + (",".join(done) or "none changed"))
             tabs = fts.build(root, con, force=force, log=lambda m: (print(m), j.progress(message=m)))
             j.progress(done=len(tabs), unit="tables", message="fts: " + (",".join(tabs) or "none changed"))
+    elif cmd == "eval":
+        from .evaluate import main as ev
+        ev(rest)
     elif cmd == "log":
         from .jobs import read
         root = os.path.expanduser(_opt(rest, "--root", ROOT))
