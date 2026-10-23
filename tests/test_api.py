@@ -75,7 +75,7 @@ def test_read_only(client):
 
 def test_refuses_no_tokens(root):
     with pytest.raises(SystemExit):
-        make_app(root, {}, Doors({}, enabled=False))
+        make_app(root, {})                                  # no tokens and no doors: nobody could call it
 
 
 def test_ui_login_cookie(client):

@@ -61,6 +61,9 @@ class Doors:
     def door(self, server, client, host, bearer):
         """-> "loopback" | "tailnet:<node>" | "token:<machine>" | None (refused)."""
         if bearer:
+            if hasattr(self.tokens, "check"):          # tokens.Tokens: hashed, expiring, rotating
+                n = self.tokens.check(bearer)
+                return f"token:{n}" if n else None
             import hmac
             ok = [m for m, t in self.tokens.items() if hmac.compare_digest(bearer.encode(), t.encode())]
             return f"token:{ok[0]}" if ok else None

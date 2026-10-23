@@ -42,8 +42,8 @@ def dumps(v):
 def make_app(root, tokens, doors=None):
     """tokens: {machine: token}; doors: who needs none (doors.py; default: loopback + Nat's own tailnet nodes)."""
     from .doors import Doors
-    if not tokens:
-        raise SystemExit("no tokens: run `relic5 token add <machine>` first")
+    if not tokens and doors is None:
+        raise SystemExit("no tokens: run `relic5 token new <name>` first")
     doors = doors if doors is not None else Doors(tokens)
     con = duckdb.connect(":memory:", config={"threads": min(os.cpu_count() or 4, 16)})
     relic = Relic5(root, con)
@@ -72,7 +72,7 @@ def make_app(root, tokens, doors=None):
 
     @app.get("/login")
     def login(t: str = ""):
-        if not any(hmac.compare_digest(t.encode(), v.encode()) for v in tokens.values()) or not t:
+        if not t or not doors.door("", "", "", t):
             return JSONResponse({"error": "bad token"}, status_code=401)
         r = RedirectResponse("/", status_code=303)
         r.set_cookie("relic5_t", t, httponly=True, samesite="strict", max_age=90 * 86400)

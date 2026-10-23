@@ -12,6 +12,6 @@ COPY pyproject.toml uv.lock README.md ./
 COPY src ./src
 RUN uv sync --frozen --no-dev && chown -R relic:relic /app
 USER relic
-ENV PATH=/app/.venv/bin:$PATH RELIC5_ROOT=/data RELIC5_TOKENS=/config/tokens HOME=/home/relic
+ENV PATH=/app/.venv/bin:$PATH RELIC5_ROOT=/data RELIC5_TOKENS=/config/tokens RELIC5_TOKENS_JSON=/config/tokens.json HOME=/home/relic
 EXPOSE 8795
 CMD ["relic5", "serve", "--root", "/data", "--host", "127.0.0.1,100.103.52.67", "--port", "8795"]

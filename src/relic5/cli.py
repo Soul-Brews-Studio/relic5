@@ -1,7 +1,7 @@
 """relic5 command line.
 
-  relic5 token add <machine>      on the hub: make a token for one machine, print it once (file 0600)
-  relic5 token list               on the hub: machines that hold a token (never the tokens)
+  relic5 token new <name> [--expires 90d] | list | rotate <name> [--grace 24h] | revoke <name>
+                                  on the hub: tokens stored hashed (tokens.json, 0600), the secret shown once
   relic5 index [--root ~/relic5] [--force] [YYYY-MM ...]   on the hub: month manifests, BM25 tables, names (fast lane)
   relic5 index --vectors                     on the hub: vector tables and watermarks only (slow lane, after shards land)
   relic5 mcp                      stdio MCP on a Mac: forwards to the hub, embeds semantic queries here
@@ -70,7 +70,10 @@ def serve(args):
     root = os.path.expanduser(_opt(args, "--root", ROOT))
     hosts = _opt(args, "--host", "127.0.0.1").split(",")
     port = int(_opt(args, "--port", str(PORT)))
-    app = make_app(root, read_tokens())
+    from .doors import Doors
+    from .tokens import Tokens
+    T = Tokens()
+    app = make_app(root, T, Doors(T))
     socks = []
     for h in hosts:   # one process on every address (relic4 cli.py, PR #5 @febfdb7)
         sk = socket.socket(socket.AF_INET6 if ":" in h else socket.AF_INET)
@@ -103,10 +106,24 @@ def main(argv=None):
     cmd, rest = args[0], args[1:]
     as_json = "--json" in rest
     rest = [a for a in rest if a != "--json"]
-    if cmd == "token" and rest[:1] == ["add"] and len(rest) == 2:
-        print(add_token(rest[1]))
-    elif cmd == "token" and rest[:1] == ["list"]:
-        print("\n".join(read_tokens()) or "(no tokens)")
+    if cmd == "token":
+        from .tokens import Tokens
+        T, sub = Tokens(), rest[:1]
+        if sub == ["add"] and len(rest) == 2:          # 2026-10-23 form, kept: a plain legacy line
+            print(add_token(rest[1]))
+        elif sub == ["new"] and len(rest) >= 2:
+            print(T.new(rest[1], _opt(rest, "--expires")))
+        elif sub == ["rotate"] and len(rest) >= 2:
+            print(T.rotate(rest[1], _opt(rest, "--grace", "24h")))
+        elif sub == ["revoke"] and len(rest) == 2:
+            T.revoke(rest[1])
+            print(f"revoked {rest[1]}")
+        elif sub == ["list"]:
+            for t in T.list():
+                print(f"{t['name']:<16} {t['store']:<15} created {t.get('created') or '-':<21} expires {t.get('expires') or 'never':<21}"
+                      + (f" rotating until {t['rotating_until']}" if t.get("rotating_until") else ""))
+        else:
+            sys.exit("relic5 token new <name> [--expires 90d] | list | rotate <name> [--grace 24h] | revoke <name>")
     elif cmd == "index":
         import duckdb
         from .parts import Parts
