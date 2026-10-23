@@ -78,13 +78,18 @@ class Relic5:
 
     # ---- search ----
     def search(self, query, since=None, until=None, horizon=None, repo=None, session=None, role=None, tier=None,
-               with_=None, limit=DEFAULT_LIMIT, cursor=None):
+               with_=None, limit=DEFAULT_LIMIT, cursor=None, vector=None, model=None):
         """BM25 over the published index (search.py); ILIKE over the parts when none is built or FTS cannot parse
         the query (relic3 falls back the same way, query.ts:127-140)."""
         if not (query or "").split():
             raise UsageError("search needs a query")
         kw = dict(since=since, until=until, horizon=horizon, repo=repo, session=session, role=role, tier=tier, with_=with_,
                   limit=limit, cursor=cursor)
+        if vector is not None:
+            if not self.index.built():
+                raise UsageError("no index published yet")
+            from . import search as S
+            return S.search(self, self.index, query, vector=vector, model=model, **kw)
         if self.index.built():
             from . import search as S
             try:

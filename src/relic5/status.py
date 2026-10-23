@@ -61,13 +61,17 @@ def status(root, now=None):
     last_error = next((e for e in evs if e.get("state") == "error"), None)
     if last_error and not any(e["verb"] == last_error["verb"] and e.get("state") == "done" and e["at"] > last_error["at"] for e in evs):
         warnings.append(f"last {last_error['verb']} failed at {last_error['at']}: {last_error.get('message', '')[:200]}")
+    vp = os.path.join(search_dir(p.root), "vectors.json")
+    vs = _json.load(open(vp)) if os.path.exists(vp) else {"at": None, "models": {}}
+    vectors = {"at": vs["at"], "pending": sum(v["pending"] for w in vs["models"].values() for v in w.values()) if vs["models"] else rows["text"],
+               "models": vs["models"], "tables": {k: v["rows"] for k, v in fst.items() if k in live and k.startswith("vec_")}}
     cur = this_month(now)
     sealed = [m for m in months if m != "undated" and m < cur]
     return {
         "api": 1, "home": p.root, "layout": {"version": 1, "unit": "month", "schema": 1} if months else None,
         "code": {"name": "relic5", "version": __version__},
         "watermarks": {"archive": {"at": None}, "index": {"at": built, "rows": rows["text"]}, "fts": fts,
-                       "vectors": {"at": None, "pending": rows["text"]}},
+                       "vectors": vectors},
         "months": {"total": len(months), "sealed": len(sealed), "open": cur if cur in months else None,
                    "list": [{"month": m, "sealed": m in sealed, "rows": {s: v["rows"] for s, v in mans.get(m, {}).get("streams", {}).items()}}
                             for m in months]},

@@ -46,8 +46,10 @@ def test_mcp_call(client):
     assert len(json.loads(r["content"][0]["text"])["hits"]) == 1
     bad = rpc(client, "tools/call", {"name": "relic_search", "arguments": {"query": "x", "typo": 1}}).json()["result"]
     assert bad["isError"] and "unknown argument" in bad["content"][0]["text"]
-    sem = rpc(client, "tools/call", {"name": "relic_search", "arguments": {"query": "x", "semantic": True}}).json()["result"]
-    assert sem["isError"] and "embed milestone" in sem["content"][0]["text"]
+    sem = rpc(client, "tools/call", {"name": "relic_search", "arguments": {"query": "hub", "semantic": True}}).json()["result"]
+    assert "keyword hits" in json.loads(sem["content"][0]["text"])["note"]          # no vector: keyword, said out loud
+    bad = rpc(client, "tools/call", {"name": "relic_search", "arguments": {"query": "x", "vector": [1, 0]}}).json()["result"]
+    assert bad["isError"] and "only apply with semantic" in bad["content"][0]["text"]
     gone = rpc(client, "tools/call", {"name": "relic_trace", "arguments": {}}).json()["result"]
     assert gone["isError"]
     assert rpc(client, "tools/call", {"name": "nope"}).json()["error"]["code"] == -32602

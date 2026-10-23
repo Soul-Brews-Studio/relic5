@@ -87,6 +87,14 @@ def make_app(root, tokens, doors=None):
         from .jobs import read
         return read(root)[0][:min(max(n, 1), 1000)]
 
+    @app.get("/api/missing")
+    def missing(model: str = "", limit: int = 1000, prefix: str = ""):
+        """Keys with no vector yet, for an embed worker (read-only; vectors come back over ssh)."""
+        from . import vec as V
+        if prefix and not all(c in "0123456789abcdef" for c in prefix):
+            return JSONResponse({"error": "prefix is hex"}, status_code=400)
+        return V.missing(relic.parts.root, con.cursor(), model or V.DEFAULT, min(max(limit, 1), 100000), prefix)
+
     @app.get("/health")
     def health():
         return {"ok": True}

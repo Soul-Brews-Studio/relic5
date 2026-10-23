@@ -32,6 +32,8 @@ SEARCH_PROPS = {
     "cursor": {**STR, "description": "next_cursor from a previous result"},
     "semantic": {"type": "boolean", "description": "route to semantic search (errors if unavailable)"},
     "model": {"type": "string", "description": "with semantic: which vector table (its model or slug), when the root holds more than one"},
+    "vector": {"type": "array", "items": {"type": "number"}, "description": "with semantic: the query embedded by the client "
+               "(same model@hash, unit length); `relic5 mcp` on a Mac adds it. Without it semantic answers by keyword and says so"},
 }
 TOOLS = [
     {"name": "relic_search", "description": "Search every machine's history on the relic5 hub (keyword; Thai-aware), month partitions.",
@@ -80,16 +82,22 @@ def _int(a, k, minimum=0):
 def run_tool(relic, name, a, door=None):
     if name == "relic_search":
         _check(a, list(SEARCH_PROPS))
-        if a.get("semantic"):
-            raise UsageError("semantic search is not available on relic5 yet (vectors come with the embed milestone) - retry without semantic")
-        if "model" in a:
-            raise UsageError("model only applies with semantic")
+        vec = a.get("vector")
+        if ("model" in a or vec is not None) and not a.get("semantic"):
+            raise UsageError("model and vector only apply with semantic")
+        if vec is not None and (not isinstance(vec, list) or not vec or not all(isinstance(x, (int, float)) for x in vec)):
+            raise UsageError("vector must be a non-empty list of numbers")
+        note = None
+        if a.get("semantic") and vec is None:   # the hub embeds nothing: no vector, answer by keyword and say so
+            note = "semantic needs the query embedded by the client (relic5 mcp on a Mac adds `vector`): these are keyword hits"
         for k in ("via", "chat", "from_user", "cwd"):
             if a.get(k) is not None:
                 raise UsageError(f"{k} is not available on relic5 yet: relic-extract's parts do not carry it")
-        return relic.search(_str(a, "query"), since=_str(a, "since"), until=_str(a, "until"), horizon=_str(a, "horizon"),
-                            repo=_str(a, "repo"), session=_str(a, "session"), role=_str(a, "role"), tier=_str(a, "tier"),
-                            with_=_str(a, "with"), limit=min(_int(a, "limit", 1) or DEFAULT_LIMIT, 100), cursor=_str(a, "cursor"))
+        r = relic.search(_str(a, "query"), since=_str(a, "since"), until=_str(a, "until"), horizon=_str(a, "horizon"),
+                         repo=_str(a, "repo"), session=_str(a, "session"), role=_str(a, "role"), tier=_str(a, "tier"),
+                         with_=_str(a, "with"), limit=min(_int(a, "limit", 1) or DEFAULT_LIMIT, 100), cursor=_str(a, "cursor"),
+                         vector=vec, model=_str(a, "model") if vec is not None else None)
+        return {"note": note, **r} if note else r
     if name == "relic_show":
         _check(a, ["id", "seq", "before", "after"])
         before, after = _int(a, "before"), _int(a, "after")

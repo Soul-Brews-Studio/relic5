@@ -1,0 +1,100 @@
+"""vec.py: vectors on the hub. The hub embeds nothing: clients make vectors, the hub stores, indexes and searches them.
+
+  <root>/vectors/<model@hash>/*.parquet     shards (key VARCHAR, vector FLOAT[]), float32, L2-normalised
+      key = blake2b-128 of the chunk text (relic-extract's key); model@hash = relic4's cache name
+      (agent-relic-v4 src/relic4/embed.py cache_name, PR #6 @b399119): the model plus doc_prompt, dtype, max_seq.
+      Seeded from m5's ~/relic4-scratch/vec/_cache (1,031,819 keys, gemma-300m@806f5f90, 2026-10-23).
+  vec_<slug>_history / vec_<slug>_open      LanceDB tables built by `relic5 index` (fts.py builds them beside BM25):
+      the prose rows (text stream, folded across machines) that have a vector, sealed months / the open month.
+
+A worker (m5 MPS or ANE, gb300 ad hoc) asks `missing()` (GET /api/missing) for keys without a vector, newest
+watermark first, embeds them with the SAME model@hash and rsyncs a shard into vectors/<model@hash>/ over ssh: the
+search server stays read-only. Any engine may write shards; vectors from another engine must pass a parity probe
+before they go in the same folder (relic3: an --also engine passes a parity probe, hub/README.md).
+"""
+import os, re
+
+from .parts import Parts, sql_list
+
+VDIR = "vectors"
+MODEL_DIR = re.compile(r"^[A-Za-z0-9._-]+--[A-Za-z0-9._-]+@[0-9a-f]{8}$")
+DEFAULT = "unsloth--embeddinggemma-300m@806f5f90"
+
+
+def models(root):
+    d = os.path.join(root, VDIR)
+    if not os.path.isdir(d):
+        return []
+    return sorted(m for m in os.listdir(d) if MODEL_DIR.match(m) and shards(root, m))
+
+
+def shards(root, model):
+    d = os.path.join(root, VDIR, model)
+    return sorted(os.path.join(d, f) for f in os.listdir(d) if f.endswith(".parquet") and not f.startswith(".")) if os.path.isdir(d) else []
+
+
+def slug(model):
+    return re.sub(r"[^a-z0-9]+", "_", model.lower()).strip("_")
+
+
+def vectors_sql(root, model):
+    """One vector per key: shards may overlap (relic4: read them as any_value ... GROUP BY key)."""
+    fs = shards(root, model)
+    return f"(SELECT key, any_value(vector) AS vector FROM read_parquet({sql_list(fs)}) GROUP BY key)" if fs else None
+
+
+def text_sql(parts, months=None):
+    fs = [p for _, mon, p in parts.files("text") if months is None or mon in months]
+    if not fs:
+        return None
+    return f"""(SELECT regexp_extract(filename, '/parts/([^/]+)/', 1) AS machine, msgkey, chunk, key, month, sid, ts, ts_th,
+               role, engine, cat, text FROM read_parquet({sql_list(fs)}, union_by_name = true, filename = true)
+               WHERE text IS NOT NULL AND text <> '')"""
+
+
+def missing(root, con, model=DEFAULT, limit=1000, prefix="", max_chars=6000):
+    """Keys of the prose text stream with no vector yet, newest first (the open month first), one row per key.
+    prefix: only keys starting with it, so two workers (m5, gb300) can take disjoint slices."""
+    parts = Parts(root)
+    src = text_sql(parts)
+    if src is None:
+        return {"model": model, "rows": [], "pending": 0}
+    have = vectors_sql(root, model)
+    anti = f"AND key NOT IN (SELECT key FROM {have})" if have else ""
+    pre = "AND starts_with(key, ?)" if prefix else ""
+    params = [prefix] if prefix else []
+    base = f"SELECT key, max(ts) AS ts, any_value(substr(text, 1, {int(max_chars)})) AS text FROM {src} WHERE TRUE {anti} {pre} GROUP BY key"
+    pending = con.execute(f"SELECT count(*) FROM ({base})", params).fetchone()[0]
+    rows = con.execute(f"SELECT key, ts, text FROM ({base}) ORDER BY ts DESC LIMIT ?", params + [int(limit)]).fetchall()
+    return {"model": model, "pending": pending, "rows": [{"key": k, "ts": t, "text": x} for k, t, x in rows]}
+
+
+def watermarks(root, con, model=DEFAULT):
+    """Per machine: the newest ts at or before which every text chunk has a vector, and how many have none."""
+    parts = Parts(root)
+    src, have = text_sql(parts), vectors_sql(root, model)
+    if src is None:
+        return {}
+    if have is None:
+        return {m: {"at": None, "pending": n} for m, n in con.execute(f"SELECT machine, count(*) FROM {src} GROUP BY 1").fetchall()}
+    rows = con.execute(f"""SELECT machine, min(ts) FILTER (WHERE v.key IS NULL) AS first_gap, max(ts) AS newest,
+                           count(*) FILTER (WHERE v.key IS NULL) AS pending
+                           FROM {src} t LEFT JOIN {have} v USING (key) GROUP BY machine""").fetchall()
+    out = {}
+    for m, gap, newest, pending in rows:
+        at = newest if gap is None else con.execute(f"SELECT max(ts) FROM {src} WHERE machine = ? AND ts < ?", [m, gap]).fetchone()[0]
+        out[m] = {"at": at, "pending": pending}
+    return out
+
+
+def table_sql(parts, root, model, months):
+    """Folded prose text rows of some months joined to their vectors (rows with no vector are left out)."""
+    src, have = text_sql(parts, months), vectors_sql(root, model)
+    if src is None or have is None:
+        return None
+    return f"""SELECT msgkey || CASE WHEN chunk > 0 THEN ':' || chunk ELSE '' END AS uid, * EXCLUDE (rn, machine) FROM (
+               SELECT t.*, 'prose' AS layer, NULL::VARCHAR AS title, v.vector::FLOAT[] AS vector,
+                 list(machine) OVER (PARTITION BY msgkey, chunk ORDER BY machine
+                   ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS machines,
+                 row_number() OVER (PARTITION BY msgkey, chunk ORDER BY machine) AS rn
+               FROM {src} t JOIN {have} v USING (key)) WHERE rn = 1 ORDER BY ts, msgkey, chunk"""

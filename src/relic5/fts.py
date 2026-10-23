@@ -86,6 +86,15 @@ def build(root, con, log=print, now=None, force=False):
             sig = json.loads(json.dumps(sig))
             if force or state.get(name, {}).get("sig") != sig or name not in current(root):
                 plan[name] = (layer, ms + (["history"] if part == "history" else []), sig)
+    from . import vec as V
+    for model in V.models(root):
+        layer = "vec_" + V.slug(model)
+        shard_sig = [[os.path.basename(f), os.path.getsize(f)] for f in V.shards(root, model)]
+        for part, ms in groups.items():
+            name = f"{layer}_{part}"
+            sig = json.loads(json.dumps({"text": _sig(parts, "prose", ms), "shards": shard_sig}))
+            if force or state.get(name, {}).get("sig") != sig or name not in current(root):
+                plan[name] = ("vec:" + model, ms, sig)
     if not plan:
         return []
     gen = time.strftime("%Y%m%d-%H%M%S")
@@ -95,7 +104,8 @@ def build(root, con, log=print, now=None, force=False):
     done = []
     for name, (layer, ms, sig) in plan.items():
         t = time.time()
-        sql = _select(parts, layer, ms)
+        is_vec = layer.startswith("vec:")
+        sql = V.table_sql(parts, root, layer[4:], ms) if is_vec else _select(parts, layer, ms)
         tab = con.execute(sql).arrow() if sql else None
         if hasattr(tab, "read_all"):
             tab = tab.read_all()
@@ -103,8 +113,15 @@ def build(root, con, log=print, now=None, force=False):
             cur.pop(name, None)
             state[name] = {"sig": sig, "rows": 0, "built": gen}
             continue
+        if is_vec:
+            import pyarrow as pa
+            dim = len(tab.column("vector")[0].as_py())
+            i = tab.schema.get_field_index("vector")
+            flat = tab.column("vector").combine_chunks().flatten().cast(pa.float32())
+            tab = tab.set_column(i, "vector", pa.FixedSizeListArray.from_arrays(flat, dim))
         tb = db.create_table(name, tab, mode="overwrite")
-        tb.create_index("text", config=FTS(**FTS_SETTINGS), replace=True)
+        if not is_vec:
+            tb.create_index("text", config=FTS(**FTS_SETTINGS), replace=True)
         cur[name] = f"{gen}/{name}.lance"
         state[name] = {"sig": sig, "rows": tab.num_rows, "built": gen, "seconds": round(time.time() - t, 1)}
         done.append(name)
@@ -147,6 +164,26 @@ class Index:
 
     def built(self):
         return bool(self._load())
+
+    def vector(self, model, vector, where, limit):
+        """Nearest prose rows to a unit query vector (exact flat scan, cosine), best first; _score = cosine."""
+        from . import vec as V
+        out = []
+        for part in ("open", "history"):
+            tb = self._load().get(f"vec_{V.slug(model)}_{part}")
+            if tb is None:
+                continue
+            qb = tb.search(vector, vector_column_name="vector").distance_type("cosine").limit(limit)
+            if where:
+                qb = qb.where(where, prefilter=True)
+            for r in qb.select(COLS + ["_distance"]).to_list():
+                r["_score"] = 1 - r.pop("_distance")
+                out.append(r)
+        out.sort(key=lambda r: -r["_score"])
+        return out[:limit]
+
+    def vector_models(self):
+        return sorted({n[4:].rsplit("_", 1)[0] for n in self._load() if n.startswith("vec_")})
 
     def query(self, layer, q, where, limit):
         """BM25 hits of one layer (history + open), best first."""

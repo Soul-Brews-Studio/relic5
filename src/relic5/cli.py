@@ -13,7 +13,7 @@ Client settings: RELIC5_URL (default http://white.follow-rankine.ts.net:8795), R
 (default ~/.config/relic5/token, 0600, the one line `relic5 token add` printed on the hub).
 Hub settings: RELIC5_ROOT (default ~/relic5), RELIC5_TOKENS (default ~/.config/relic5/tokens: `<machine> <token>` lines).
 """
-import json, os, re, secrets, sys, urllib.parse, urllib.request
+import json, os, re, secrets, sys, time, urllib.parse, urllib.request
 
 ROOT = os.environ.get("RELIC5_ROOT", "~/relic5")
 TOKENS = os.environ.get("RELIC5_TOKENS", "~/.config/relic5/tokens")
@@ -117,6 +117,14 @@ def main(argv=None):
             j.progress(done=len(done), unit="months", message="manifests: " + (",".join(done) or "none changed"))
             tabs = fts.build(root, con, force=force, log=lambda m: (print(m), j.progress(message=m)))
             j.progress(done=len(tabs), unit="tables", message="fts: " + (",".join(tabs) or "none changed"))
+            from . import vec as V
+            marks = {m: V.watermarks(root, con, m) for m in V.models(root)}
+            p = os.path.join(fts.search_dir(root), "vectors.json")
+            with open(p + ".tmp", "w") as f:
+                json.dump({"at": time.strftime("%FT%T%z"), "models": marks}, f, indent=1)
+            os.replace(p + ".tmp", p)
+            for m, w in marks.items():
+                print(f"vectors {m}: " + ", ".join(f"{k} pending {v['pending']:,} at {v['at']}" for k, v in sorted(w.items())))
     elif cmd == "eval":
         from .evaluate import main as ev
         ev(rest)

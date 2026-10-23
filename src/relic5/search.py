@@ -57,8 +57,26 @@ def run(index, query, layers, where, want):
     return out
 
 
+def pick_model(index, model):
+    """A vector table by its model, model@hash or slug; the only one when there is one."""
+    from .query import UsageError
+    from .vec import slug as slug_of
+    have = index.vector_models()
+    if not have:
+        raise UsageError("no vectors on the hub yet")
+    if not model:
+        if len(have) > 1:
+            raise UsageError(f"several vector tables: pick a model ({', '.join(have)})")
+        return have[0]
+    want = slug_of(model)
+    hit = [h for h in have if h == want or want in h]
+    if len(hit) != 1:
+        raise UsageError(f"model {model}: " + ("no vectors for it" if not hit else "ambiguous") + f" (have {', '.join(have)})")
+    return hit[0]
+
+
 def search(relic, index, query, since=None, until=None, horizon=None, repo=None, session=None, role=None, tier=None,
-           with_=None, limit=20, cursor=None):
+           with_=None, limit=20, cursor=None, vector=None, model=None):
     from .query import UsageError, repo_pattern
     words = query.split()
     layers = ["prose"] + ([w for w in (with_ or "").split(",") if w] if with_ != "all" else ["tools", "thinking"])
@@ -106,6 +124,9 @@ def search(relic, index, query, since=None, until=None, horizon=None, repo=None,
             assert c["q"] == sig
         except Exception:
             raise UsageError("bad cursor: it belongs to another query")
+    if vector is not None:   # semantic: relic3 does not widen it (semantic.ts:175-178): one window, archive by default
+        pinned = pinned or horizon or ("window" if lo or hi or session else "archive")
+        slug = pick_model(index, model)
     fixed = pinned or horizon or ("window" if lo or hi or session else None)
     tried, hits, chosen = [], [], None
     want = off + limit + 1
@@ -113,7 +134,10 @@ def search(relic, index, query, since=None, until=None, horizon=None, repo=None,
         start = lo if hz == "window" else window(horizon=hz)[0]
         where = " AND ".join(conds + ([f"ts >= {q_(start)}"] if start else [])) or None
         tried.append(hz)
-        hits = run(index, query, layers, where, want)
+        if vector is not None:
+            hits = fold(index.vector(slug, vector, where, int(want * 1.5) + 8), set())
+        else:
+            hits = run(index, query, layers, where, want)
         chosen = hz
         if fixed or len(hits) >= min(10, limit):
             break
@@ -130,5 +154,6 @@ def search(relic, index, query, since=None, until=None, horizon=None, repo=None,
                     "locator": {"month": r["month"], "stream": r["layer"], "key": r["key"], "chunk": r["chunk"]}})
     nxt = base64.urlsafe_b64encode(json.dumps({"o": off + limit, "q": sig, "h": chosen}).encode()).decode().rstrip("=") if more else None
     months = sorted({h["month"] for h in hits if h.get("month")})
-    return {"hits": out, "next_cursor": nxt, "horizon": chosen, "horizons_tried": tried, "widened": len(tried) > 1,
+    extra = {"semantic": True, "model": slug} if vector is not None else {}
+    return {**extra, "hits": out, "next_cursor": nxt, "horizon": chosen, "horizons_tried": tried, "widened": len(tried) > 1,
             "searched_weeks": months, "searched_months": months}
