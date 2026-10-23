@@ -195,6 +195,11 @@ def _main(argv=None):
     elif cmd == "mcp":
         from .shim import serve as shim
         shim(URL)
+    elif cmd == "import" and rest[:1] == ["relic3-links"]:
+        import duckdb
+        from . import importer
+        out = os.path.expanduser(_opt(rest, "--out", "~/.relic-import/relic3-links.parquet"))
+        importer.relic3_links(duckdb.connect(), os.path.expanduser(_opt(rest, "--index", "~/.relic3-hub/index")), out)
     elif cmd == "import" and rest[:1] in (["relic3"], ["jsonl-truth"]):
         import duckdb, subprocess as sp
         from . import importer

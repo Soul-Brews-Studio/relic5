@@ -147,3 +147,23 @@ def convert_truth(con, truth_dir, out_dir, known=None, log=print):
     n_s = con.execute("SELECT count(DISTINCT sid) FROM imp").fetchone()[0]
     log(f"import jsonl-truth: {sum(rows.values()):,} rows, {n_s:,} sessions, {len(rows)} months -> {out_dir} ({time.time() - t:.0f}s)")
     return rows
+
+
+def relic3_links(con, index_dir, out_path, log=print):
+    """The resolver's map: every relic3 uid (events and tools) -> session, ts (relic5's form), role, layer, and the msgkey
+    the row would have in relic5 (relic-extract's MSGKEY over the converted row; equal for ~91% of prose, measured on
+    2026W38). relic_show looks an old relic3:// link or 40-hex uid up here instead of refusing it."""
+    run, _, files = live_files(index_dir)
+    t = time.time()
+    con.execute(f"""COPY (
+        SELECT uid, session_uuid AS sid, {TS} AS ts, role, 'prose' AS layer,
+               md5(to_json(['text', role, {TS}, text])) AS msgkey
+          FROM read_parquet({_lst(files['events'])}, union_by_name = true) WHERE ts IS NOT NULL
+        UNION ALL
+        SELECT uid, session_uuid, {TS}, role, 'tools', NULL
+          FROM read_parquet({_lst(files['tools'])}, union_by_name = true) WHERE ts IS NOT NULL
+    ) TO '{out_path}.tmp' (FORMAT parquet, COMPRESSION zstd)""")
+    os.replace(out_path + ".tmp", out_path)
+    n = con.execute(f"SELECT count(*) FROM '{out_path}'").fetchone()[0]
+    log(f"relic3 links: {n:,} uids from run {run} -> {out_path} ({os.path.getsize(out_path) / 1e6:.0f} MB, {time.time() - t:.0f}s)")
+    return n

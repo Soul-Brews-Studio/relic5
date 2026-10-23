@@ -200,10 +200,39 @@ class Relic5:
                 "locator": {"month": r["month"], "stream": r["layer"], "key": r["key"], "chunk": r["chunk"]}}
 
     # ---- show ----
+    def _relic3(self, ident):
+        """An old relic3:// link or 40-hex uid -> (msgkey, how) through resolve/relic3.parquet, or None."""
+        m = re.search(r"([0-9a-f]{40})$", ident)
+        p = os.path.join(self.parts.root, "resolve", "relic3.parquet")
+        if not m or not os.path.exists(p):
+            return None
+        rows = self._rows(f"SELECT sid, ts, role, layer, msgkey FROM read_parquet('{p}') WHERE uid = ?", [m.group(1)])
+        if not rows:
+            return None
+        r = rows[0]
+        if r["msgkey"]:
+            for s in ("text", "vault"):
+                src = self.parts.source(s)
+                if src and self._rows(f"SELECT 1 FROM {src} WHERE msgkey = ? LIMIT 1", [r["msgkey"]]):
+                    return r["msgkey"], "relic3 uid -> msgkey"
+        stream = "tools" if r["layer"] == "tools" else "text"
+        src = self.parts.source(stream)
+        if src and r["sid"]:
+            hit = self._rows(f"""SELECT msgkey FROM {src} WHERE sid = ? AND ts = ? ORDER BY (role = ?) DESC, chunk LIMIT 1""",
+                             [r["sid"], r["ts"], r["role"] if stream == "text" else ""])
+            if hit:
+                return hit[0]["msgkey"], "relic3 uid -> (session, ts)"
+        return None
+
     def _parse_id(self, ident):
         ident = ident.strip()
         if ident.startswith("relic3://") or re.fullmatch(r"[0-9a-f]{40}", ident):
-            raise UsageError("a relic3 id: relic5 keys messages by msgkey - search relic5 again for this message")
+            found = self._relic3(ident)
+            if found:
+                self._resolved = found[1]
+                return None, found[0], 0
+            raise UsageError("a relic3 id that relic5 cannot place (not in resolve/relic3.parquet, or its row is not on the hub)"
+                             " - search relic5 again for this message")
         month = None
         m = re.fullmatch(r"relic5://(\d{4}-\d{2}|undated)/([0-9a-f]{32})(?::(\d+))?", ident)
         if m:
@@ -243,6 +272,9 @@ class Relic5:
         before_rows, after_rows = self._neighbours(target, before, after)
         clean = lambda r: {k: v for k, v in r.items() if k not in ("machine",)} | {"uid": uid(r), "link": f"relic5://{r['month']}/{uid(r)}"}
         notes = []
+        if getattr(self, "_resolved", None):
+            notes.append(f"resolved an old relic3 id: {self._resolved}")
+            self._resolved = None
         if target.get("type") == "relic3-merged":
             notes.append("imported from relic3: this assistant row may carry its thinking inline (relic3 stored them as one row)")
         return {"link": f"relic5://{target['month']}/{uid(target)}", "target": clean(target), "notes": notes,
