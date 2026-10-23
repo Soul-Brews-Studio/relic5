@@ -215,6 +215,14 @@ class Relic5:
                 src = self.parts.source(s)
                 if src and self._rows(f"SELECT 1 FROM {src} WHERE msgkey = ? LIMIT 1", [r["msgkey"]]):
                     return r["msgkey"], "relic3 uid -> msgkey"
+        if r["role"] == "note" and r["sid"] and "/ψ/" in r["sid"]:
+            # relic3 keyed a ψ note by its absolute path; relic5's vault rows carry the path inside the ψ vault
+            src = self.parts.source("vault")
+            rel = r["sid"].split("/ψ/", 1)[1]
+            hit = self._rows(f"""SELECT msgkey FROM {src} WHERE path = ? ORDER BY (vault IS NOT NULL AND ? LIKE '%' || vault || '%') DESC, chunk
+                                 LIMIT 1""", [rel, r["sid"]]) if src else []
+            if hit:
+                return hit[0]["msgkey"], f"relic3 note -> ψ note {rel}"
         stream = "tools" if r["layer"] == "tools" else "text"
         src = self.parts.source(stream)
         if src and r["sid"]:
