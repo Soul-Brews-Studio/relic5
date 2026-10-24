@@ -60,6 +60,10 @@ def test_indexed_searched_shown_counted(root, monkeypatch):
     shown = r.show(hits[0]["link"])
     assert shown["layer"] == "memory" and "tailscale" in shown["target"]["text"] and shown["before"] == []
     assert status(root)["memory"] == {"feedback": 1}
+    lst = memory.listing(root)
+    assert lst["types"] == {"feedback": 1} and lst["projects"] == {"laris-co-neo-oracle": 1}
+    n = lst["notes"][0]
+    assert n["title"] == "tailscale-only-vpn" and n["description"].startswith("tailscale is the only VPN") and n["link"] == hits[0]["link"]
     put(root, "m5", "project_x.md", NOTE.replace("type: feedback", "type: project"))
     assert fts.build(root, duckdb.connect(), log=lambda s: None) == ["memory_history"]
 

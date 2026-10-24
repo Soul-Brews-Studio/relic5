@@ -8,7 +8,7 @@ import { Search } from "../components/Icons";
 import { usePoll } from "../api";
 import type { Queries } from "../types";
 
-export interface SearchState { q: string; horizon: string; with: string; repo: string }
+export interface SearchState { q: string; horizon: string; with: string; repo: string; role: string }
 
 function HitRow({ h, q, active, onOpen }: { h: Hit; q: string; active: boolean; onOpen: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -37,6 +37,28 @@ function Context({ r, q }: { r: ShowResult; q: string }) {
     </div>
   );
   return <>{r.before.map(m => one(m))}{one(r.target, true)}{r.after.map(m => one(m))}</>;
+}
+
+/** Human / assistant as two toggles, both on by default; at least one stays on. Both on = no role filter. */
+export function WhoPick({ role, onChange }: { role: string; onChange: (role: string) => void }) {
+  const on = { user: role !== "assistant", assistant: role !== "user" };
+  const flip = (k: "user" | "assistant") => {
+    const next = { ...on, [k]: !on[k] };
+    if (!next.user && !next.assistant) return;
+    onChange(next.user && next.assistant ? "" : next.user ? "user" : "assistant");
+  };
+  return (
+    <span role="group" aria-label="Who" className="inline-flex gap-1.5">
+      {(["user", "assistant"] as const).map(k => (
+        <button key={k} type="button" aria-pressed={on[k]} onClick={() => flip(k)}
+          className={cx("flex min-h-9 items-center gap-1.5 rounded-full border px-3.5 text-[12px] font-semibold",
+            on[k] ? "border-accent-dim bg-accent-wash text-text" : "border-line text-faint line-through hover:text-muted")}>
+          <span className={cx("size-2 rounded-full", k === "user" ? "bg-user" : "bg-assistant", !on[k] && "opacity-30")} />
+          {k === "user" ? "human" : "assistant"}
+        </button>
+      ))}
+    </span>
+  );
 }
 
 /** Before the first search: what this box reaches, and the questions people actually asked (GET /api/queries). */
@@ -73,13 +95,14 @@ export function SearchView({ st, setSt, machine, focusKey }:
   const input = useRef<HTMLInputElement>(null);
 
   useEffect(() => { input.current?.focus(); }, [focusKey]);
-  useEffect(() => { setDraft(st); if (st.q) run(st); }, [st.q, st.horizon, st.with, st.repo]);   // eslint-disable-line
+  useEffect(() => { setDraft(st); if (st.q) run(st); }, [st.q, st.horizon, st.with, st.repo, st.role]);   // eslint-disable-line
 
   async function run(s: SearchState) {
     const p = new URLSearchParams({ q: s.q, limit: "40" });
     if (s.horizon) p.set("horizon", s.horizon);
     if (s.with) p.set("with", s.with);
     if (s.repo) p.set("repo", s.repo);
+    if (s.role) p.set("role", s.role);
     setBusy(true); setErr(null);
     const t = performance.now();
     try { setRes(await get<SearchResult>("/api/search?" + p)); setActive(-1); }
@@ -125,6 +148,8 @@ export function SearchView({ st, setSt, machine, focusKey }:
           <span className="flex items-center gap-2.5">What
             <Seg label="Layers" value={draft.with} onChange={v => go({ ...draft, with: v })}
               options={[{ value: "", label: "talk" }, { value: "tools", label: "+ tools" }, { value: "thinking", label: "+ thinking" }, { value: "memory", label: "memory notes" }, { value: "all", label: "everything" }]} /></span>
+          {draft.with !== "memory" && <span className="flex items-center gap-2.5">Who
+            <WhoPick role={draft.role} onChange={role => go({ ...draft, role })} /></span>}
           <span className="flex items-center gap-2.5">Repo
             <input aria-label="Repo" className={inputCls + " w-44 font-mono"} placeholder="any" value={draft.repo}
               onChange={e => setDraft({ ...draft, repo: e.target.value })} onBlur={() => draft.repo !== st.repo && go(draft)} /></span>
