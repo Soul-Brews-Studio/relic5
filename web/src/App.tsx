@@ -83,6 +83,11 @@ export function App() {
           )}
         </div>
         <span className="mt-3 hidden gap-1 text-[12px] text-faint lg:flex"><Kbd>/</Kbd> search · <Kbd>j</Kbd> <Kbd>k</Kbd> move · <Kbd>↵</Kbd> open · <Kbd>esc</Kbd> close</span>
+        {s?.copy && (
+          <p className="m-0 mt-4 rounded-xl border border-line bg-panel px-4 py-2.5 text-[13px] text-soft">
+            A copy of {s.copy.of}'s hub, as of {s.copy.at} (snapshot {s.copy.snapshot}). Search works; nothing new arrives here, so push, backup and seal checks are off.
+          </p>
+        )}
         {(status.error || (s?.warnings.length ?? 0) > 0) && (
           <div className="mt-4 flex flex-col gap-1.5">
             {status.error && <p className="m-0 rounded-xl border border-danger bg-danger-wash px-4 py-2.5 text-[13px] text-danger">last poll failed: {status.error}</p>}

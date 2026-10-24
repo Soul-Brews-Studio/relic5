@@ -23,7 +23,8 @@ interface Check { key: string; title: string; level: Level; text: string; comman
 
 function checks(s: Status, evs: JobEvent[]): Check[] {
   const out: Check[] = [];
-  for (const m of Object.keys({ ...s.machines, ...s.versions }).filter(m => !m.endsWith("-import")).sort()) {
+  // a copy (COPY.json) gets no pushes, backups or seals: those checks belong to the live hub, not to it
+  for (const m of s.copy ? [] : Object.keys({ ...s.machines, ...s.versions }).filter(m => !m.endsWith("-import")).sort()) {
     const f = s.freshness.machines[m] ?? {}, c = syncChip(f.sync), age = f.push_age_s;
     const level: Level = c.tone === "bad" ? "failed" : age == null ? "unknown" : age > 1800 ? "warning" : c.tone === "ok" ? "ok" : "unknown";
     out.push({ key: "m-" + m, title: m, level, icon: Machine, big: age == null ? "unknown" : secs(age),
@@ -41,11 +42,11 @@ function checks(s: Status, evs: JobEvent[]): Check[] {
     text: pending ? `${num(pending)} messages wait to be embedded; semantic search misses them until then.` : "Every message long enough to embed has a vector.",
     command: pending ? "relic5 embed" : undefined });
   const b = s.backup, stale = !b?.at || (b.age_s ?? 0) > 36 * 3600;
-  out.push({ key: "backup", title: "Backup", icon: Shield, level: !b?.at ? "failed" : stale ? "warning" : "ok", big: b?.at ? secs(b.age_s) : "none",
+  if (!s.copy) out.push({ key: "backup", title: "Backup", icon: Shield, level: !b?.at ? "failed" : stale ? "warning" : "ok", big: b?.at ? secs(b.age_s) : "none",
     text: b?.at ? `Snapshot of ${bytes(b.bytes)} on ${b.host}, restore-tested; the next one runs at 03:30.` : "No snapshot of the hub exists yet.",
     command: stale ? "bin/relic5-backup && bin/relic5-restore-test" : undefined });
   const d = s.store.disk.free_pct;
-  out.push({ key: "disk", title: "Disk on white", icon: Disk, level: d < 10 ? "failed" : d < 20 ? "warning" : "ok", big: `${d}%`,
+  out.push({ key: "disk", title: s.copy ? "Disk on this machine" : "Disk on white", icon: Disk, level: d < 10 ? "failed" : d < 20 ? "warning" : "ok", big: `${d}%`,
     text: `${bytes(s.store.disk.free)} free of ${bytes(s.store.disk.total)}; relic5 uses ${bytes(s.store.total)} of it.`,
     command: d < 20 ? "relic5 gc" : undefined });
   const sv = s.seals?.verify, sealedN = Object.values(s.seals?.machines ?? {}).reduce((a, x) => a + x.sealed, 0);
@@ -122,12 +123,13 @@ export function GlancePage({ s, error, at, theme, setTheme }:
 
   const list = checks(s, log.data ?? []).sort((a, b) => rank[a.level] - rank[b.level]);
   const bad = list.filter(c => c.level === "failed" || c.level === "warning");
-  const level: Level = bad.some(c => c.level === "failed") ? "failed" : bad.length || s.warnings.length ? "warning" : "ok";
+  const level: Level = s.copy ? "unknown" : bad.some(c => c.level === "failed") ? "failed" : bad.length || s.warnings.length ? "warning" : "ok";
   const text = s.rows.text ?? 0, indexed = s.watermarks.index.rows ?? 0, vectors = sum(s.watermarks.vectors.tables);
   const months = s.months.list.filter(m => m.rows.text > 0);
   const machines = Object.keys({ ...s.machines, ...s.versions }).sort((a, b) => (s.machines[b]?.text?.rows ?? 0) - (s.machines[a]?.text?.rows ?? 0));
   const machinesOk = list.filter(c => c.key.startsWith("m-") && c.level === "ok").length, machinesAll = list.filter(c => c.key.startsWith("m-")).length;
-  const verdict = level === "ok"
+  const verdict = s.copy ? `A copy of ${s.copy.of}'s hub, as of ${bkk(s.copy.at)}. Search works; nothing new arrives here.`
+    : level === "ok"
     ? `All in. ${machinesOk} of ${machinesAll} machines synced, searchable to ${secs(s.freshness.fts?.age_s)} ago, backed up ${secs(s.backup?.age_s)} ago.`
     : `${bad.length + s.warnings.length} ${bad.length + s.warnings.length === 1 ? "thing needs" : "things need"} you: ${bad.map(c => c.title).join(", ") || "see the hub's warnings"}.`;
 
@@ -138,12 +140,12 @@ export function GlancePage({ s, error, at, theme, setTheme }:
         <section className="flex items-start gap-5">
           <Badge level={level} size="lg" />
           <div className="min-w-0">
-            <h1 className={cx("m-0 max-w-[24ch] text-[clamp(28px,4.4vw,52px)] leading-[1.08] font-bold tracking-[-0.025em] text-balance", level === "ok" ? "text-text" : levelText(level))}>{verdict}</h1>
+            <h1 className={cx("m-0 max-w-[24ch] text-[clamp(28px,4.4vw,52px)] leading-[1.08] font-bold tracking-[-0.025em] text-balance", level === "ok" || s.copy ? "text-text" : levelText(level))}>{verdict}</h1>
             <p className="m-0 mt-3 text-[15px] text-muted">{levelWord(level)} · {sessions.data ? `${num(sessions.data.events)} transcript events in ${num(sessions.data.total)} sessions` : `${num(text)} messages`} from {machines.length} sources · {s.months.list.filter(m => m.sealed && m.rows.text > 0).length} sealed months, {s.months.open ?? "no"} open</p>
           </div>
         </section>
 
-        {(bad.length > 0 || s.warnings.length > 0) && (
+        {!s.copy && (bad.length > 0 || s.warnings.length > 0) && (
           <div className="mt-8 grid gap-4 md:grid-cols-2">
             {bad.map(c => <HealthCard key={c.key} title={c.title} level={c.level} command={c.command} big={c.big} icon={c.icon}>{c.text}</HealthCard>)}
             {s.warnings.map(w => <HealthCard key={w} title="The hub warns" level="warning">{w}</HealthCard>)}

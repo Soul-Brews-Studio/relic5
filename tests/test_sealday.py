@@ -130,3 +130,23 @@ def test_month_recap_route_and_flag(hub):
     months_json(hub, "mba", [{"month": "2026-09", "sealed": False}])
     SD.run(hub)
     assert {m["month"]: m["recap"] for m in SD.summary(hub)}["2026-09"] is True
+
+
+def test_overdue_months_for_one_reason_are_one_line(hub):
+    from relic5 import sealday as SD
+    states = [{"month": m, "state": "sealing", "waiting": [f"mba: has not sealed {m}"], "problems": [], "fingerprint": None,
+               "reconciled_at": None, "amendments": 0, "recap": False} for m in ("2026-07", "2026-08", "2026-09")]
+    late = SD.overdue(states, datetime(2026, 10, 20, tzinfo=timezone.utc))
+    assert late == ["seal day 3 months (2026-07 .. 2026-09): still sealing 3+ days after it ended: mba: has not sealed the month"]
+
+
+def test_a_copy_turns_the_live_checks_off(hub):
+    from relic5.status import status
+    months_json(hub, "mba", [{"month": "2026-09", "sealed": False}])
+    sealday.run(hub)
+    live = status(hub, now=datetime(2026, 10, 20, tzinfo=timezone.utc))["warnings"]
+    assert any(w.startswith("seal day") for w in live) and any(w.startswith("no backup yet") for w in live)
+    json.dump({"of": "white", "snapshot": "20261024-014647", "at": "2026-10-24T01:46:47Z"}, open(os.path.join(hub, "COPY.json"), "w"))
+    s = status(hub, now=datetime(2026, 10, 20, tzinfo=timezone.utc))
+    assert s["copy"]["of"] == "white"
+    assert not [w for w in s["warnings"] if w.startswith(("seal day", "no backup")) or "last push" in w]

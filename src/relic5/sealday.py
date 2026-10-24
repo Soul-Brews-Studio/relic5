@@ -242,15 +242,21 @@ def recap_path(root: str, month: str) -> str:
 
 
 def overdue(states: list[MonthState], now: datetime | None = None) -> list[str]:
-    """Warnings: a closed month still sealing or blocked GRACE_DAYS after it ended (Bangkok)."""
+    """Warnings: closed months still sealing or blocked GRACE_DAYS after they ended (Bangkok). Months stuck for the
+    same reason are one line ("13 months still sealing (2025-09 .. 2026-09): m5, mba have not sealed them"), so a
+    machine that has not sealed anything yet does not bury every other warning."""
     now = now or datetime.now(timezone.utc)
-    out = []
+    groups: dict[tuple[str, str], list[str]] = {}
     for s in states:
         if s["state"] not in ("sealing", "blocked"):
             continue
         y, mo = int(s["month"][:4]), int(s["month"][5:7])
         end = datetime(y + mo // 12, mo % 12 + 1, 1, tzinfo=BKK)
         if now - end > timedelta(days=GRACE_DAYS):
-            why = (s["problems"] or s["waiting"])[:2]
-            out.append(f"seal day {s['month']}: still {s['state']} {GRACE_DAYS}+ days after it ended: " + "; ".join(why))
+            why = "; ".join(w.replace(s["month"], "the month") for w in (s["problems"] or s["waiting"])[:3])
+            groups.setdefault((s["state"], why), []).append(s["month"])
+    out = []
+    for (state, why), ms in groups.items():
+        span = ms[0] if len(ms) == 1 else f"{len(ms)} months ({ms[0]} .. {ms[-1]})"
+        out.append(f"seal day {span}: still {state} {GRACE_DAYS}+ days after it ended: {why}")
     return out

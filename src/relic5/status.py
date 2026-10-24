@@ -6,7 +6,7 @@ counts so a relic3 consumer that reads weeks.total still gets a number. Watermar
   machines  per machine and stream: the newest ts it pushed (its watermark: every row at or before it is here)
   vectors   nothing embedded yet (embed milestone): pending = every folded text row
 """
-import os, time
+import json, os, time
 from datetime import datetime as _datetime
 
 from . import __version__
@@ -29,6 +29,17 @@ def last_backup(evs: list[JobEvent], now: _datetime | None = None) -> Json:
     except ValueError:
         age = None
     return {"at": b["at"], "bytes": b.get("done"), "message": b.get("message"), "age_s": age, "host": b.get("host")}
+
+
+def copy_of(root: str) -> Json | None:
+    """A hub restored from a backup snapshot to look at locally (COPY.json, written when it was copied: of, snapshot,
+    at). It is not live: nothing pushes to it, so freshness, backup and seal-day checks are off and the UI says so."""
+    p = os.path.join(root, "COPY.json")
+    try:
+        c: Json = json.load(open(p))
+        return c
+    except (OSError, ValueError):
+        return None
 
 
 def status(root: str, now: _datetime | None = None) -> Json:
@@ -92,9 +103,13 @@ def status(root: str, now: _datetime | None = None) -> Json:
         warnings.append(f"seal: {prob}")
     from . import sealday as SD
     seal_days = SD.summary(p.root)
-    warnings += SD.overdue(seal_days, now)
+    copy = copy_of(p.root)
+    if not copy:   # a copy gets no pushes, backups or seals of its own: those checks belong to the live hub
+        warnings += SD.overdue(seal_days, now)
     backup = last_backup(evs, now)
-    if backup["at"] is None:
+    if copy:
+        pass
+    elif backup["at"] is None:
         warnings.append("no backup yet (bin/relic5-backup on m5 pulls one; see docs/RESTORE.md)")
     elif backup["age_s"] is not None and backup["age_s"] > BACKUP_STALE_S:
         warnings.append(f"last backup {backup['age_s'] // 3600} h ago, at {backup['at']} (should run nightly)")
@@ -119,7 +134,7 @@ def status(root: str, now: _datetime | None = None) -> Json:
         fresh["machines"][m] = {"newest_ts": x.get("newest_ts"), "pushed_at": pushed, "lag_s": lag(x.get("newest_ts")),
                                 "push_age_s": lag(pushed.replace("+0700", "+07:00").replace("+0000", "+00:00")) if pushed else None}
         age = fresh["machines"][m]["push_age_s"]
-        if age is not None and age > 1800 and not m.endswith("-import"):
+        if age is not None and age > 1800 and not m.endswith("-import") and not copy:
             warnings.append(f"machine {m}: last push {age // 60} min ago (relic-chain should push every 10 min)")
     for m in p.machines():   # the chain's own verdict (relic-chain SYNC OK / MISMATCH), as last pushed
         sp_ = os.path.join(p.dir, m, "_sync.json")
@@ -135,7 +150,7 @@ def status(root: str, now: _datetime | None = None) -> Json:
     fresh["fts"]["age_s"] = round(t_now - os.path.getmtime(ip)) if os.path.exists(ip) else None
     from . import selfknow
     store, res = selfknow.store(p.root), selfknow.resources()
-    warnings += selfknow.warnings(store, res)
+    warnings += [w.replace("on the hub", "on this machine (a copy of the hub)") if copy else w for w in selfknow.warnings(store, res)]
     q = selfknow.queries(p.root)
     cur = this_month(now)
     sealed = [m for m in months if m != "undated" and m < cur]
@@ -157,6 +172,7 @@ def status(root: str, now: _datetime | None = None) -> Json:
                  "tools": rows["tools"], "sessions": None, "files": sum(len(p.files(s)) for s in MONTH_STREAMS)},
         "jobs": {"running": running, "recent": evs[:10], "last_error": last_error},
         "backup": backup,
+        "copy": copy,
         "memory": __import__("relic5.memory", fromlist=["counts"]).counts(p.root),
         "seals": seal_info,
         "seal_days": seal_days,
