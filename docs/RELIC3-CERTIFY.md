@@ -41,7 +41,7 @@ The 173,408 rows fall in 371 sessions:
 keeps a tool's result in its call's row, so relic3's 2,767,629 separate result rows match only through their call.
 
 **The 4 Codex sessions held nowhere else** (no raw file on any machine): 01a0525c, 01a093df, 01a0ad99, 01a0d5fd. Their
-4,676 unmatched rows (177 prose and 4,499 tool rows) were imported as the machine `relic3-codex` (`~/.relic-import/relic3-codex`, through
+4,676 unmatched rows (177 prose and 4,499 tool rows) were imported as the machine `relic3-codex-import` (`~/.relic-import/relic3-codex`, through
 relic-extract, pushed 2026-10-24 19:59). The hub's index grew by exactly those: tools_history +1,547 messages, prose_history +83.
 
 **Notes.** 43,916 relic3 note paths are not placed in relic5's vault:
