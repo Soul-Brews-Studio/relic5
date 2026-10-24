@@ -27,7 +27,7 @@ SEARCH_PROPS = {
               "every extra word widens the result. BM25 finds TOPICS, not facts: for 'did I already do X' search the most unique "
               "literal string (an id, a filename, an error), not topic words (relic3's measured advice). With semantic: meaning."},
     "sort": {**STR, "enum": ["relevant", "newest"], "description": "relevant (default) | newest: the most relevant 600, newest first"},
-    "horizon": {**STR, "description": "7d | 15d | 1m | 3m | archive (default archive: every month); exclusive with since/until"},
+    "horizon": {**STR, "description": "7d | 15d | 1m | 3m | archive: search only that window. Default (none): widen 7d -> 15d -> 1m -> 3m -> archive until 10 hits, then add the best older hits after them (older_hits, note), so every month is searched; exclusive with since/until"},
     "since": {**STR, "description": "YYYY-MM-DD (from 00:00:00Z of that UTC day), an ISO time, or Nd/Nh/Nm before now (1m = one minute)"},
     "until": {**STR, "description": "YYYY-MM-DD (through 23:59:59Z of that UTC day), an ISO time, or Nd/Nh/Nm before now"},
     "repo": STR, "session": {**STR, "description": "session uuid prefix"}, "role": STR, "tier": STR,

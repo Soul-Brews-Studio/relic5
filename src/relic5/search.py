@@ -2,7 +2,8 @@
 fold.ts @9f0bdb5.
 
   widening   with no horizon / since / until / session, try 7d, 15d, 1m, 3m, archive and answer from the narrowest
-             window holding at least min(10, limit) folded hits (query.ts:298-325); the cursor pins that horizon
+             window holding at least min(10, limit) folded hits (query.ts:298-325); the cursor pins that horizon.
+             Then the best hits older than that window follow (issue #19): recent first, never only recent
   fold       a hit whose (ts, role, text with whitespace collapsed) was already seen is dropped, the first kept
              (fold.ts:37-58), and so is a second chunk text (same key) - before counting, widening and paging
   order      prose before tools / thinking (query.ts:317-319); within a layer BM25 score desc, then newest, then uid
@@ -200,6 +201,22 @@ def search(relic: "Relic5", index: "Index", query: str, since: str | None = None
         chosen = hz
         if fixed or len(hits) >= min(10, limit):
             break
+    # Widening stops at the first window with min(10, limit) hits, and a hit count is not relevance: "trinity" found 10
+    # in October and never reached the August and September sessions Nat meant (issue #19). So when no window was asked
+    # for and widening stopped short of archive, everything older is searched too and its best hits follow the window's.
+    # The page cursor pins `chosen`; this runs again on every page, so paging is stable.
+    older = 0
+    note = None
+    if vector is None and not horizon and not (lo or hi or session) and chosen not in (None, "archive", "window"):
+        cut = window(horizon=chosen)[0]
+        if cut:
+            old_where = " AND ".join(conds + [f"ts < {q_(cut)}"])
+            seen: set[tuple[object, ...]] = {(r["ts"], r["role"], " ".join((r["text"] or "").split())) for r in hits} | {("key", r["key"]) for r in hits}
+            more_hits = fold(run(index, query, layers, old_where, want), seen)
+            older = len(more_hits)
+            hits = hits + more_hits
+            note = (f"{len(hits) - older} hits in the last {chosen}, then the best {older} older ones" if older
+                    else f"nothing older than {chosen} matches")
     if sort == "newest":   # relic3: the most relevant 600, newest first (query.ts:106-107)
         if len(hits) < min(600, off + limit + 1) and vector is None:
             hits = run(index, query, layers, where, 600)
@@ -221,4 +238,4 @@ def search(relic: "Relic5", index: "Index", query: str, since: str | None = None
     months = sorted({h["month"] for h in hits if h.get("month")})
     extra: Json = {"semantic": True, "model": slug, "hybrid": bool(hybrid)} if vector is not None else {}
     return {**extra, "hits": out, "next_cursor": nxt, "horizon": chosen, "horizons_tried": tried, "widened": len(tried) > 1,
-            "searched_weeks": months, "searched_months": months}
+            "searched_weeks": months, "searched_months": months, "older_hits": older, "note": note}
