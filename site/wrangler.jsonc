@@ -1,0 +1,10 @@
+// relic5's public page as a static-assets Worker on relic5.buildwithoracle.com, the same shape as relic-scan's
+// (relic4-scan site/wrangler.jsonc). Deploy from this folder, on m5 (its wrangler login): npx -y wrangler@4 deploy
+// custom_domain: Cloudflare makes the DNS record and the certificate for the name in the buildwithoracle.com zone.
+{
+  "name": "relic5-site",
+  "compatibility_date": "2026-10-01",
+  "account_id": "a5eabdc2b11aae9bd5af46bd6a88179e",
+  "assets": { "directory": "./public", "html_handling": "auto-trailing-slash" },
+  "routes": [{ "pattern": "relic5.buildwithoracle.com", "custom_domain": true }]
+}
