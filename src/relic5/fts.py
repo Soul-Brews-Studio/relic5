@@ -220,20 +220,27 @@ class Index:
     def built(self) -> bool:
         return bool(self._load())
 
-    def vector(self, model: str, vector: Sequence[float], filt: "VecFilter", limit: int) -> list[Json]:
-        """Nearest prose rows to a unit query vector: exact, in memory (vec.Matrix), best first; _score = cosine."""
+    def matrices(self, model: str) -> "list[Matrix]":
+        """The in-memory vector matrices (open, history) of one model, made on first use per generation."""
         from . import vec as V
         tabs = self._load()
         if getattr(self, "_mx_seen", None) != self.seen:
             self._mx, self._mx_seen = {}, self.seen
-        out: list[Json] = []
+        out: list[V.Matrix] = []
         for part in ("open", "history"):
             name = f"vec_{V.slug(model)}_{part}"
             if name not in tabs:
                 continue
             if name not in self._mx:
                 self._mx[name] = V.Matrix(tabs[name])
-            out += self._mx[name].search(vector, filt, limit)
+            out.append(self._mx[name])
+        return out
+
+    def vector(self, model: str, vector: Sequence[float], filt: "VecFilter", limit: int) -> list[Json]:
+        """Nearest prose rows to a unit query vector: exact, in memory (vec.Matrix), best first; _score = cosine."""
+        out: list[Json] = []
+        for mx in self.matrices(model):
+            out += mx.search(vector, filt, limit)
         out.sort(key=lambda r: -r["_score"])
         return out[:limit]
 

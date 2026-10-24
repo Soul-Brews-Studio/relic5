@@ -1,15 +1,16 @@
 // The hub's shell, after the old ARRA Oracle Studio: a sticky top header on desktop, a bottom tab bar on a phone, and a Cmd/Ctrl-K palette to jump or search from anywhere.
 import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
 import { cx } from "./ui";
-import { Asked, Close, Columns, Menu, Rows, Disk, Home, Jobs, Live, Mark, More, Moon, Note, Plug, Search, Session, Sun } from "./Icons";
+import { Asked, Close, Globe, Columns, Menu, Rows, Disk, Home, Jobs, Live, Mark, More, Moon, Note, Plug, Search, Session, Sun } from "./Icons";
 
-export type View = "home" | "search" | "live" | "memory" | "jobs" | "queries" | "compare" | "store" | "connect";
+export type View = "home" | "search" | "map" | "live" | "memory" | "jobs" | "queries" | "compare" | "store" | "connect";
 export type Theme = "dark" | "paper";
 export type Layout = "top" | "side";
 
 export const VIEWS: { id: View; label: string; icon: ComponentType<{ size?: number }>; phone?: boolean; group: 0 | 1 }[] = [
   { id: "home", label: "Home", icon: Home, phone: true, group: 0 },
   { id: "search", label: "Search", icon: Search, phone: true, group: 0 },
+  { id: "map", label: "Map", icon: Globe, group: 0 },
   { id: "live", label: "Live", icon: Live, phone: true, group: 0 },
   { id: "memory", label: "Knowledge", icon: Note, phone: true, group: 0 },
   { id: "jobs", label: "Jobs", icon: Jobs, phone: true, group: 1 },

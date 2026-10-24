@@ -51,7 +51,7 @@ function NoteCard({ n, q, onOpen }: { n: Note; q: string; onOpen: () => void }) 
         <span className="ml-auto text-faint">{n.machines.join(", ")}</span>
       </span>
       <span className="mt-2 block text-base font-semibold text-text group-hover:text-accent">{highlight(n.title.replace(/[-_]/g, " "), q)}</span>
-      <span className="mt-1 line-clamp-2 block max-w-[78ch] text-sm leading-relaxed text-soft">{highlight(n.description, q)}</span>
+      <span className="mt-1 line-clamp-2 block max-w-[78ch] text-sm leading-relaxed text-soft">{highlight(unq(n.description), q)}</span>
     </button>
   );
 }
@@ -97,7 +97,7 @@ function NotePage({ n, onBack, onPrev, onNext }: { n: Note; onBack: () => void; 
           <span className="text-muted">{bkk(n.ts)} Bangkok · {ago(n.ts)}</span>
         </div>
         <h1 className="m-0 text-xl leading-tight font-extrabold tracking-[-0.01em] text-text">{n.title.replace(/[-_]/g, " ")}</h1>
-        <p className="m-0 mt-3 max-w-[70ch] text-base text-muted">{n.description}</p>
+        <p className="m-0 mt-3 max-w-[70ch] text-base text-muted">{unq(n.description)}</p>
       </header>
       {err ? <State error>{err}</State> : !t ? <Loading label="Reading the note" /> : <Markdown text={stripFrontmatter(body)} />}
       <footer className="mt-12 flex flex-col gap-3 border-t border-line pt-6 text-sm">
@@ -128,6 +128,8 @@ function NotePage({ n, onBack, onPrev, onNext }: { n: Note; onBack: () => void; 
     </article>
   );
 }
+
+const unq = (t: string) => t.replace(/\\"/g, '"');
 
 export function MemoryView() {
   const p = usePoll<Listing>("/api/memory", 60000);
@@ -165,7 +167,7 @@ export function MemoryView() {
           <Toggle pressed={!type} onClick={() => setType("")}>everything <span className="font-mono text-xs text-faint">{num(total)}</span></Toggle>
           {Object.entries(p.data.types).sort((a, b) => b[1] - a[1]).map(([t, n]) => (
             <Toggle key={t} pressed={type === t} onClick={() => { setType(type === t ? "" : t); setShown(PAGE); }}>
-              <span className="size-2 rounded-full" style={{ background: kind(t).color }} />{kind(t).word}s <span className="font-mono text-xs text-faint">{num(n)}</span>
+              <span className="size-2 rounded-full" style={{ background: kind(t).color }} />{t === "user" ? "about Nat" : kind(t).word + "s"} <span className="font-mono text-xs text-faint">{num(n)}</span>
             </Toggle>
           ))}
           <select aria-label="Project" value={project} onChange={e => { setProject(e.target.value); setShown(PAGE); }} className={inputCls + " ml-auto w-full sm:w-72"}>
