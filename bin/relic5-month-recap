@@ -26,18 +26,20 @@ BRIEF = """You are writing the relic5 month recap for {month}. That month is SEA
 checked byte for byte and written down with fingerprint {fp} (reconciled {at}). Its data will never change, so what you \
 write from it stays true.
 
-Use ONLY the relic5 MCP tools: relic_sessions (since/until/repo/limit), relic_search (query with since={month}-01 and \
-until={last}), relic_session, relic_show. Do not read files, do not use other tools, do not guess.
+Use ONLY the relic5 MCP tools: relic_sessions (since/until/repo/limit; by_repo=true gives sessions per repo), \
+relic_search (query with since={month}-01 and until={last}), relic_session, relic_show. Do not read files, do not use \
+other tools, do not guess. Start with relic_sessions since={month}-01 until={last} by_repo=true limit=0: its total and \
+its repos list are the month's numbers and the project ranking.
 
 Write exactly one file: {path}
 
 Structure:
 # {month} in relic5
-> Sealed month, fingerprint `{fp}`, reconciled {at}. {sessions_line}
+> Sealed month, fingerprint `{fp}`, reconciled {at}. <sessions total> top-level sessions (relic_sessions).
 ## The month in five lines
 (the five most important things that happened, each with one relic5:// link)
 ## By project
-(the ~12 projects with the most sessions that month, most first; each a heading and 2-4 bullets: what was built or \
+(the ~12 repos with the most sessions in by_repo, most first, with their count; each a heading and 2-4 bullets: what was built or \
 decided, what broke and how it was fixed; every bullet ends with a relic5:// link to the message that shows it)
 ## Rules and decisions Nat made
 (each one a bullet quoting or closely paraphrasing Nat, with its link)
@@ -60,13 +62,8 @@ def has_recap(month: str) -> bool:
 def brief(month: str, day: dict[str, Any]) -> str:
     y, m = int(month[:4]), int(month[5:7])
     last = f"{month}-{[31, 29 if y % 4 == 0 else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][m - 1]:02d}"
-    try:
-        n = get(f"/api/sessions?limit=0&since={month}-01&until={last}")["total"]
-        sessions_line = f"{n:,} top-level sessions (relic_sessions)."
-    except Exception:
-        sessions_line = ""
     return BRIEF.format(month=month, fp=day["fingerprint"], at=day["reconciled_at"], last=last,
-                        path=os.path.join(OUT, f"{month}.md"), sessions_line=sessions_line)
+                        path=os.path.join(OUT, f"{month}.md"))
 
 
 def recap(month: str, dry: bool, agent: str) -> bool:

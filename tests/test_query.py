@@ -99,6 +99,16 @@ def test_sessions(relic):
     assert relic.sessions(since="2026-10-23")["total"] == 1
 
 
+def test_sessions_by_repo(relic):
+    """Counts per repo for the same window and filters: what a month recap's "By project" needs (2026-10-24)."""
+    r = relic.sessions(by_repo=True, limit=0)
+    assert {x["repo"]: x["sessions"] for x in r["repos"]} == {"-opt-Code-github-com-laris-co-neo-oracle": 1,
+                                                              "-opt-Code-github-com-Soul-Brews-Studio-relic5": 1}
+    assert sum(x["sessions"] for x in r["repos"]) == r["total"]
+    assert [x["repo"] for x in relic.sessions(by_repo=True, since="2026-10-23")["repos"]] == ["-opt-Code-github-com-laris-co-neo-oracle"]
+    assert "repos" not in relic.sessions()
+
+
 def test_session(relic):
     s = relic.session("s1")
     assert s["uuid"] == "s1-aaaa" and [k["uuid"] for k in s["subagents"]] == ["agent-1"]

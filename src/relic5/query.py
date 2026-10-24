@@ -379,7 +379,7 @@ class Relic5:
 
     # ---- sessions ----
     def sessions(self, repo: str | None = None, since: str | None = None, until: str | None = None, limit: int | None = None,
-                 via: str | None = None, chat: str | None = None, from_user: str | None = None) -> Json:
+                 via: str | None = None, chat: str | None = None, from_user: str | None = None, by_repo: bool = False) -> Json:
         meta = self._meta()
         if not meta:
             raise NotFound("no sessions on the hub: push relic-scan's meta/sessions.parquet")
@@ -404,8 +404,13 @@ class Relic5:
                               FROM {meta} s WHERE {w} ORDER BY last_ts DESC NULLS LAST LIMIT ?""", params + [limit or DEFAULT_LIMIT])
         names = self._names({r["sid"] for r in rows})
         rows = [r | {"name": names.get(r["sid"])} for r in rows]
-        return {"total": total, "counted": "top-level sessions only (no parent_sid); subagents fold into children",
-                "events": int(events), "sessions": [self._session_row(r) for r in rows]}
+        out: Json = {"total": total, "counted": "top-level sessions only (no parent_sid); subagents fold into children",
+                     "events": int(events), "sessions": [self._session_row(r) for r in rows]}
+        if by_repo:   # the same window and filters, counted per repo; a session with no repo (Codex) counts by its tenant
+            out["repos"] = self._rows(f"""SELECT coalesce(proj, '(no repo) ' || coalesce(cat, '?')) AS repo, count(*) AS sessions,
+                                          coalesce(sum(n_rows), 0)::BIGINT AS events FROM {meta} WHERE {w}
+                                          GROUP BY 1 ORDER BY sessions DESC, repo LIMIT 200""", params)
+        return out
 
     def _session_row(self, r: Json) -> Json:
         return {"uuid": r["sid"], "name": r.get("name"), "home": r["machine"], "tenant": r["cat"], "source": r["engine"],

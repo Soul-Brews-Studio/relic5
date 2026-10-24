@@ -40,7 +40,7 @@ def args_of(params: QueryParams) -> Json:
     a: Json = {}
     for k0, v in params.multi_items():
         k = "query" if k0 == "q" else k0.replace("-", "_")
-        a[k] = int(v) if k in INT_KEYS and v.isdigit() else (v in ("1", "true")) if k == "semantic" else v
+        a[k] = int(v) if k in INT_KEYS and v.isdigit() else (v in ("1", "true")) if k in ("semantic", "by_repo") else v
     return a
 
 
