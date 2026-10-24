@@ -15,7 +15,12 @@ build:
 # Linux: start the hub (restart: unless-stopped), then wait for the healthcheck
 up: build
     UID=$(id -u) GID=$(id -g) docker compose up -d serve
-    @for i in $(seq 1 30); do s=$(docker inspect -f '{{"{{"}}.State.Health.Status{{"}}"}}' $(docker compose ps -q serve)); [ "$s" = healthy ] && { echo "serve healthy"; exit 0; }; sleep 2; done; echo "serve not healthy" >&2; exit 1
+    @for i in $(seq 1 30); do s=$(docker inspect -f '{{"{{"}}.State.Health.Status{{"}}"}}' $(docker compose ps -q serve)); [ "$s" = healthy ] && { echo "serve healthy"; just prune-old; exit 0; }; sleep 2; done; echo "serve not healthy" >&2; exit 1
+
+# Remove the relic5 images an earlier build left untagged (each `just up` leaves one, ~0.9 GB: 31 had piled up on
+# white by 2026-10-24). Only dangling images whose command is `relic5 serve`; docker refuses one a container still uses.
+prune-old:
+    @n=0; for id in $(docker images -f dangling=true -q); do case "$(docker image inspect -f '{{"{{"}}json .Config.Cmd{{"}}"}}' $id 2>/dev/null)" in *'"relic5","serve"'*) docker rmi $id >/dev/null 2>&1 && n=$((n+1));; esac; done; echo "removed $n old relic5 image(s)"
 
 down:
     docker compose down
