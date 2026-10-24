@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { Status } from "../types";
-import { num, secs } from "../format";
+import { bytes, num, secs } from "../format";
 import { cx } from "./ui";
 
 function Item({ label, children, warn }: { label: string; children: ReactNode; warn?: boolean }) {
@@ -21,6 +21,7 @@ export function StatusBar({ s, error }: { s: Status | null; error: string | null
       <Item label="vectors pending" warn={!!pending}>{num(pending)}</Item>
       <Item label="running" warn={s.jobs.running.length > 0}>{s.jobs.running.map(j => j.verb).join(", ") || "nothing"}</Item>
       <Item label="rows">{num(s.rows.text)} text · {num(s.rows.tools)} tools · {num(s.rows.thinking)} thinking</Item>
+      <Item label="last backup" warn={!s.backup?.at || (s.backup.age_s ?? 0) > 36 * 3600}>{s.backup?.at ? `${secs(s.backup.age_s)} ago · ${bytes(s.backup.bytes)}` : "none yet"}</Item>
       <Item label="warnings" warn={s.warnings.length > 0}>{s.warnings.length || "none"}</Item>
       {error && <p className="m-0 basis-full rounded border-l-2 border-danger bg-danger-wash px-2 py-1.5 text-[11px] text-danger">last poll failed: {error}</p>}
       {s.warnings.map(w => <p key={w} className="m-0 basis-full rounded border-l-2 border-warning bg-raised px-2 py-1.5 text-[11px] text-soft">{w}</p>)}

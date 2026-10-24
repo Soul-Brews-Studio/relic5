@@ -1,0 +1,48 @@
+#!/bin/sh
+# relic5 restore test: rebuild a hub from a backup snapshot in a scratch directory and check that it counts the same
+# rows the hub counted when the snapshot was taken (hub-status.json, saved by bin/relic5-backup).
+#
+#   bin/relic5-restore-test                      # the newest snapshot, ~/relic5-backup/white/latest
+#   bin/relic5-restore-test <snapshot dir>       # a given one
+#   RELIC5_RESTORE_KEEP=1 bin/relic5-restore-test   # leave the scratch hub in place to look at
+#
+# The snapshot is never written: parts and resolve are cloned (APFS clonefile, cp -c: no extra space until written),
+# and `relic5 index` builds the manifests and BM25 tables into the scratch root. Exit 0 = every count matches.
+set -eu
+REPO=$(cd "$(dirname "$0")/.." && pwd)
+RELIC5="${RELIC5_BIN:-$REPO/.venv/bin/relic5}"
+PY="${RELIC5_PY:-$REPO/.venv/bin/python}"
+SNAP=$(cd "${1:-${RELIC5_BACKUP_DIR:-$HOME/relic5-backup/white}/latest}" && pwd -P)
+[ -f "$SNAP/hub-status.json" ] || { echo "$SNAP has no hub-status.json: not a relic5-backup snapshot" >&2; exit 2; }
+SCRATCH=$(mktemp -d "${TMPDIR:-/tmp}/relic5-restore.XXXXXX")
+cleanup() { [ -n "${RELIC5_RESTORE_KEEP:-}" ] && echo "scratch hub kept: $SCRATCH" || rm -rf "$SCRATCH"; }
+trap cleanup EXIT
+
+t0=$(date +%s)
+for d in parts resolve; do
+  [ -d "$SNAP/$d" ] || continue
+  cp -c -R "$SNAP/$d" "$SCRATCH/$d" 2>/dev/null || cp -R "$SNAP/$d" "$SCRATCH/$d"   # clone on APFS, copy elsewhere
+done
+echo "restore test: $SNAP -> $SCRATCH"
+"$RELIC5" index --root "$SCRATCH" >"$SCRATCH/index.log" 2>&1 || { tail -5 "$SCRATCH/index.log" >&2; echo "index failed" >&2; exit 1; }
+"$PY" - "$SCRATCH" "$SNAP/hub-status.json" "$(( $(date +%s) - t0 ))" <<'PY'
+import json, sys
+from relic5.status import status
+scratch, saved, secs = sys.argv[1], json.load(open(sys.argv[2])), sys.argv[3]
+got = status(scratch)
+bad = 0
+print(f"{'what':<34} {'hub (at backup)':>16} {'restored':>12}")
+def check(name, want, have):
+    global bad
+    ok = want == have
+    bad += not ok
+    print(f"{name:<34} {str(want):>16} {str(have):>12}  {'ok' if ok else 'DIFFERS'}")
+for k in ("text", "thinking", "tools"):
+    check(f"rows {k} (folded)", saved["rows"].get(k), got["rows"].get(k))
+for m in sorted(saved.get("machines", {})):
+    for s in ("text", "thinking", "tools"):
+        check(f"parts/{m} {s}", saved["machines"][m].get(s, {}).get("rows"), got["machines"].get(m, {}).get(s, {}).get("rows"))
+check("months", saved["months"]["total"], got["months"]["total"])
+print(f"restore test {'PASSED' if not bad else 'FAILED'}: {bad} differ · rebuilt in {secs}s · BM25 tables {len(got['watermarks']['fts']['rows'])}")
+sys.exit(1 if bad else 0)
+PY

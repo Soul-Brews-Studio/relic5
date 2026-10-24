@@ -75,6 +75,7 @@ export function Rail({ s, machine, setMachine }: { s: Status; machine: string; s
           ["index", ago(w.index.at)], ["BM25", s.freshness.fts ? `${secs(s.freshness.fts.age_s)} old` : "none"],
           ["vectors pending", num(w.vectors.pending)], ["store", bytes(st.total)],
           ["disk free", `${bytes(st.disk.free)} (${st.disk.free_pct}%)`],
+          ["last backup", s.backup?.at ? `${ago(s.backup.at)} · ${bytes(s.backup.bytes)}` : "none yet"],
           ["load", (r.load ?? []).map(x => x.toFixed(2)).join(" / ") + ` · ${r.cpus} cpu`],
         ]} />
       </Section>

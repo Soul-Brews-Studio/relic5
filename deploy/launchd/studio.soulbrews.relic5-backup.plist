@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- m5 (user beta): pull a snapshot of the hub on white every night at 03:30, and run the restore test against it.
+     Install: cp to ~/Library/LaunchAgents/ and `launchctl load -w` it (docs/RESTORE.md). Log: ~/Library/Logs/relic5-backup.log -->
+<plist version="1.0"><dict>
+  <key>Label</key><string>studio.soulbrews.relic5-backup</string>
+  <key>ProgramArguments</key><array>
+    <string>/bin/sh</string><string>-c</string>
+    <string>/opt/Code/github.com/Soul-Brews-Studio/relic5/bin/relic5-backup &amp;&amp; /opt/Code/github.com/Soul-Brews-Studio/relic5/bin/relic5-restore-test</string>
+  </array>
+  <key>EnvironmentVariables</key><dict>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+  <key>StartCalendarInterval</key><dict><key>Hour</key><integer>3</integer><key>Minute</key><integer>30</integer></dict>
+  <key>ProcessType</key><string>Background</string>
+  <key>Nice</key><integer>10</integer>
+  <key>StandardOutPath</key><string>/Users/beta/Library/Logs/relic5-backup.log</string>
+  <key>StandardErrorPath</key><string>/Users/beta/Library/Logs/relic5-backup.log</string>
+</dict></plist>
