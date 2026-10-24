@@ -3,9 +3,8 @@
 > **In relic5** (merged 2026-10-24 from esp32-oracle `lab/pet-studio` @ 97f6280, Nat: "merge all"). It runs on the
 > Mac that holds the pets (Bluetooth goes through OraclePet.app, firmware through ESP-IDF), not on the relic5 hub.
 > The pet's own code stays in esp32-oracle's `lab/`: `pet-sdk`, `jc3248-pet-idf`, `desk-pet-mac`. The server finds
-> that lab through `PET_LAB`, else `$(ghq root)/github.com/Soul-Brews-Studio/esp32-oracle/lab`. Until esp32-oracle
-> PR #28 merges, the lab is on its branch, so set
-> `PET_LAB=$(ghq root)/github.com/Soul-Brews-Studio/esp32-oracle/wt/siamese-pack-esp32-21oct-wed2026/lab`.
+> that lab through `PET_LAB`, else `$(ghq root)/github.com/Soul-Brews-Studio/esp32-oracle/lab` (on esp32-oracle's
+> main since its PR #28, 2026-10-24), so a plain esp32-oracle clone is enough.
 >
 > `just pet-studio` (relic5 root) installs, builds the page and starts the server on http://127.0.0.1:4810.
 > Each oracle's page in the hub (Oracles tab) has a **Pet** prompt: give it to `studio_auto_sprite`, then keep the
