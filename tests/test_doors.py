@@ -2,7 +2,7 @@ from relic5.doors import Doors
 
 OWNER = "nat.wrw@gmail.com"
 NODES = {"100.111.101.21": {"node": "m5.follow-rankine.ts.net", "login": OWNER},
-         "100.84.206.23": {"node": "yd-linux.tail436f93.ts.net", "login": "someone-else@example.com"}}
+         "100.99.9.9": {"node": "shared-node.other-tailnet.ts.net", "login": "someone-else@example.com"}}
 
 
 def doors():
@@ -23,10 +23,10 @@ def test_own_tailnet_node_needs_no_token():
 
 def test_shared_in_node_and_strangers_need_a_token():
     d = doors()
-    assert d.door("100.103.52.67", "100.84.206.23", "white", "") is None             # the clinic's node: another owner
+    assert d.door("100.103.52.67", "100.99.9.9", "white", "") is None             # the clinic's node: another owner
     assert d.door("100.103.52.67", "100.99.1.1", "white", "") is None                # whois knows nothing
     assert d.door("100.103.52.67", "192.168.1.5", "white", "") is None               # not a tailnet address
-    assert d.door("100.103.52.67", "100.84.206.23", "white", "tok") == "token:m5"
+    assert d.door("100.103.52.67", "100.99.9.9", "white", "tok") == "token:m5"
     assert d.door("100.103.52.67", "100.111.101.21", "white", "wrong") is None       # a bad token is refused, not ignored
 
 
