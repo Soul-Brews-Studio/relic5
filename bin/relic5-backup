@@ -1,0 +1,78 @@
+#!/bin/sh
+# relic5 backup: pull the hub's data from white into a dated snapshot on this machine (m5), hardlinked to the
+# previous snapshot, so a day costs only what changed.
+#
+#   bin/relic5-backup              # RELIC5_HUB_SSH=nat@white.follow-rankine.ts.net, into ~/relic5-backup/white
+#   bin/relic5-backup -n           # dry run: say what would move
+#
+# Kept: parts (every machine's pushed history), vectors (hours of embedding to redo), resolve (relic3 links),
+# logs, attic, and the hub's token file. Not kept: index/ (rebuilt from parts by `relic5 index`) and app/ (git).
+# Each run is one JobEvent "backup" in the hub's logs/jobs.jsonl (start, then done with the snapshot's size or error),
+# which relic_status shows as "last backup" and warns about after 36 h. The hub's row counts at backup time are
+# saved beside the data (hub-status.json), for bin/relic5-restore-test to compare against.
+set -u
+HUB="${RELIC5_HUB_SSH:-nat@white.follow-rankine.ts.net}"
+DEST="${RELIC5_BACKUP_DIR:-$HOME/relic5-backup/white}"
+KEEP="${RELIC5_BACKUP_KEEP:-14}"            # newest snapshots kept; older ones are removed after a good run
+PARTS="${RELIC5_BACKUP_PARTS:-parts vectors resolve logs attic}"
+STATUS_URL="${RELIC5_BACKUP_STATUS_URL:-${RELIC5_HUB_URL:-http://white.follow-rankine.ts.net:8795}/api/status}"
+RSYNC=$(command -v /opt/homebrew/bin/rsync || command -v rsync)   # GNU rsync: --link-dest and --stats as below
+DRY=""
+[ "${1:-}" = "-n" ] && DRY="-n"
+SSH="ssh -o BatchMode=yes -o ConnectTimeout=10"
+
+home=$($SSH "$HUB" 'printf %s "$HOME"') || { echo "cannot reach $HUB" >&2; exit 1; }
+mkdir -p "$DEST" && chmod 700 "$DEST"
+NAME=$(date -u +%Y%m%d-%H%M%S)
+SNAP="$DEST/$NAME"
+PREV=$(ls -1d "$DEST"/2*/ 2>/dev/null | sed 's:/$::' | tail -1)
+
+JOB="backup-$(hostname -s)-$NAME-$$"
+jobev() {   # state, extra JSON fields (no leading comma)
+  [ -n "$DRY" ] && return 0
+  line=$(printf '{"job": "%s", "verb": "backup", "state": "%s", "at": "%s", "pid": %s, "host": "%s", "message": "%s"%s}' \
+    "$JOB" "$1" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$$" "$(hostname -s)" "$2" "${3:+, $3}")
+  $SSH "$HUB" "mkdir -p \"\$HOME/relic5/logs\" && printf '%s\\n' '$line' >> \"\$HOME/relic5/logs/jobs.jsonl\"" || true
+}
+
+t0=$(date +%s)
+jobev start "snapshot $NAME -> $(hostname -s):$DEST"
+rc=0
+sent=0
+mkdir -p "$SNAP.partial"
+for p in $PARTS; do
+  $SSH "$HUB" "test -e '$home/relic5/$p'" || continue
+  link=""
+  [ -n "$PREV" ] && [ -d "$PREV/$p" ] && link="--link-dest=$PREV/$p"
+  out=$("$RSYNC" -a $DRY --delete --timeout=300 --stats $link "$HUB:$home/relic5/$p/" "$SNAP.partial/$p/" 2>&1) || { echo "$out" >&2; rc=1; continue; }
+  s=$(printf '%s\n' "$out" | sed -n -E 's/^Total bytes received: ([0-9,]+).*/\1/p' | tr -d ',')
+  sent=$((sent + ${s:-0}))
+  printf 'kept %-8s received=%s\n' "$p" "${s:-0}"
+done
+# The token file (name + token lines, 0600): restoring the hub without it locks every client out.
+mkdir -p "$SNAP.partial/config"
+"$RSYNC" -a $DRY "$HUB:$home/.config/relic5/" "$SNAP.partial/config/" >/dev/null 2>&1 || { echo "no token file copied" >&2; rc=1; }
+# Privacy by the directories (700), not by file modes: a changed mode would defeat --link-dest (every file copied).
+chmod 700 "$SNAP.partial"
+# What the hub counted when this was taken: the restore test rebuilds from the snapshot and must match these.
+[ -z "$DRY" ] && { curl -fsS -m 30 "$STATUS_URL" > "$SNAP.partial/hub-status.json" || { echo "no hub status saved" >&2; rc=1; }; }
+
+if [ -n "$DRY" ]; then rm -rf "$SNAP.partial"; echo "dry run: nothing kept"; exit $rc; fi
+if [ $rc -ne 0 ]; then
+  jobev error "snapshot $NAME failed, kept as $NAME.partial" "\"rc\": $rc"
+  echo "backup failed; partial copy left at $SNAP.partial" >&2
+  exit $rc
+fi
+mv "$SNAP.partial" "$SNAP"
+ln -sfn "$NAME" "$DEST/latest"
+size=$(du -sk "$SNAP" | cut -f1)                   # this snapshot alone, as if restored
+total=$(du -sk "$DEST" | cut -f1)                  # every snapshot, hardlinks counted once
+# Old snapshots: only complete, dated ones under $DEST, newest $KEEP kept.
+ls -1d "$DEST"/2*[0-9] 2>/dev/null | sort -r | awk -v k="$KEEP" 'NR > k' | while read -r old; do
+  case "$old" in "$DEST"/2[0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]) rm -rf "$old";; esac
+done
+secs=$(( $(date +%s) - t0 ))
+jobev done "snapshot $NAME: $((size / 1024)) MB, $((sent / 1048576)) MB new, all snapshots $((total / 1024)) MB, ${secs}s" \
+  "\"rc\": 0, \"done\": $((size * 1024)), \"unit\": \"bytes\""
+printf '%s relic5 backup %s -> %s rc=0 size=%sMB new=%sMB all=%sMB %ss\n' "$(date '+%F %T')" "$HUB" "$SNAP" \
+  "$((size / 1024))" "$((sent / 1048576))" "$((total / 1024))" "$secs"

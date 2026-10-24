@@ -12,6 +12,23 @@ from . import __version__
 from .parts import MONTH_STREAMS, Parts, this_month
 
 
+BACKUP_STALE_S = 36 * 3600   # nightly, plus a day of slack (relic4-scan, 2026-10-24)
+
+
+def last_backup(evs, now=None):
+    """The newest finished backup (bin/relic5-backup writes a JobEvent "backup"): when, how big, how old."""
+    from datetime import datetime
+    from .window import utcnow
+    b = next((e for e in evs if e.get("verb") == "backup" and e.get("state") == "done"), None)
+    if not b:
+        return {"at": None, "bytes": None, "message": None, "age_s": None, "host": None}
+    try:
+        age = round(((now or utcnow()) - datetime.fromisoformat(b["at"].replace("Z", "+00:00"))).total_seconds())
+    except ValueError:
+        age = None
+    return {"at": b["at"], "bytes": b.get("done"), "message": b.get("message"), "age_s": age, "host": b.get("host")}
+
+
 def status(root, now=None):
     p = Parts(root)
     mans = p.manifests()
@@ -66,6 +83,11 @@ def status(root, now=None):
     last_error = next((e for e in evs if e.get("state") == "error"), None)
     if last_error and not any(e["verb"] == last_error["verb"] and e.get("state") == "done" and e["at"] > last_error["at"] for e in evs):
         warnings.append(f"last {last_error['verb']} failed at {last_error['at']}: {last_error.get('message', '')[:200]}")
+    backup = last_backup(evs, now)
+    if backup["at"] is None:
+        warnings.append("no backup yet (bin/relic5-backup on m5 pulls one; see docs/RESTORE.md)")
+    elif backup["age_s"] is not None and backup["age_s"] > BACKUP_STALE_S:
+        warnings.append(f"last backup {backup['age_s'] // 3600} h ago, at {backup['at']} (should run nightly)")
     vp = os.path.join(search_dir(p.root), "vectors.json")
     vs = _json.load(open(vp)) if os.path.exists(vp) else {"at": None, "models": {}}
     vectors = {"at": vs["at"], "pending": sum(v["pending"] for w in vs["models"].values() for v in w.values()) if vs["models"] else rows["text"],
@@ -124,5 +146,6 @@ def status(root, now=None):
         "rows": {"events": rows["text"] + rows["thinking"], "text": rows["text"], "thinking": rows["thinking"],
                  "tools": rows["tools"], "sessions": None, "files": sum(len(p.files(s)) for s in MONTH_STREAMS)},
         "jobs": {"running": running, "recent": evs[:10], "last_error": last_error},
+        "backup": backup,
         "warnings": warnings,
     }
