@@ -45,6 +45,7 @@ export interface Status {
   rows: Record<string, number | null>;
   jobs: { running: JobEvent[]; recent: JobEvent[]; last_error: JobEvent | null };
   backup?: { at: string | null; bytes: number | null; message: string | null; age_s: number | null; host: string | null };
+  memory?: Record<string, number>;
   warnings: string[];
 }
 

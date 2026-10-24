@@ -34,7 +34,7 @@ SEARCH_PROPS = {
     "cwd": {**STR, "description": "sessions that began in this folder or below it (relic-scan meta cwd)"},
     "branch": {**STR, "description": "sessions on this git branch"},
     "title": {**STR, "description": "sessions whose host title contains this (case-blind)"},
-    "with": {**STR, "enum": ["tools", "thinking", "vault", "all"], "description": "also search tool calls, thinking, ψ notes, or all"},
+    "with": {**STR, "enum": ["tools", "thinking", "vault", "memory", "all"], "description": "also search tool calls, thinking, ψ notes, or all; memory = only the agents' memory notes (rules, decisions, references; role memory-feedback / memory-project / memory-reference / memory-user)"},
     "limit": {"type": "integer", "minimum": 1, "description": f"default {DEFAULT_LIMIT}"},
     "cursor": {**STR, "description": "next_cursor from a previous result"},
     "semantic": {"type": "boolean", "description": "route to semantic search (errors if unavailable)"},

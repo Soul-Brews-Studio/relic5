@@ -84,12 +84,15 @@ def search(relic, index, query, since=None, until=None, horizon=None, repo=None,
     if sort not in (None, "", "relevant", "newest"):
         raise UsageError("sort is relevant | newest")
     words = query.split()
-    layers = ["prose"] + ([w for w in (with_ or "").split(",") if w] if with_ != "all" else ["tools", "thinking"])
+    if with_ == "memory":   # the memory notes alone: rules, decisions, references (memory.py); not mixed with talk
+        layers = ["memory"]
+    else:
+        layers = ["prose"] + ([w for w in (with_ or "").split(",") if w] if with_ != "all" else ["tools", "thinking", "memory"])
     layers = ["prose" if l == "vault" else l for l in layers]
     layers = list(dict.fromkeys(layers))
     for l in layers:
-        if l not in ("prose", "tools", "thinking"):
-            raise UsageError(f"with {l}: one of tools, thinking, vault, all")
+        if l not in ("prose", "tools", "thinking", "memory"):
+            raise UsageError(f"with {l}: one of tools, thinking, vault, memory, all")
     try:
         lo, hi, _ = window(since, until, None)
     except ValueError as ex:
