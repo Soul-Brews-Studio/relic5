@@ -9,7 +9,7 @@ import { ago, bkk, repoColor } from "../format";
 import type { Hit, SearchResult, ShowResult } from "../types";
 import { Drawer } from "../components/Drawer";
 import { Markdown } from "../components/Markdown";
-import { Btn, Chip, cx, inputCls, Kbd, Lbl, Loading, Marked, Seg, State, Toggle, Who } from "../components/ui";
+import { Btn, Chip, cx, inputCls, Kbd, Lbl, Loading, Marked, Seg, State, Who } from "../components/ui";
 import type { PaletteSession } from "../components/Shell";
 import { Close, Filter, Search, Session } from "../components/Icons";
 
@@ -29,7 +29,8 @@ const LAYERS = [
 ];
 
 /** A snippet without the Markdown marks it was cut from (Nat's screenshot: "**" and "#" in every row). */
-const clean = (t: string) => t.replace(/\*\*|__|`+/g, "").replace(/^#{1,4}\s+/gm, "").replace(/<\/?pasted_content[^>]*>/g, "");
+const clean = (t: string) => t.replace(/\*\*|__|`+/g, "").replace(/^#{1,4}\s+/gm, "").replace(/<\/?pasted_content[^>]*>/g, "")
+  .replace(/\|?(\s*:?-{3,}:?\s*\|)+/g, " ").replace(/\s*\|\s*/g, " · ").replace(/(\s·\s)+/g, " · ");
 
 /** Hits that follow each other in one session fold under the first (Panel A: seven rows of one session buried the rest). */
 interface Row { h: Hit; i: number; more: Hit[] }
@@ -134,9 +135,19 @@ function Related({ hits, st, narrow }: { hits: Hit[]; st: SearchState; narrow: (
     )}
     {repos.length > 1 && (
       <RailGroup label="Repos">
-        <div className="flex flex-wrap gap-1.5">
-          {repos.map(([r, n]) => <Toggle key={r} pressed={st.repo === r} onClick={() => narrow({ repo: st.repo === r ? "" : r })}><span className="size-2 rounded-full" style={{ background: repoColor(r) }} />{r}<span className="font-mono text-xs text-faint">{n}</span></Toggle>)}
-        </div>
+        <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
+          {repos.map(([r, n]) => {
+            const on = st.repo === r;
+            return (
+              <li key={r}><button type="button" aria-pressed={on} onClick={() => narrow({ repo: on ? "" : r })}
+                className={cx("flex min-h-10 w-full items-center gap-2.5 rounded-lg border px-2.5 text-left text-sm transition-colors", on ? "border-accent bg-accent-wash text-text" : "border-transparent text-soft hover:bg-panel hover:text-text")}>
+                <span className="size-2 flex-none rounded-full" style={{ background: repoColor(r) }} />
+                <span className="min-w-0 flex-1 truncate" title={r}>{r}</span>
+                <span className="font-mono text-xs text-muted tabular-nums">{n}</span>
+              </button></li>
+            );
+          })}
+        </ul>
       </RailGroup>
     )}
   </>;
@@ -159,8 +170,8 @@ const HORIZONS = [{ value: "", label: "auto" }, { value: "7d", label: "7 days" }
 const row = "flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-sm text-soft transition-colors duration-[120ms] hover:bg-panel hover:text-text";
 
 /** Before the first search: suggestions, not filters (prism: the empty page was five filter groups and no suggestion). */
-function Launch({ recent, top, repos, pick, scopeRepo, layer }: {
-  recent: string[]; top: { query: string; n: number }[]; repos: [string, number][];
+function Launch({ recent, top, repos, when, pick, scopeRepo, layer }: {
+  recent: string[]; top: { query: string; n: number }[]; repos: [string, number][]; when: string;
   pick: (q: string) => void; scopeRepo: (r: string) => void; layer: (w: string) => void;
 }) {
   const lately = recent.slice(0, 8);
@@ -187,7 +198,7 @@ function Launch({ recent, top, repos, pick, scopeRepo, layer }: {
       </div>
       <div className="flex flex-col gap-8">
         {repos.length > 0 && <section aria-labelledby="s-repos">
-          <h2 id="s-repos" className="m-0 mb-1 px-3 text-sm font-bold text-text">Busy this week</h2>
+          <h2 id="s-repos" className="m-0 mb-1 px-3 text-sm font-bold text-text">Busy {when}</h2>
           <p className="m-0 mb-2 px-3 text-xs text-muted">Pick a repo to search only inside it.</p>
           <ul className="m-0 flex list-none flex-col p-0">{repos.map(([r, n]) => (
             <li key={r}><button type="button" onClick={() => scopeRepo(r)} className={row}>
@@ -249,11 +260,18 @@ export function SearchView({ st, setSt, machine, setMachine, machines, recent, t
   const selected = active >= 0 ? rows[Math.min(active, rows.length - 1)]?.h : undefined;
   // every repo with a session, for the repo box; the ones with a session this week, for the suggestions
   const repoNames = useMemo(() => [...new Set(sessions.map(x => x.repo).filter(r => r && r !== "(no repo)"))].sort(), [sessions]);
+  // the window the suggestions follow: Nat clicked "15 days" before typing and saw nothing change
+  const days = ({ "": 7, "7d": 7, "15d": 15, "1m": 31, "3m": 92, archive: 3650 } as Record<string, number>)[draft.horizon] ?? 7;
   const busyRepos = useMemo(() => {
-    const since = new Date(Date.now() - 7 * 864e5).toISOString(), m = new Map<string, number>();
+    const since = new Date(Date.now() - days * 864e5).toISOString(), m = new Map<string, number>();
     for (const x of sessions) if (x.ts >= since && x.repo && x.repo !== "(no repo)") m.set(x.repo, (m.get(x.repo) ?? 0) + 1);
     return [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8);
-  }, [sessions]);
+  }, [sessions, days]);
+  // the hub lists at most its newest 500 sessions; past that, say how far back the list really reaches
+  const oldest = useMemo(() => sessions.reduce((m, x) => (x.ts && x.ts < m ? x.ts : m), new Date().toISOString()), [sessions]);
+  const reach = new Date(Date.now() - days * 864e5).toISOString() < oldest;
+  const busyWhen = reach ? `since ${bkk(oldest).slice(0, 5)} (the newest ${sessions.length} sessions)`
+    : days === 7 ? "this week" : `in the last ${({ 15: "15 days", 31: "month", 92: "3 months" } as Record<number, string>)[days]}`;
 
   useEffect(() => {   // the reader follows the selection; the drawer opens only on a click when the reader pane is not on screen
     if (!selected) { setShow(null); return; }
@@ -343,9 +361,11 @@ export function SearchView({ st, setSt, machine, setMachine, machines, recent, t
         </label>
         <Btn primary size="lg" type="submit">Search</Btn>
       </form>
-      <div className="mb-8">{scope}</div>
+      <div className="mb-8">{scope}
+        {!draft.q.trim() && <p className="m-0 mt-3 text-xs text-muted">Type words to search. The choices above apply to the next search; {draft.horizon ? "the window is set" : "auto starts at 7 days and widens until it finds enough"}.</p>}
+      </div>
 
-      {!searched ? <Launch recent={recent} top={top} repos={busyRepos} pick={q => go({ ...draft, q })}
+      {!searched ? <Launch recent={recent} top={top} repos={busyRepos} when={busyWhen} pick={q => go({ ...draft, q })}
         scopeRepo={r => { setDraft({ ...draft, repo: r }); input.current?.focus(); }}
         layer={w => { setDraft({ ...draft, with: w }); input.current?.focus(); }} /> : (
       <div className="grid gap-8 lg:grid-cols-[248px_minmax(0,1fr)] 2xl:grid-cols-[248px_minmax(0,1fr)_minmax(380px,0.8fr)]">

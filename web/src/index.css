@@ -9,8 +9,9 @@
   /* the content area takes the old ARRA Oracle Studio's surfaces (ui-oracle apps/studio/src/index.css, 2026-04-19), which Nat
      prefers to the later "Control Surface": near-black canvas, cards a shade up, borders as translucent white */
   --bg:#0a0a0f; --panel:#0f0f14; --raised:#181820; --deep:#08080c; --rail:#13161d;
-  --line:rgb(255 255 255 / .08); --line-strong:rgb(255 255 255 / .14);
-  --text:#e4e7ef; --soft:#c1c7d4; --muted:#8a92a5; --faint:#848c9f;
+  /* raised 2026-10-24 (Nat: "it too low contrast?"): soft 14.2:1, muted 9.3:1, faint 6.9:1 on the #0a0a0f canvas */
+  --line:rgb(255 255 255 / .11); --line-strong:rgb(255 255 255 / .19);
+  --text:#f0f2f7; --soft:#d6dbe5; --muted:#aab2c3; --faint:#9099ac;
   --amber:#f5b73b; --on-amber:#1d1405; --amber-wash:rgb(245 183 59 / .12);
   --accent:#64b5f6; --on-accent:#06121f; --accent-dim:#173451; --accent-wash:rgb(100 181 246 / .10); --accent-ink:#e6f6fd;
   --ok:#6fd6a0; --ok-wash:rgb(111 214 160 / .10);

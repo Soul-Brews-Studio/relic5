@@ -115,7 +115,7 @@ function Searched({ q, search }: { q: Queries | null; search: (q: string) => voi
   if (!q) return null;
   const real = (r: { query: string; client?: string | null; tool?: string }) => r.query && r.query.length < 70 && !(r.client ?? "").startsWith("eval");
   const top = q.top.filter(t => real(t)).slice(0, 24);
-  const recent = [...new Map(q.last.filter(r => r.tool === "relic_search" && real(r)).map(r => [r.query.trim(), r] as const)).values()].slice(0, 8);
+  const recent = [...new Map([...(q.searches ?? []).map(r => ({ ...r, tool: "relic_search" })), ...q.last].filter(r => r.tool === "relic_search" && real(r)).map(r => [r.query.trim(), r] as const)).values()].slice(0, 8);
   if (!top.length && !recent.length) return null;
   const max = Math.max(...top.map(t => t.n), 1);
   const size = (n: number) => (n / max > 0.66 ? "text-lg font-bold text-text" : n / max > 0.33 ? "text-base font-semibold text-soft" : "text-sm text-muted");

@@ -1,7 +1,7 @@
 // The hub's shell, after the old ARRA Oracle Studio: a sticky top header on desktop, a bottom tab bar on a phone, and a Cmd/Ctrl-K palette to jump or search from anywhere.
 import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
 import { cx } from "./ui";
-import { Asked, Columns, Rows, Disk, Home, Jobs, Live, Mark, More, Moon, Note, Plug, Search, Session, Sun } from "./Icons";
+import { Asked, Close, Columns, Menu, Rows, Disk, Home, Jobs, Live, Mark, More, Moon, Note, Plug, Search, Session, Sun } from "./Icons";
 
 export type View = "home" | "search" | "live" | "memory" | "jobs" | "queries" | "compare" | "store" | "connect";
 export type Theme = "dark" | "paper";
@@ -80,12 +80,62 @@ export function Sidebar({ view, go, state, foot, theme, setTheme, badges, onPale
   );
 }
 
+/** The left drawer (Nat, 2026-10-24: "add left drawer an optional"): with the top menu, the ☰ button slides the
+ *  sidebar's list in over the page, on a phone too; Escape, the backdrop or picking a view closes it. */
+export function NavDrawer({ open, onClose, view, go, state, foot, badges, onPalette }: {
+  open: boolean; onClose: () => void; view: View; go: (v: View) => void; state: HubState; foot: ReactNode;
+  badges?: Partial<Record<View, number>>; onPalette: () => void;
+}) {
+  const ref = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const d = ref.current;
+    if (!d) return;
+    if (open && !d.open) d.showModal();
+    if (!open && d.open) d.close();
+  }, [open]);
+  const item = (v: (typeof VIEWS)[number]) => {
+    const I = v.icon, on = view === v.id;
+    return (
+      <a key={v.id} href={v.id === "home" ? "#" : `#tab=${v.id}`} aria-current={on ? "page" : undefined}
+        onClick={e => { e.preventDefault(); go(v.id); onClose(); }}
+        className={cx("flex min-h-11 items-center gap-3 rounded-lg px-3 text-sm font-medium", on ? "bg-raised text-text" : "text-soft hover:bg-raised hover:text-text")}>
+        <span className={on ? "text-accent" : "text-muted"}><I size={20} /></span>{v.label}
+        {!!badges?.[v.id] && <span className="ml-auto rounded-full bg-accent px-1.5 text-xs font-bold text-on-accent">{badges[v.id]}</span>}
+      </a>
+    );
+  };
+  return (
+    <dialog ref={ref} onClose={onClose} onClick={e => e.target === ref.current && onClose()} aria-label="Menu"
+      className="m-0 h-dvh max-h-none w-[280px] max-w-[85vw] border-0 border-r border-line bg-rail p-0 text-text shadow-[var(--shadow-pop)] backdrop:bg-black/50">
+      <div className="flex h-full flex-col px-3 pt-4 pb-4">
+        <div className="mb-5 flex items-center gap-3 px-1.5">
+          <Mark size={34} /><b className="text-lg font-bold text-accent">relic5</b>
+          <button type="button" onClick={onClose} aria-label="Close the menu" className="ml-auto grid size-11 place-items-center rounded-lg text-muted hover:bg-raised hover:text-text"><Close size={18} /></button>
+        </div>
+        <button type="button" onClick={() => { onClose(); onPalette(); }}
+          className="mb-4 flex min-h-10 items-center gap-2.5 rounded-lg border border-line bg-deep px-3 text-xs text-muted hover:border-line-strong hover:text-text">
+          <Search size={15} />Search or jump<kbd className="ml-auto rounded border border-line px-1 font-mono text-xs">⌘K</kbd>
+        </button>
+        <nav aria-label="Views" className="flex flex-col gap-0.5">
+          {VIEWS.filter(v => v.group === 0).map(item)}
+          <div className="mx-3 my-3 h-px bg-line" />
+          {VIEWS.filter(v => v.group === 1).map(item)}
+        </nav>
+        <div className="mt-auto px-3 text-xs leading-relaxed text-muted">
+          <b className="flex items-center gap-2 text-xs font-bold tracking-[0.14em] text-text uppercase"><span className={cx("size-2 rounded-full", dot[state])} />{word[state]}</b>
+          {foot}
+        </div>
+      </div>
+    </dialog>
+  );
+}
+
 /** Desktop: the old ARRA Oracle Studio's header (ui-oracle apps/studio Header.tsx, 2026-04-19), not relic-scan's
  *  sidebar (Nat, 2026-10-24: "make this ui diff from relic scanner"): one sticky bar, the name in the accent, the views
  *  as text links in two groups split by a hairline, the palette, the theme and the hub's state on the right. */
-export function TopNav({ view, go, state, foot, theme, setTheme, badges, onPalette, onLayout, version }: {
+export function TopNav({ view, go, state, foot, theme, setTheme, badges, onPalette, onLayout, onDrawer, version }: {
   view: View; go: (v: View) => void; state: HubState; foot: ReactNode; theme: Theme; setTheme: (t: Theme) => void;
-  badges?: Partial<Record<View, number>>; onPalette: () => void; onLayout: () => void; version?: string;
+  badges?: Partial<Record<View, number>>; onPalette: () => void; onLayout: () => void; onDrawer: () => void; version?: string;
 }) {
   const link = (v: (typeof VIEWS)[number]) => {
     const on = view === v.id;
@@ -101,6 +151,8 @@ export function TopNav({ view, go, state, foot, theme, setTheme, badges, onPalet
   };
   return (
     <header className="sticky top-0 z-20 hidden h-16 items-center gap-6 border-b border-line bg-[color-mix(in_srgb,var(--panel)_92%,transparent)] px-6 backdrop-blur sm:flex">
+      <button type="button" onClick={onDrawer} aria-label="Open the menu" aria-haspopup="dialog"
+        className="-mr-3 grid size-10 flex-none place-items-center rounded-lg text-muted hover:bg-raised hover:text-text"><Menu size={20} /></button>
       <a href="#" onClick={e => { e.preventDefault(); go("home"); }} className="flex flex-none items-center gap-2.5 rounded-lg">
         <Mark size={30} />
         <b className="text-xl font-bold tracking-[-0.01em] text-accent">relic5</b>
