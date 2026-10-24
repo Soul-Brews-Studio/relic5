@@ -6,6 +6,10 @@
 > that lab through `PET_LAB`, else `$(ghq root)/github.com/Soul-Brews-Studio/esp32-oracle/lab` (on esp32-oracle's
 > main since its PR #28, 2026-10-24), so a plain esp32-oracle clone is enough.
 >
+> In relic5 the page is the **v2 Designer only**, a graphic canvas (Nat, 2026-10-24: "it should only graphic canvas
+> not blockly"), at http://127.0.0.1:4810/?canvas=<name>. The v1 page (Blocks, code, firmware tabs) is not
+> here; esp32-oracle keeps it. Apps, packs, firmware builds and flashing stay on the server API and the MCP tools.
+>
 > `just pet-studio` (relic5 root) installs, builds the page and starts the server on http://127.0.0.1:4810.
 > Each oracle's page in the hub (Oracles tab) has a **Pet** prompt: give it to `studio_auto_sprite`, then keep the
 > pack's GIFs on the oracle's page with relic5's `relic_artifact_put`.
