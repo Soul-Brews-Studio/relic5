@@ -110,6 +110,22 @@ def test_sessions_by_repo(relic):
     assert len(relic.sessions(by_repo=True)["repos"]) <= 201                # top 200 plus one "(other N repos)" row
 
 
+def test_sessions_pick_the_same_copy_every_time(root):
+    """A sid held twice on one machine (two homes): always the most complete copy, so counts never move."""
+    import os
+    import duckdb
+    from conftest import META_COLS, meta, write_parquet
+    from relic5.query import Relic5
+    p = os.path.join(root, "parts/m5/meta/sessions.parquet")
+    rows = [meta("s1-aaaa"), meta("s2-bbbb", last="2026-10-22T10:00:00.000Z", proj="-opt-Code-github-com-Soul-Brews-Studio-relic5"),
+            meta("agent-1", tier="subagent", parent="s1-aaaa"),
+            meta("s9-dup", first="2026-09-29T00:00:00.000Z", last="2026-09-30T00:00:00.000Z"),   # an old copy, September only
+            meta("s9-dup", first="2026-09-29T00:00:00.000Z", last="2026-10-23T00:00:00.000Z")]   # the full one, into October
+    write_parquet(p, META_COLS, rows, types={"n_rows": "BIGINT", "months": "VARCHAR[]", **{k: "BIGINT" for k in META_COLS[11:]}})
+    for _ in range(5):
+        assert Relic5(root, duckdb.connect()).sessions(since="2026-10-01")["total"] == 3     # s1, s2 and s9's full copy
+
+
 def test_session(relic):
     s = relic.session("s1")
     assert s["uuid"] == "s1-aaaa" and [k["uuid"] for k in s["subagents"]] == ["agent-1"]
