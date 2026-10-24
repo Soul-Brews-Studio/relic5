@@ -28,7 +28,12 @@ export function LiveView({ machine, role = "", on }: { machine: string; role?: s
         { key: "t", head: "time (+07)", cell: r => <time>{(r.ts_th ?? "").slice(5, 16).replace("T", " ")}</time> },
         { key: "m", head: "machine", cell: r => (r.machines ?? []).join(", ") },
         { key: "r", head: "role", cell: r => <Who role={r.role} /> },
-        { key: "s", head: "session", cell: r => (r.session_name || r.sid || "").slice(0, 40), title: r => r.sid ?? "" },
+        // repo first: a title is the session's first one ("Restart self" stays after the session moves on to other work)
+        { key: "s", head: "session", cell: r => {
+            const repo = r.cat && r.cat !== "home / other" ? r.cat : "";
+            const name = (r.session_name || r.sid || "").slice(0, 40);
+            return repo ? <><span className="text-muted">{repo.slice(0, 24)} · </span>{name}</> : name;
+          }, title: r => `${r.cat ?? ""} · ${r.session_name ?? ""} · ${r.sid ?? ""}` },
         { key: "x", head: "text", cell: r => (r.text ?? "").replace(/\s+/g, " ").slice(0, 180), title: r => r.text ?? "" },
       ]} />
     </>
