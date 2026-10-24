@@ -56,10 +56,14 @@ function checks(s: Status, evs: JobEvent[]): Check[] {
       `${sealedN} machine-months sealed; each one's parts still hold the rows they were sealed with.`,
     command: sv?.problems.length ? "relic5 seals --verify" : undefined });
   const day = evs.filter(e => Date.now() - Date.parse(e.at) < 86400e3), failed = day.filter(e => e.state === "error");
-  out.push({ key: "jobs", title: "Jobs, 24 h", icon: Pulse, level: failed.length ? "failed" : evs.length ? "ok" : "unknown",
+  // a failure the same job kind on the same machine has since finished cleanly is recovered, not failing (mba's push
+  // failed at 19:31 on 10-24 and pushed fine every pass after; the card stayed red for 24 h)
+  const same = (a: typeof evs[number], b: typeof evs[number]) => a.verb === b.verb && (a.message ?? a.host) === (b.message ?? b.host);
+  const open = failed.filter(f => !day.some(e => e.state === "done" && same(e, f) && Date.parse(e.at) > Date.parse(f.at)));
+  out.push({ key: "jobs", title: "Jobs, 24 h", icon: Pulse, level: open.length ? "failed" : evs.length ? "ok" : "unknown",
     big: `${day.length - failed.length}/${day.length}`,
-    text: failed.length ? `${failed.length} failed; the newest: ${failed[0].verb} at ${bkk(failed[0].at)}. ${failed[0].message ?? ""}` :
-      `Pushes, index runs, embeds and backups all finished.${s.jobs.running.length ? ` Running now: ${s.jobs.running.map(j => j.verb).join(", ")}.` : ""}` });
+    text: open.length ? `${open.length} failed; the newest: ${open[0].verb} at ${bkk(open[0].at)}. ${open[0].message ?? ""}` :
+      `Pushes, index runs, embeds and backups all finished${failed.length ? ` (${failed.length} failed, then ran fine again: ${failed[0].verb} at ${bkk(failed[0].at)}, ${failed[0].message ?? failed[0].host ?? ""})` : ""}.${s.jobs.running.length ? ` Running now: ${s.jobs.running.map(j => j.verb).join(", ")}.` : ""}` });
   return out;
 }
 
