@@ -91,7 +91,7 @@ LESSONS.md). It is not an app. **KEEP** it as the reference.
 | **relic5 `bin/relic5-push`** | rsync parts + meta to `white…:/home/nat/relic5/parts/<machine>` | 2026-10-24 | (repo) | (repo) | yes, "relic5 push m5 … rc=0 2s" in relic-chain.log | **KEEP** |
 | **RelicFeeder** (`relic5/feeder`) | SwiftUI menu bar that runs the chain and shows the hub card | 2026-10-23 | 3 | (repo) | yes, but from the build dir, no LaunchAgent | **KEEP** (Mac front). Install it as the LaunchAgent, then unload relic-chain after a day (per memory note, ask first) |
 | `studio.soulbrews.relic-chain` LaunchAgent | 10-min loop: scan, extract, push, SYNC check | n/a | n/a | n/a | yes (loaded, last rc 0) | **KEEP until RelicFeeder is the LaunchAgent**, then unload |
-| agent-relic-v3 `hub/` (`push.sh`, `indexer.sh`) + LaunchAgents `relic-push`, `relic-indexer`, `relic-embed-tunnel` | relic3 hub: raw transcript mirror to `white.local`, index on m5, publish | 2026-10-07 | 11 | in v3's 22 | **yes**: 434 + 216 runs, last 08:49 / 08:47 | **RETIRE** after the MCP switch in (d). Until then it is a second writer to white |
+| agent-relic-v3 `hub/` (`push.sh`, `indexer.sh`) + LaunchAgents `relic-push`, `relic-indexer`, `relic-embed-tunnel` | relic3 hub: raw transcript mirror to `white.local`, index on m5, publish | 2026-10-07 | 11 | in v3's 22 | **yes**: 434 + 216 runs, last 08:49 / 08:47 | **UNLOADED 2026-10-24 09:25** (Nat): `relic-push` and `relic-indexer` stopped on m5, plists kept at `/tmp/studio.soulbrews.relic-{push,indexer}.plist.bak` (reload: `launchctl load -w ~/Library/LaunchAgents/<name>.plist`). No new relic3 generation reaches white; the existing `~/.relic3-gens` (81 GB, last generation 20261024T020854Z) stays until Nat decides, with a copy offered first. `relic-embed-tunnel` untouched. relic3's MCP still answers, from that frozen index |
 | agent-relic-v3 `scanner/` (as a feeder) | INDEX NOW / EMBED buttons for relic3 | 2026-10-05 | 6 | in v3's 22 | running app | **RETIRE** (see b) |
 | jsonl-oracle Structor `watch-local` / `watch-kvmlab1` | week-stamped PocketBase intake | 2026-09-11 | 0 | 0 | plists not loaded | **RETIRE** |
 | agents-relic (v1), agent-relic-v2, agent-relic-v2.1 | LanceDB-per-repo (v1), y/m/tenant layout (v2, v2.1). `relic` on PATH is v2.1 | 2026-10-01 / 09-25 / 10-01 | 1 / 1 / 24 | 0 / 0 / 0 | CLI installed (`~/.bun/bin/relic` → agent-relic-v2.1), no job | **RETIRE** all three (`tail` and `handoff` already in relic5, RELIC3-COMPARE.md "Reading") |
@@ -133,7 +133,8 @@ LESSONS.md). It is not an app. **KEEP** it as the reference.
 - **(c) feed from a Mac**: `relic-scan run` (relic4-scan), then `relic-extract run`, then `bin/relic5-push`, driven by
   **RelicFeeder**. The evidence disagrees with the plan in two places:
   1. RelicFeeder runs from the build dir with no LaunchAgent, so `relic-chain` is still the scheduled feeder.
-  2. relic3's `relic-push` + `relic-indexer` still write to white every 5 and 10 minutes.
+  2. ~~relic3's `relic-push` + `relic-indexer` still write to white every 5 and 10 minutes.~~ Unloaded 2026-10-24
+     09:25 (Nat's decision): relic3's index on white is frozen at 20261024T020854Z.
   These are three schedulers for one job. End state: one RelicFeeder LaunchAgent per Mac. Unload relic-chain a day
   after that (memory note, ask Nat). Unload relic3's jobs only after (d) is done.
 - **(d) agent access**: **relic5 MCP**, as expected. But the evidence says agents have **not moved**: relic3 has 727
