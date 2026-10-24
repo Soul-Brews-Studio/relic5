@@ -12,6 +12,7 @@ import { Context, SearchView, shortRepo, type SearchState } from "./views/Search
 import { MemoryView } from "./views/MemoryView";
 import { MapView } from "./views/MapView";
 import { OraclesView } from "./views/OraclesView";
+import { FamilyView } from "./views/FamilyView";
 import { ConnectView } from "./views/ConnectView";
 import { LiveView } from "./views/LiveView";
 import { JobsView } from "./views/JobsView";
@@ -123,6 +124,7 @@ export function App() {
             setMachine={m => setSt(v => ({ ...v, machine: m }))} setRole={role => setSt(v => ({ ...v, search: { ...v.search, role } }))} on />}
           {st.view === "memory" && <MemoryView />}
           {st.view === "oracles" && <OraclesView />}
+          {st.view === "family" && <FamilyView />}
           {st.view === "map" && <MapView openSession={(sid, name, repo) => openSession({ sid, name, repo, ts: "" })}
             search={(q, session) => setSt(v => ({ ...v, view: "search", search: { ...v.search, q, session: session ?? "" } }))} />}
           {st.view === "connect" && <ConnectView />}

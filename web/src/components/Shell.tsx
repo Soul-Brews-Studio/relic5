@@ -1,9 +1,9 @@
 // The hub's shell, after the old ARRA Oracle Studio: a sticky top header on desktop, a bottom tab bar on a phone, and a Cmd/Ctrl-K palette to jump or search from anywhere.
 import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
 import { cx } from "./ui";
-import { Asked, Close, Globe, Psi, Columns, Menu, Rows, Disk, Home, Jobs, Live, Mark, More, Moon, Note, Plug, Search, Session, Sun } from "./Icons";
+import { Asked, Close, Globe, Psi, Tree, Columns, Menu, Rows, Disk, Home, Jobs, Live, Mark, More, Moon, Note, Plug, Search, Session, Sun } from "./Icons";
 
-export type View = "home" | "search" | "map" | "oracles" | "live" | "memory" | "jobs" | "queries" | "compare" | "store" | "connect";
+export type View = "home" | "search" | "map" | "oracles" | "family" | "live" | "memory" | "jobs" | "queries" | "compare" | "store" | "connect";
 export type Theme = "dark" | "paper";
 export type Layout = "top" | "side";
 
@@ -14,6 +14,7 @@ export const VIEWS: { id: View; label: string; icon: ComponentType<{ size?: numb
   { id: "live", label: "Live", icon: Live, phone: true, group: 0 },
   { id: "memory", label: "Knowledge", icon: Note, phone: true, group: 0 },
   { id: "oracles", label: "Oracles", icon: Psi, group: 0 },
+  { id: "family", label: "Family", icon: Tree, group: 0 },
   { id: "jobs", label: "Jobs", icon: Jobs, phone: true, group: 1 },
   { id: "store", label: "Disk", icon: Disk, group: 1 },
   { id: "queries", label: "Asked", icon: Asked, group: 1 },

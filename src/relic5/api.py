@@ -223,6 +223,16 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
             return JSONResponse({"error": str(ex)}, status_code=400)
         return JSONResponse(rec)
 
+    @app.get("/api/lineage", response_model=None)
+    def lineage_route() -> Json:
+        from . import family
+        return family.lineage(relic.parts.root)
+
+    @app.get("/api/team", response_model=None)
+    def team_route(days: int = 90) -> Json:
+        from . import family
+        return family.team(relic, max(7, min(days, 400)))
+
     @app.get("/api/oracles", response_model=None)
     def oracles_route() -> Json:
         from . import oracles
