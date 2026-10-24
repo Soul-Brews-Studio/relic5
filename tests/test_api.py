@@ -115,3 +115,16 @@ def test_status_says_which_door(client):
     assert client.get("/api/status", headers={"Authorization": "Bearer tok-mba"}).json()["you"] == "token:mba"
     r = rpc(client, "tools/call", {"name": "relic_status", "arguments": {}}).json()["result"]
     assert json.loads(r["content"][0]["text"])["you"] == "token:m5"
+
+
+def test_connected_devices(client):
+    """/api/clients: each door + client that called, with its tools; the client is the header, else the User-Agent."""
+    client.get("/login", params={"t": "tok-mba"})
+    client.get("/api/status", headers={"X-Relic5-Client": "relic-feeder"})
+    client.get("/api/search", params={"q": "hub"}, headers={"User-Agent": "claude-code/2.1.308 (darwin)"})
+    rpc(client, "tools/call", {"name": "relic_status", "arguments": {}})
+    devs = {(d["door"], d["client"]): d for d in client.get("/api/clients").json()["devices"]}
+    assert devs[("token:mba", "relic-feeder (http)")]["tools"] == {"relic_status": 1}
+    assert devs[("token:mba", "claude-code (http)")]["tools"] == {"relic_search": 1}
+    assert any(door == "token:m5" and c.endswith("(mcp)") for door, c in devs)
+    assert all(d["calls_24h"] >= 1 and d["last"] for d in devs.values())
