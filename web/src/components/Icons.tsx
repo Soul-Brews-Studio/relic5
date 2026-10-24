@@ -30,6 +30,7 @@ export const Rows = (p: P) => <svg {...base(p)}><rect x="3.5" y="4.5" width="17"
 export const Menu = (p: P) => <svg {...base(p)}><path d="M4 7h16M4 12h16M4 17h16" /></svg>;
 export const Globe = (p: P) => <svg {...base(p)}><circle cx="12" cy="12" r="8.5" /><ellipse cx="12" cy="12" rx="3.6" ry="8.5" /><path d="M3.5 12h17" /></svg>;
 export const Psi = (p: P) => <svg {...base(p)}><path d="M12 4v16M6 6.5v3a6 6 0 0012 0v-3M9 20h6" /></svg>;
+export const Tree = (p: P) => <svg {...base(p)}><circle cx="6" cy="6" r="2.2" /><circle cx="18" cy="12" r="2.2" /><circle cx="18" cy="19" r="2.2" /><path d="M6 8.2V16a3 3 0 003 3h6.8M6 12h9.8" /></svg>;
 export const Columns = (p: P) => <svg {...base(p)}><rect x="3.5" y="4.5" width="7" height="15" rx="1.5" /><rect x="13.5" y="4.5" width="7" height="15" rx="1.5" /><path d="M6 9h2M16 9h2M6 12.5h2M16 12.5h2" /></svg>;
 export const Filter = (p: P) => <svg {...base(p)}><path d="M4 5.5h16l-6.2 7.3V19l-3.6-1.8v-4.4L4 5.5z" /></svg>;
 export const Session = (p: P) => <svg {...base(p)}><path d="M4.5 6.5a2 2 0 012-2h11a2 2 0 012 2v8a2 2 0 01-2 2H11l-4.5 3.5v-3.5h0a2 2 0 01-2-2v-8z" /><path d="M8.5 9.5h7M8.5 12.5h4.5" /></svg>;

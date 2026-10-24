@@ -79,6 +79,12 @@ if [ -n "$META" ] && on_hub "mkdir -p '$target/meta'"; then   # openrsync (macOS
   out=$(rsync -a $DRY --timeout=120 --stats $META "$R$target/meta/" 2>&1) || { echo "$out" >&2; rc=1; }
   report meta "$out"
 fi
+# The fleet's lineage, when this machine holds mother-oracle: its newest frozen scan (registry/lineage/vN_<date>_scan.json,
+# /oracle-lineage-scan: who budded from whom, born when) as meta/lineage.json, for the hub's Family view.
+LIN=$(ls -t "$(ghq root 2>/dev/null || echo "$HOME/Code")"/github.com/laris-co/mother-oracle/registry/lineage/v*_scan.json 2>/dev/null | head -1)
+if [ -n "$LIN" ] && on_hub "mkdir -p '$target/meta'"; then
+  rsync -a $DRY --timeout=60 "$LIN" "$R$target/meta/lineage.json" >/dev/null 2>&1 || rc=1
+fi
 # Seal receipts (relic5 sealday.py): for every month relic-scan sealed, the sha256 and size of each extracted part
 # as this machine holds it, so the hub can prove its copy is byte-identical before it reconciles the month. Hashes
 # are cached by size + mtime in $SRC/.receipts-cache.json: an unchanged sealed month costs nothing the next time.
