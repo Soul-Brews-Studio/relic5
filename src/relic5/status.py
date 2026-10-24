@@ -83,6 +83,10 @@ def status(root, now=None):
     last_error = next((e for e in evs if e.get("state") == "error"), None)
     if last_error and not any(e["verb"] == last_error["verb"] and e.get("state") == "done" and e["at"] > last_error["at"] for e in evs):
         warnings.append(f"last {last_error['verb']} failed at {last_error['at']}: {last_error.get('message', '')[:200]}")
+    from . import seals as SL
+    seal_info = SL.summary(p.root)
+    for prob in ((seal_info["verify"] or {}).get("problems") or [])[:3]:
+        warnings.append(f"seal: {prob}")
     backup = last_backup(evs, now)
     if backup["at"] is None:
         warnings.append("no backup yet (bin/relic5-backup on m5 pulls one; see docs/RESTORE.md)")
@@ -148,5 +152,6 @@ def status(root, now=None):
         "jobs": {"running": running, "recent": evs[:10], "last_error": last_error},
         "backup": backup,
         "memory": __import__("relic5.memory", fromlist=["counts"]).counts(p.root),
+        "seals": seal_info,
         "warnings": warnings,
     }

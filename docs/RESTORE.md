@@ -53,3 +53,8 @@ and `restore test PASSED` = the snapshot rebuilds the hub exactly. The snapshot 
 6. Start it: `just up`; check `relic_status` (rows equal `hub-status.json`, no warnings).
 7. Pushes since the snapshot come back by themselves: every machine's next relic-chain pass re-sends what the hub
    lacks (rsync compares sizes and mtimes).
+
+## Sealed months
+
+A month relic-scan has sealed (seals.py) never changes on the hub unless it is resealed, so after its first snapshot
+every later snapshot hardlinks its parts: a sealed month costs its size once, whatever the number of nights.

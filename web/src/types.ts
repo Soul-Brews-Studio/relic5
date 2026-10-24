@@ -46,6 +46,8 @@ export interface Status {
   jobs: { running: JobEvent[]; recent: JobEvent[]; last_error: JobEvent | null };
   backup?: { at: string | null; bytes: number | null; message: string | null; age_s: number | null; host: string | null };
   memory?: Record<string, number>;
+  seals?: { machines: Record<string, { sealed: number; newest_sealed_at: string | null; resealed: number; months: string[] }>;
+            verify: { at: string; checked: number; problems: string[] } | null };
   warnings: string[];
 }
 
