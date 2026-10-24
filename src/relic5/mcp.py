@@ -65,6 +65,15 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {"id": STR}, "required": ["id"], "additionalProperties": False}},
     {"name": "relic_status", "description": "Months, per-machine watermarks, totals, jobs and warnings (StatusReport).",
      "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
+    {"name": "relic_artifact_put", "description": "Keep something you made for an oracle on the hub: an image (png jpg webp gif svg), "
+     "a video (mp4 webm mov), a 3D model (glb gltf) or a small web piece (html). It shows on the oracle's page in the hub "
+     "(Oracles tab). Send the file as base64 in data with filename, or an HTML/SVG piece as text with ext. Add the prompt "
+     "that made it, so the record says how. The same bytes again return the first record. Up to 60 MB.",
+     "inputSchema": {"type": "object", "properties": {"oracle": STR, "title": STR, "filename": STR, "ext": STR, "data": STR, "text": STR,
+                                                      "note": STR, "prompt": STR, "session": STR},
+                     "required": ["oracle"], "additionalProperties": False}},
+    {"name": "relic_artifacts", "description": "List the artifacts kept on the hub, newest first: one oracle's, or every oracle's with a count each.",
+     "inputSchema": {"type": "object", "properties": {"oracle": STR, "limit": INT}, "additionalProperties": False}},
 ]
 UNAVAILABLE = {
     "relic_chain": "relic_chain is not available in relic5 (as in relic3 v3)",
@@ -132,6 +141,16 @@ def run_tool(relic: Relic5, name: str, a: Json, door: str | None = None) -> Json
     if name == "relic_session":
         _check(a, ["id"])
         return relic.session(_str(a, "id"))
+    if name == "relic_artifact_put":
+        from . import artifacts
+        _check(a, ["oracle", "title", "filename", "ext", "data", "text", "note", "prompt", "session"])
+        for k in ("oracle", "title", "filename", "ext", "data", "text", "note", "prompt", "session"):
+            _str(a, k)
+        return artifacts.put_b64(relic.parts.root, a, door)
+    if name == "relic_artifacts":
+        from . import artifacts
+        _check(a, ["oracle", "limit"])
+        return artifacts.listing(relic.parts.root, _str(a, "oracle"), min(_int(a, "limit", 1) or 100, 500))
     if name == "relic_status":
         _check(a, [])
         return {"you": door, **status(relic.parts.root)}
