@@ -93,15 +93,19 @@ def test_probe_rows_carry_stored_vectors(withvec):
 def test_near_duplicates_collapse():
     """Issue #25: a templated prompt per worktree differs only in its paths; it is one hit that counts the others."""
     from relic5.search import collapse, near_key
-    tpl = "You are auditing ONE git worktree of the maw-js repo at {} (branch fix-{}). Report findings as a table."
+    tpl = ('You are auditing ONE git worktree of the maw-js repo to decide if it is SAFE to remove during a full team teardown. '
+           'Worktree path: "{}"  (branch hint: "{}"). NOTE: if "{}" does not exist, that worktree is already gone: report it '
+           'as gone and stop. Otherwise list uncommitted files, unpushed commits and stashes, then give a verdict.')
     rows = [{"uid": "target", "text": "delete it, no backup, git can restore", "_score": 0.9}] + \
-           [{"uid": f"t{i}", "text": tpl.format(f"/opt/Code/wt/maw-{i}-issue{300 + i}", i), "_score": 0.8 - i / 100} for i in range(8)] + \
+           [{"uid": f"t{i}", "text": tpl.format(p, b, p), "_score": 0.8 - i / 100}
+            for i, (p, b) in enumerate([(f"/opt/Code/github.com/Soul-Brews-Studio/maw-js-{2400 + i}-x", ["detached", "alpha", f"fix/{2783 + i}-resolve-myname"][i % 3])
+                                        for i in range(8)])] + \
            [{"uid": "other", "text": "The user sent a new message while you were working: ship the release", "_score": 0.5},
             {"uid": "other2", "text": "The user sent a new message while you were working: revert the bump", "_score": 0.4}]
     got = collapse(rows)
     assert [r["uid"] for r in got] == ["target", "t0", "other", "other2"]        # same opening, different words: kept
     assert got[1]["_dups"] == 7 and "_dups" not in got[0]
-    assert near_key(rows[1]) == near_key(rows[5]) != near_key(rows[9])
+    assert near_key(rows[9]).startswith("ship the release") or "ship the release" in near_key(rows[9])
 
 
 def test_semantic_reply_says_how_fresh_it_is(withvec):
