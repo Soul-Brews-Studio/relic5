@@ -61,6 +61,19 @@ def test_widening_narrowest_window(built):
     assert r.search("hub", since="2026-08-01")["horizon"] == "window"
 
 
+def test_widening_never_hides_older_hits(built):
+    """Issue #19: widening stops in a window with enough hits, but the best older hits still follow them."""
+    root, _ = built
+    r = Relic5(root, duckdb.connect())
+    res = r.search("hub", limit=2)                                       # 2 hits in the last 7 days: widening stops there
+    assert res["horizons_tried"] == ["7d"] and res["older_hits"] > 0 and "older ones" in res["note"]
+    months = [h["partition"] for h in r.search("hub", limit=50)["hits"]]
+    assert "2026-08" in months and "2026-09" in months                   # august and september reached on the first call
+    recent = r.search("hub", limit=2)["hits"]
+    assert all(h["ts"] >= "2026-10-16" for h in recent[:2])              # the window's hits still come first
+    assert r.search("hub", horizon="7d", limit=2)["older_hits"] == 0      # an explicit window means only that window
+
+
 def test_prose_before_tools(built):
     root, _ = built
     hits = Relic5(root, duckdb.connect()).search("hub", with_="tools", limit=50)["hits"]
