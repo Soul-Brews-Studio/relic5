@@ -57,7 +57,7 @@ interface NoteLite { title: string; path: string; ts: string; text: string }
 interface Portrait {
   name: string; path: string; machines: string[]; notes: number; sections: Record<string, number>; newest?: number; repo: string;
   soul: NoteLite[]; learnings: NoteLite[]; retros: NoteLite[]; rules: { title: string; description: string; link: string }[];
-  sessions: { sid: string; name?: string; ts?: string }[]; words: [string, number][]; prompts: { character: string; enlighten: string }; error?: string;
+  sessions: { sid: string; name?: string; ts?: string }[]; words: [string, number][]; prompts: { character: string; enlighten: string; pet?: string }; error?: string;
 }
 
 const when = (ms?: number) => (ms ? new Date(ms).toISOString() : undefined);
@@ -85,7 +85,7 @@ function Notes({ title, sub, notes, empty }: { title: string; sub: string; notes
 function OraclePage({ name, onBack }: { name: string; onBack: () => void }) {
   const [p, setP] = useState<Portrait | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [tab, setTab] = useState<"character" | "enlighten">("character");
+  const [tab, setTab] = useState<"character" | "enlighten" | "pet">("character");
   const [arts, setArts] = useState<Artifact[]>([]);
   useEffect(() => {
     setP(null); setErr(null);
@@ -111,17 +111,19 @@ function OraclePage({ name, onBack }: { name: string; onBack: () => void }) {
       <section className="mb-6 rounded-2xl border border-accent/40 bg-panel p-5">
         <div className="flex flex-wrap items-center gap-3">
           <div role="tablist" aria-label="Prompt" className="flex gap-1">
-            {([["character", "Character and style"], ["enlighten", "Enlightenment"]] as const).map(([k, l]) => (
+            {([["character", "Character and style"], ["enlighten", "Enlightenment"], ["pet", "Pet"]] as const).filter(([k]) => k !== "pet" || p.prompts.pet).map(([k, l]) => (
               <button key={k} type="button" role="tab" aria-selected={tab === k} onClick={() => setTab(k)}
                 className={cx("-mb-px min-h-11 border-b-2 px-3 text-sm font-semibold", tab === k ? "border-accent text-text" : "border-transparent text-muted hover:text-text")}>{l}</button>
             ))}
           </div>
-          <span className="ml-auto"><Copy text={p.prompts[tab]} label="Copy the prompt" /></span>
+          <span className="ml-auto"><Copy text={p.prompts[tab] ?? ""} label="Copy the prompt" /></span>
         </div>
-        <p className="m-0 mt-3 text-sm text-muted">{tab === "character"
+        <p className="m-0 mt-3 text-sm text-muted">{tab === "pet"
+          ? `For Pet Studio (pet-studio/ in relic5, on the Mac that holds the pets): give it to studio_auto_sprite to draw ${p.name}'s desk pet and its seven moods, then keep the GIFs here with relic_artifact_put.`
+          : tab === "character"
           ? `Built only from ${p.name}'s soul notes, learnings and the rules set for it. Paste it into Claude to get its character, voice and style, each claim quoted from a note.`
           : `Built from ${p.name}'s newest learnings and retrospectives. Paste it into Claude to hear what ${p.name} has come to understand, and where the notes are thin.`}</p>
-        <pre className="m-0 mt-4 max-h-[340px] overflow-auto rounded-xl border border-line bg-deep p-4 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words text-soft">{p.prompts[tab]}</pre>
+        <pre className="m-0 mt-4 max-h-[340px] overflow-auto rounded-xl border border-line bg-deep p-4 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words text-soft">{p.prompts[tab] ?? ""}</pre>
       </section>
 
       <section className="mb-6 rounded-2xl border border-line bg-panel p-5">
