@@ -74,7 +74,24 @@ def load(root: str) -> Record:
     return rec
 
 
-def _save(root: str, name: str, obj: Record | Verify) -> None:
+def retire(root: str, machine: str, why: str) -> int:
+    """A machine whose parts went to the attic: its seal records move to index/_seals/retired.json (kept, with when and
+    why), so verify stops reporting its parts missing. Returns the number of months moved. A retired machine that
+    pushes again simply gets new records."""
+    rec = load(root)
+    months = rec.pop(machine, None)
+    if months is None:
+        return 0
+    p = os.path.join(_dir(root), "retired.json")
+    old: dict[str, Json] = json.load(open(p)) if os.path.exists(p) else {}
+    old[f"{machine}@{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}"] = {"why": why, "months": months}
+    _save(root, "retired.json", old)
+    _save(root, "seals.json", rec)
+    verify(root)
+    return len(months)
+
+
+def _save(root: str, name: str, obj: Record | Verify | dict[str, Json]) -> None:
     os.makedirs(_dir(root), exist_ok=True)
     p = os.path.join(_dir(root), name)
     with open(p + ".tmp", "w") as f:
