@@ -69,6 +69,54 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
             c = ua.lower() or "unknown"
         return f"{c} ({via})"
 
+    # Tokens from the UI (Connect tab). Only a tokenless door (loopback, Nat's tailnet) may list or change them: a
+    # token never mints a token. Every change is a JSON POST with an X-Relic5-Request header, which a page on another
+    # site cannot send without a CORS preflight this hub never answers. The secret is returned once and never logged.
+    def token_admin(request: Request) -> "tuple[Tokens | None, JSONResponse | None]":
+        from .tokens import Tokens as T   # imported here: tokens.py reads its paths at import (see the top of this file)
+        if (request.state.door or "").startswith("token:") or not isinstance(tokens, T):
+            return None, JSONResponse({"error": "tokens are managed from the hub itself or Nat's tailnet, not with a token"}, status_code=403)
+        if request.method == "POST" and (request.headers.get("x-relic5-request") != "1"
+                                         or not request.headers.get("content-type", "").startswith("application/json")):
+            return None, JSONResponse({"error": "a token change needs Content-Type: application/json and X-Relic5-Request: 1"}, status_code=400)
+        return tokens, None
+
+    @app.get("/api/tokens", response_model=None)
+    def tokens_list(request: Request) -> Response | list[Json]:
+        t, bad = token_admin(request)
+        if t is None:
+            return bad or JSONResponse({"error": "refused"}, status_code=403)
+        return t.list()
+
+    @app.post("/api/tokens", response_model=None)
+    async def tokens_change(request: Request) -> Response | Json:
+        t, bad = token_admin(request)
+        if t is None:
+            return bad or JSONResponse({"error": "refused"}, status_code=403)
+        try:
+            body: Json = await request.json()
+        except ValueError:
+            return JSONResponse({"error": "body is not JSON"}, status_code=400)
+        action, name = body.get("action"), str(body.get("name") or "")
+        secret: str | None = None
+        try:
+            if action == "new":
+                secret = t.new(name, body.get("expires") or None)
+            elif action == "rotate":
+                secret = t.rotate(name, body.get("grace") or "24h")
+            elif action == "revoke":
+                t.revoke(name)
+            else:
+                return JSONResponse({"error": "action is new | rotate | revoke"}, status_code=400)
+        except SystemExit as ex:
+            return JSONResponse({"error": str(ex)}, status_code=400)
+        from .jobs import emit
+        import socket, time as _t
+        emit(relic.parts.root, {"job": f"token-{action}-{name}-{int(_t.time())}", "verb": "token", "state": "done", "rc": 0,
+                                "at": _t.strftime("%Y-%m-%dT%H:%M:%SZ", _t.gmtime()), "host": socket.gethostname(),
+                                "message": f"token {name}: {action} (by {request.state.door})"})
+        return {"name": name, "action": action, **({"token": secret} if secret else {})}
+
     @app.get("/api/clients", response_model=None)
     def clients_route() -> Json:
         from . import selfknow

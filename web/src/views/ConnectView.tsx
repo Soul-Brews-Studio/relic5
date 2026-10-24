@@ -2,7 +2,7 @@ import { useState } from "react";
 import { usePoll } from "../api";
 import { DataTable } from "../components/DataTable";
 import { ago, bkk, num } from "../format";
-import { Btn, Chip, cx, SectionHead, State } from "../components/ui";
+import { Btn, Chip, cx, inputCls, SectionHead, State } from "../components/ui";
 
 interface Device { door: string; client: string; first: string; last: string; calls: number; calls_24h: number;
                    tools: Record<string, number>; p50_ms: number | null }
@@ -25,6 +25,75 @@ function Cmd({ title, why, cmd }: { title: string; why: string; cmd: string }) {
       <p className="m-0 mt-1 max-w-[80ch] text-[13px] text-muted">{why}</p>
       <pre className="m-0 mt-3 overflow-x-auto rounded-lg bg-deep px-4 py-3 font-mono text-[12px] leading-relaxed whitespace-pre-wrap text-soft select-all">{cmd}</pre>
     </div>
+  );
+}
+
+interface TokenRow { name: string; created?: string; expires?: string | null; rotating_until?: string | null; store: string }
+
+async function tokenCall(body: object): Promise<{ token?: string; error?: string }> {
+  const r = await fetch("/api/tokens", { method: "POST", credentials: "same-origin",
+    headers: { "Content-Type": "application/json", "X-Relic5-Request": "1" }, body: JSON.stringify(body) });
+  return r.json();
+}
+
+/** Issue, rotate and revoke tokens for clients outside the tailnet. The secret is shown once, here, and never again. */
+function Tokens({ url }: { url: string }) {
+  const p = usePoll<TokenRow[] | { error: string }>("/api/tokens", 0);
+  const [name, setName] = useState("");
+  const [expires, setExpires] = useState("90d");
+  const [fresh, setFresh] = useState<{ name: string; token: string } | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const act = async (body: { action: string; name: string; expires?: string }) => {
+    setErr(null);
+    const r = await tokenCall(body);
+    if (r.error) setErr(r.error);
+    else if (r.token) setFresh({ name: body.name, token: r.token });
+    p.reload();
+  };
+  const rows = Array.isArray(p.data) ? p.data : [];
+  const denied = p.data && !Array.isArray(p.data) ? p.data.error : null;
+  return (
+    <>
+      <SectionHead>Tokens</SectionHead>
+      <p className="m-0 px-5 pb-3 font-sans text-[13px] text-muted">
+        For a client outside the tailnet. Stored hashed; the secret is shown once when issued. Only the hub itself and Nat's tailnet can manage them.
+      </p>
+      {denied ? <State error>{denied}</State> : (
+        <form onSubmit={e => { e.preventDefault(); if (name) act({ action: "new", name, expires: expires === "never" ? "" : expires }); }}
+          className="flex flex-wrap items-center gap-3 px-5 pb-4 font-sans">
+          <input value={name} onChange={e => setName(e.target.value.toLowerCase())} placeholder="name, e.g. phone or laptop"
+            pattern="[a-z0-9-]+" aria-label="Token name" className={inputCls + " w-64"} />
+          <select value={expires} onChange={e => setExpires(e.target.value)} aria-label="Expires" className={inputCls}>
+            <option value="30d">expires in 30 days</option><option value="90d">expires in 90 days</option>
+            <option value="365d">expires in a year</option><option value="never">never expires</option>
+          </select>
+          <Btn primary type="submit" disabled={!name}>Issue token</Btn>
+        </form>
+      )}
+      {err && <State error>{err}</State>}
+      {fresh && (
+        <div className="mx-5 mb-4 rounded-xl border border-warning p-4 font-sans">
+          <div className="text-[14px] font-semibold text-text">Token for {fresh.name}: copy it now, it will not be shown again</div>
+          <pre className="m-0 mt-2 overflow-x-auto rounded-lg bg-deep px-4 py-3 font-mono text-[12px] whitespace-pre-wrap text-soft select-all">{fresh.token}</pre>
+          <pre className="m-0 mt-2 overflow-x-auto rounded-lg bg-deep px-4 py-3 font-mono text-[12px] whitespace-pre-wrap text-soft select-all">{`claude mcp add --transport http relic5 ${url} --header "Authorization: Bearer ${fresh.token}"\n# Codex:\nexport RELIC5_TOKEN=${fresh.token}\ncodex mcp add relic5 --url ${url} --bearer-token-env-var RELIC5_TOKEN`}</pre>
+          <div className="mt-3 flex gap-2">
+            <Btn type="button" onClick={() => navigator.clipboard.writeText(fresh.token)}>Copy the token</Btn>
+            <Btn type="button" onClick={() => setFresh(null)}>Done, hide it</Btn>
+          </div>
+        </div>
+      )}
+      <DataTable rows={rows} rowKey={r => r.name} empty="no tokens yet" cols={[
+        { key: "n", head: "name", cell: r => <b>{r.name}</b> },
+        { key: "c", head: "created", cell: r => (r.created ? ago(r.created) : r.store) },
+        { key: "e", head: "expires", cell: r => (r.expires ? bkk(r.expires) : r.store === "hashed" ? "never" : "") },
+        { key: "r", head: "rotating", cell: r => (r.rotating_until ? `old one valid until ${bkk(r.rotating_until)}` : "") },
+        { key: "a", head: "", cell: r => r.store === "hashed" ? (
+          <span className="flex gap-2">
+            <Btn type="button" onClick={() => act({ action: "rotate", name: r.name })}>Rotate</Btn>
+            <Btn type="button" onClick={() => { if (confirm(`Revoke ${r.name}? Clients using it stop working at once.`)) act({ action: "revoke", name: r.name }); }}>Revoke</Btn>
+          </span>) : <span className="text-faint">legacy file: edit it on the hub</span> },
+      ]} />
+    </>
   );
 }
 
@@ -98,6 +167,7 @@ export function ConnectView({ repo }: { repo?: string }) {
         Remove it again with <code className="font-mono">claude mcp remove relic5</code> or <code className="font-mono">codex mcp remove relic5</code>.
       </div>
       {test && !test.ok && <State error>{test.error}</State>}
+      <Tokens url={url} />
       <Devices />
     </>
   );

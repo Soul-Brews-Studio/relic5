@@ -6,7 +6,7 @@ x-relic: &relic
   network_mode: host
   volumes:
     - ${RELIC5_DATA:-~/relic5}:/data
-    - ${HOME}/.config/relic5/tokens:/config/tokens:ro
+    - ${HOME}/.config/relic5:/config     # tokens (legacy, plain) and tokens.json (hashed): the Connect tab writes it
     - /var/run/tailscale/tailscaled.sock:/var/run/tailscale/tailscaled.sock   # tailscale whois for the tailnet door
     - /usr/bin/tailscale:/usr/local/bin/tailscale:ro                         # the host's static CLI, same version as tailscaled
 
