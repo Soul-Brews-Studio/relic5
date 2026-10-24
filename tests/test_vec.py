@@ -119,3 +119,25 @@ def test_semantic_reply_says_how_fresh_it_is(withvec):
             open(os.path.join(fts.search_dir(root), "vectors.json"), "w"))
     f = Relic5(root, duckdb.connect()).search("anything", vector=unit([1.0, 0.0, 0.0]))["freshness"]
     assert f["vectors_at"] == "2026-10-24T03:00:00+0700" and f["vectors_pending"] == 5
+
+
+def test_fast_lane_recount_keeps_publish_time(withvec):
+    """vectors.json was written by the vector lane only, so pending read 0 for hours while new messages landed
+    (2026-10-24: 0 shown, 1,062 real). The fast lane recounts it and leaves "at" (last publish) alone."""
+    import json as _j
+    from conftest import COLS, row, write_parquet
+    root, keys, have = withvec
+    con = duckdb.connect()
+    vec.write_marks(root, con, published=True)
+    p = os.path.join(fts.search_dir(root), "vectors.json")
+    first = _j.load(open(p))
+    before = sum(v["pending"] for v in first["models"][M].values())
+    assert before >= len(keys) - len(have) and first["at"] == first["counted_at"]   # per machine: a shared key counts twice
+    write_parquet(os.path.join(root, "parts/m7/text/2026-10.parquet"), COLS,   # a new file: the fixture's stay as they are
+                  [row("a fresh line that has no vector yet", "2026-10-23T13:59:00.000Z", sid="s9-new")])
+    Parts(root).index(con, log=lambda s: None)
+    vec.write_marks(root, con, published=False)
+    after = _j.load(open(p))
+    assert after["at"] == first["at"] and sum(v["pending"] for v in after["models"][M].values()) == before + 1
+    f = Relic5(root, duckdb.connect()).search("anything", vector=unit([1.0, 0.0, 0.0]))["freshness"]
+    assert f["pending_counted_at"] == after["counted_at"]

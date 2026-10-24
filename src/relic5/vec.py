@@ -118,6 +118,26 @@ def watermarks(root: str, con: "duckdb.DuckDBPyConnection", model: str = DEFAULT
     return out
 
 
+def write_marks(root: str, con: "duckdb.DuckDBPyConnection", published: bool) -> dict[str, dict[str, Json]]:
+    """Write index/_search/vectors.json: per model and machine the watermark and how many chunks have no vector.
+    The vector lane (published=True) moves "at", the time vectors were last published. The fast lane recounts after
+    every push (published=False, about 1 s), so pending grows as new messages land instead of reading 0 until the
+    next embed; "counted_at" says when the count was taken."""
+    import json, os, time
+    from .fts import search_dir
+    p = os.path.join(search_dir(root), "vectors.json")
+    try:
+        old = json.load(open(p)).get("at")
+    except (OSError, ValueError, AttributeError):
+        old = None
+    marks = {m: watermarks(root, con, m) for m in models(root)}
+    now = time.strftime("%FT%T%z")
+    with open(p + ".tmp", "w") as f:
+        json.dump({"at": now if published else old, "counted_at": now, "models": marks}, f, indent=1)
+    os.replace(p + ".tmp", p)
+    return marks
+
+
 def table_sql(parts: Parts, root: str, model: str, months: Collection[str]) -> str | None:
     """Folded prose text rows of some months joined to their vectors (rows with no vector are left out)."""
     src, have = text_sql(parts, months), vectors_sql(root, model)
