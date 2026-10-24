@@ -25,3 +25,7 @@ export const bkk = (iso: string | null | undefined) => {
 };
 
 export const sum = (o: Record<string, number> | undefined) => Object.values(o ?? {}).reduce((a, b) => a + b, 0);
+
+/** 2002706 -> "2.00M", 869323 -> "869k": for big numerals in narrow cards; the exact number goes in a title. */
+export const compact = (v: number | null | undefined) =>
+  v == null ? UNKNOWN : v >= 1e6 ? (v / 1e6).toFixed(2) + "M" : v >= 1e4 ? Math.round(v / 1e3) + "k" : Number(v).toLocaleString();
