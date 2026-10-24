@@ -2,7 +2,7 @@ import { useState } from "react";
 import { usePoll } from "../api";
 import { DataTable } from "../components/DataTable";
 import { ago, bkk, num } from "../format";
-import { Btn, Chip, cx, inputCls, SectionHead, State } from "../components/ui";
+import { Btn, Chip, cx, inputCls, PageHead, SectionHead, State } from "../components/ui";
 
 interface Device { door: string; client: string; first: string; last: string; calls: number; calls_24h: number;
                    tools: Record<string, number>; p50_ms: number | null }
@@ -15,15 +15,15 @@ interface Tool { name: string; description?: string }
 function Cmd({ title, why, cmd }: { title: string; why: string; cmd: string }) {
   const [copied, setCopied] = useState(false);
   return (
-    <div className="border-b border-line px-6 py-5 font-sans">
-      <div className="flex flex-wrap items-baseline justify-between gap-3">
-        <h3 className="m-0 text-[15px] font-semibold text-text">{title}</h3>
+    <div className="rounded-2xl border border-line bg-panel px-6 py-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h3 className="m-0 text-base font-bold text-text">{title}</h3>
         <Btn type="button" onClick={() => { navigator.clipboard.writeText(cmd); setCopied(true); setTimeout(() => setCopied(false), 1500); }}>
           {copied ? "Copied" : "Copy"}
         </Btn>
       </div>
-      <p className="m-0 mt-1 max-w-[80ch] text-[13px] text-muted">{why}</p>
-      <pre className="m-0 mt-3 overflow-x-auto rounded-lg bg-deep px-4 py-3 font-mono text-[12px] leading-relaxed whitespace-pre-wrap text-soft select-all">{cmd}</pre>
+      <p className="m-0 mt-1 max-w-[75ch] text-sm text-muted">{why}</p>
+      <pre className="m-0 mt-4 overflow-x-auto rounded-xl bg-deep px-4 py-3.5 font-mono text-xs leading-relaxed whitespace-pre-wrap text-soft select-all">{cmd}</pre>
     </div>
   );
 }
@@ -55,7 +55,7 @@ function Tokens({ url }: { url: string }) {
   return (
     <>
       <SectionHead>Tokens</SectionHead>
-      <p className="m-0 px-5 pb-3 font-sans text-[13px] text-muted">
+      <p className="m-0 px-5 pb-3 font-sans text-sm text-muted">
         For a client outside the tailnet. Stored hashed; the secret is shown once when issued. Only the hub itself and Nat's tailnet can manage them.
       </p>
       {denied ? <State error>{denied}</State> : (
@@ -73,9 +73,9 @@ function Tokens({ url }: { url: string }) {
       {err && <State error>{err}</State>}
       {fresh && (
         <div className="mx-5 mb-4 rounded-xl border border-warning p-4 font-sans">
-          <div className="text-[14px] font-semibold text-text">Token for {fresh.name}: copy it now, it will not be shown again</div>
-          <pre className="m-0 mt-2 overflow-x-auto rounded-lg bg-deep px-4 py-3 font-mono text-[12px] whitespace-pre-wrap text-soft select-all">{fresh.token}</pre>
-          <pre className="m-0 mt-2 overflow-x-auto rounded-lg bg-deep px-4 py-3 font-mono text-[12px] whitespace-pre-wrap text-soft select-all">{`claude mcp add --transport http relic5 ${url} --header "Authorization: Bearer ${fresh.token}"\n# Codex:\nexport RELIC5_TOKEN=${fresh.token}\ncodex mcp add relic5 --url ${url} --bearer-token-env-var RELIC5_TOKEN`}</pre>
+          <div className="text-sm font-semibold text-text">Token for {fresh.name}: copy it now, it will not be shown again</div>
+          <pre className="m-0 mt-2 overflow-x-auto rounded-lg bg-deep px-4 py-3 font-mono text-xs whitespace-pre-wrap text-soft select-all">{fresh.token}</pre>
+          <pre className="m-0 mt-2 overflow-x-auto rounded-lg bg-deep px-4 py-3 font-mono text-xs whitespace-pre-wrap text-soft select-all">{`claude mcp add --transport http relic5 ${url} --header "Authorization: Bearer ${fresh.token}"\n# Codex:\nexport RELIC5_TOKEN=${fresh.token}\ncodex mcp add relic5 --url ${url} --bearer-token-env-var RELIC5_TOKEN`}</pre>
           <div className="mt-3 flex gap-2">
             <Btn type="button" onClick={() => navigator.clipboard.writeText(fresh.token)}>Copy the token</Btn>
             <Btn type="button" onClick={() => setFresh(null)}>Done, hide it</Btn>
@@ -104,7 +104,7 @@ function Devices() {
   return (
     <>
       <SectionHead>Connected devices</SectionHead>
-      <p className="m-0 px-5 pb-3 font-sans text-[13px] text-muted">
+      <p className="m-0 px-5 pb-3 font-sans text-sm text-muted">
         Every machine (its door) and program (its client) that called this hub in the last {p.data?.days ?? 7} days, from the query log. The Mac shim shows as python-urllib (mcp), RelicFeeder as relic-feeder.
       </p>
       <DataTable rows={list} rowKey={d => d.door + d.client} empty="no calls yet" cols={[
@@ -140,19 +140,11 @@ export function ConnectView({ repo }: { repo?: string }) {
   }
   return (
     <>
-      <div className="border-b border-line bg-panel px-6 pt-6 pb-5 font-sans">
-        <h2 className="m-0 text-[22px] font-bold tracking-tight text-text">Connect an agent</h2>
-        <p className="m-0 mt-1 max-w-[75ch] text-[14px] text-muted">
-          relic5 is an MCP server with five tools (relic_search, relic_show, relic_sessions, relic_session, relic_status).
-          This hub's MCP address is <code className="font-mono text-[13px] text-soft">{url}</code>. On the tailnet and on this machine no token is needed.
-        </p>
-        <div className="mt-4 flex flex-wrap items-center gap-3">
-          <Btn primary type="button" onClick={run}>Test the connection</Btn>
-          {test && (test.ok
-            ? <span className="text-[13px] text-accent">Connected through the {test.door} door · {test.tools?.length} tools: {test.tools?.map(t => t.name).join(", ")}</span>
-            : <span className="text-[13px] text-danger">Failed: {test.error}</span>)}
-        </div>
-      </div>
+      <PageHead title="Connect" sub={<>relic5 is an MCP server with five tools (relic_search, relic_show, relic_sessions, relic_session, relic_status). This hub's MCP address is <code className="font-mono text-sm text-soft">{url}</code>; on the tailnet no token is needed.</>}>
+        <Btn primary type="button" onClick={run}>Test the connection</Btn>
+      </PageHead>
+      {test && <p className={cx("m-0 mb-6 text-sm", test.ok ? "text-ok" : "text-danger")}>{test.ok ? `Connected through the ${test.door} door · ${test.tools?.length} tools: ${test.tools?.map(t => t.name).join(", ")}` : `Failed: ${test.error}`}</p>}
+      <div className="grid gap-4 xl:grid-cols-2">
       <Cmd title="Claude Code, over HTTP" why="From any machine on the tailnet. Keyword search (BM25, Thai-aware); semantic needs the shim below."
         cmd={`claude mcp add --transport http relic5 ${url}`} />
       <Cmd title="Claude Code on a Mac, with semantic search" why="The relic5 shim runs on the Mac, embeds a semantic query on its ANE (or MPS), and forwards everything to the hub. Needs the relic5 checkout on that Mac."
@@ -163,7 +155,8 @@ export function ConnectView({ repo }: { repo?: string }) {
         cmd={`# on the hub:\nrelic5 token new <name>\n# on the client:\nclaude mcp add --transport http relic5 ${url} --header "Authorization: Bearer <token>"`} />
       <Cmd title="Check it" why="Lists the MCP servers Claude Code knows and whether each one answers."
         cmd={"claude mcp list\nclaude mcp get relic5"} />
-      <div className={cx("px-6 py-4 font-sans text-[12px] text-faint")}>
+      </div>
+      <div className="mt-4 text-sm text-muted">
         Remove it again with <code className="font-mono">claude mcp remove relic5</code> or <code className="font-mono">codex mcp remove relic5</code>.
       </div>
       {test && !test.ok && <State error>{test.error}</State>}

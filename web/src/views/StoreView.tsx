@@ -1,6 +1,6 @@
 import { ago, bytes, num, sum } from "../format";
 import { DataTable } from "../components/DataTable";
-import { SectionHead, Stat, Stats } from "../components/ui";
+import { PageHead, SectionHead, Stat, Stats } from "../components/ui";
 import type { Status } from "../types";
 
 type Line = { what: string; size: number | null; detail: string };
@@ -16,6 +16,7 @@ export function StoreView({ s }: { s: Status }) {
   ];
   return (
     <>
+      <PageHead title="Store" sub="What the hub holds on white's disk, what it costs the machine, and how far each index has caught up." />
       <Stats>
         <Stat label="store" value={bytes(st.total)} note={st.growth?.per_day != null ? `${bytes(st.growth.per_day)}/day since ${st.growth.since}` : "growth measured from tomorrow"} />
         <Stat label="disk free" value={`${st.disk.free_pct}%`} tone={st.disk.free_pct < 15 ? "bad" : st.disk.free_pct < 25 ? "warn" : undefined} note={`${bytes(st.disk.free)} of ${bytes(st.disk.total)}`} />
@@ -26,7 +27,7 @@ export function StoreView({ s }: { s: Status }) {
       <DataTable rows={lines} rowKey={l => l.what} cols={[
         { key: "w", head: "what", cell: l => <b>{l.what}</b> },
         { key: "s", head: "size", num: true, cell: l => bytes(l.size) },
-        { key: "d", head: "detail", cell: l => l.detail, title: l => l.detail },
+        { key: "d", head: "detail", lead: true, cell: l => l.detail, title: l => l.detail },
       ]} />
       <SectionHead>Watermarks</SectionHead>
       <DataTable rowKey={x => x.k} rows={[

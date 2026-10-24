@@ -1,7 +1,7 @@
 import { usePoll } from "../api";
 import { bkk } from "../format";
 import { DataTable, type Col } from "../components/DataTable";
-import { Chip, Hint, SectionHead, Stat, State, Stats } from "../components/ui";
+import { Chip, Hint, PageHead, SectionHead, Stat, State, Stats } from "../components/ui";
 import type { Queries, QueryRow } from "../types";
 
 const cols: Col<QueryRow>[] = [
@@ -9,7 +9,7 @@ const cols: Col<QueryRow>[] = [
   { key: "d", head: "door", cell: r => <Chip>{r.door}</Chip> },
   { key: "c", head: "client", cell: r => r.client ?? "" },
   { key: "t", head: "tool", cell: r => r.tool },
-  { key: "q", head: "query", cell: r => r.query, title: r => r.query },
+  { key: "q", head: "query", lead: true, cell: r => r.query, title: r => r.query },
   { key: "h", head: "hits", num: true, cell: r => r.hits ?? "" },
   { key: "ms", head: "ms", num: true, cell: r => r.ms ?? "" },
   { key: "e", head: "error", cell: r => (r.error ? <Chip tone="bad">{r.error}</Chip> : "") },
@@ -22,6 +22,7 @@ export function QueriesView({ on }: { on: boolean }) {
   const q = p.data, hours = Object.entries(q.per_hour), last = hours[hours.length - 1]?.[1];
   return (
     <>
+      <PageHead title="Queries" sub="Who asked the hub what, through which door, and how fast it answered. Zero-hit queries show what search still misses." />
       <Stats>
         <Stat label="running now" value={q.running.length} />
         <Stat label="last hour" value={last?.n ?? "unknown"} note={last ? `p50 ${last.p50_ms} ms · p95 ${last.p95_ms} ms` : undefined} />

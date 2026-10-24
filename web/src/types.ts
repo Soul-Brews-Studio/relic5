@@ -60,14 +60,14 @@ export interface Hit {
   machines: string[]; link: string;
 }
 
-export interface SearchResult {
+export interface SearchResult { older_hits?: number;
   hits: Hit[]; horizon: string; horizons_tried: string[]; searched_months: string[]; widened?: boolean; fallback?: string;
 }
 
 export interface Msg { ts: string; role: string; text: string; machines?: string[]; sid?: string }
 export interface ShowResult { before: Msg[]; target: Msg; after: Msg[]; link: string }
 
-export interface TailRow { ts_th?: string; machines?: string[]; role: string; session_name?: string; sid?: string; cat?: string; text?: string; uid?: string }
+export interface TailRow { ts_th?: string; machines?: string[]; role: string; session_name?: string; sid?: string; cat?: string; link?: string; text?: string; uid?: string }
 export interface TailResult { rows: TailRow[]; newest?: string }
 
 export interface QueryRow {

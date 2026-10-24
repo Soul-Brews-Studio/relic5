@@ -89,3 +89,16 @@ def test_push_sends_memory_notes(tmp_path):
     assert (base / "claude-neo/p3/memory/user_b.md").exists()
     assert not (base / "claude/p2").exists()
     assert "stream memory:claude" in r.stdout
+
+
+def test_memory_file_route_serves_notes_only(root, monkeypatch):
+    from fastapi.testclient import TestClient
+    from relic5.api import make_app
+    from relic5.doors import Doors
+    put(root, "m5", "feedback_vpn.md", NOTE)
+    c = TestClient(make_app(root, {"m5": "t"}, Doors({"m5": "t"}, enabled=False)))
+    rel = f"parts/m5/memory/claude/{PROJ}/memory/feedback_vpn.md"
+    r = c.get("/api/memory/file", params={"path": rel}, headers={"Authorization": "Bearer t"})
+    assert r.status_code == 200 and "tailscale-only-vpn" in r.text
+    for bad in ("parts/../../etc/passwd", "tokens.json", f"parts/m5/text/2026-10.parquet"):
+        assert c.get("/api/memory/file", params={"path": bad}, headers={"Authorization": "Bearer t"}).status_code == 404
