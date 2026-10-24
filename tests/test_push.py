@@ -163,3 +163,18 @@ def test_git_logs_of_every_ghq_repo(env, tmp_path):
     os.utime(cache / ".stamp", (0, 0))   # due again, but the refs did not move
     assert push(e).returncode == 0
     assert os.path.getmtime(cache / "github.com/acme/widget.log") == before
+
+
+def test_git_repo_paths_always_carry_the_host(env, tmp_path):
+    """mba's ghq root is ~/Code/github.com: its repos still land as github.com/<org>/<repo>.log."""
+    src, hub, e = env
+    root, fb = tmp_path / "Code/github.com", tmp_path / "fakebin"
+    repo = root / "acme/widget"
+    repo.mkdir(parents=True)
+    subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True)
+    subprocess.run(["git", "-C", str(repo), "-c", "user.name=N", "-c", "user.email=n@x", "commit", "-q", "--allow-empty", "-m", "x"], check=True)
+    (fb / "ghq").write_text(f"#!/bin/sh\n[ \"$1\" = root ] && echo {root} && exit 0\necho {repo}\n")
+    (fb / "ghq").chmod(0o755)
+    r = push(dict(e, RELIC5_GIT="1", RELIC5_GIT_CACHE=str(tmp_path / "c")))
+    assert r.returncode == 0, r.stderr
+    assert (hub / "relic5/parts/m5/git/github.com/acme/widget.log").exists()

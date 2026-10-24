@@ -144,8 +144,11 @@ if [ "${RELIC5_GIT:-1}" != 0 ] && command -v ghq >/dev/null 2>&1; then
   if [ "$age" -ge "${RELIC5_GIT_EVERY:-3600}" ]; then
     groot=$(ghq root)
     ghq list -p | while IFS= read -r repo; do
-      rel=${repo#"$groot"/}; out="$GITC/$rel.log"
+      rel=${repo#"$groot"/}
       case "$rel" in _*|.*) continue;; esac   # _archive/, .rescue-husks-*/: copies of repos listed again under their host
+      # always <host>/<org>/<repo>: mba's ghq root is ~/Code/github.com, so its list has no host
+      case "$rel" in *.*/*/*) ;; */*) case "$groot" in */*.*) rel="${groot##*/}/$rel";; esac;; esac
+      out="$GITC/$rel.log"
       refs=$(git -C "$repo" for-each-ref --format='%(objectname)' 2>/dev/null | cksum)
       [ -f "$out" ] && [ "$(cat "$out.refs" 2>/dev/null)" = "$refs" ] && continue
       mkdir -p "$(dirname "$out")"
