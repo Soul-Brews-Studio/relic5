@@ -147,5 +147,6 @@ def status(root, now=None):
                  "tools": rows["tools"], "sessions": None, "files": sum(len(p.files(s)) for s in MONTH_STREAMS)},
         "jobs": {"running": running, "recent": evs[:10], "last_error": last_error},
         "backup": backup,
+        "memory": __import__("relic5.memory", fromlist=["counts"]).counts(p.root),
         "warnings": warnings,
     }

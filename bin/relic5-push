@@ -14,7 +14,7 @@ set -u
 STAMP=                                          # set by bin/relic5-install on a copy outside this checkout
 # What this push sends, as a number: bumped only when the behaviour changes (streams, meta files, _sync.json, local
 # hub...). relic_status compares this, not the git hash, which differs after every commit (relic4-scan, 2026-10-23).
-PUSH_FORMAT=4
+PUSH_FORMAT=5
 # The ssh target. RELIC5_HUB_SSH wins; RELIC5_HUB may be the hub's HTTP url (relic-chain sets it for its SYNC check):
 # then the ssh target is nat@<its host>, not the url.
 HUB="${RELIC5_HUB_SSH:-${RELIC5_HUB:-nat@white.follow-rankine.ts.net}}"
@@ -78,6 +78,17 @@ if [ -n "$META" ] && on_hub "mkdir -p '$target/meta'"; then   # openrsync (macOS
   out=$(rsync -a $DRY --timeout=120 --stats $META "$R$target/meta/" 2>&1) || { echo "$out" >&2; rc=1; }
   report meta "$out"
 fi
+# Claude Code's memory notes, raw (relic5 memory.py makes them the "memory" search layer): every
+# ~/.claude*/projects/<project>/memory/*.md -> parts/<machine>/memory/<home>/<project>/memory/. relic-scan reads only
+# .jsonl and ψ vaults, so without this the one-fact rules and decisions of every project were nowhere (Nat, 2026-10-24).
+for H in "$HOME"/.claude "$HOME"/.claude-*; do
+  [ -d "$H/projects" ] || continue
+  name=$(basename "$H" | sed 's/^\.//')
+  [ -z "$DRY" ] && { on_hub "mkdir -p '$target/memory/$name'" || { rc=1; continue; }; }
+  out=$(rsync -a $DRY --timeout=120 --stats --prune-empty-dirs --include='*/' --include='*/memory/*.md' --exclude='*' \
+    "$H/projects/" "$R$target/memory/$name/" 2>&1) || { echo "$out" >&2; rc=1; continue; }
+  report "memory:$name" "$out"
+done
 # What this machine runs, so the hub can tell when machines differ (relic_status warns on a mismatch).
 ver() { command -v "$1" >/dev/null 2>&1 && "$1" --version 2>/dev/null | head -1 | sed 's/^[^ ]* //' || echo none; }
 here=${STAMP:-$(cd "$(dirname "$0")" && git rev-parse --short HEAD 2>/dev/null || echo unknown)}

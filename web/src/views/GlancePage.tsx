@@ -161,6 +161,7 @@ export function GlancePage({ s, error, at, theme, setTheme }:
               ["Messages, each counted once", num(s.rows.text)],
               ["Tool calls", num(s.rows.tools)],
               ["Thinking blocks", num(s.rows.thinking)],
+              ["Memory notes (rules, decisions)", s.memory && Object.keys(s.memory).length ? `${num(sum(s.memory))} · ${Object.entries(s.memory).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${v}`).join(" · ")}` : "none yet"],
               ["Months", `${months[0]?.month ?? "?"} to ${months[months.length - 1]?.month ?? "?"}`],
               ["On disk", bytes(s.store.total)],
             ] as [string, string][]).map(([k, v]) => (
