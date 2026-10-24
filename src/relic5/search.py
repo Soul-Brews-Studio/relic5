@@ -270,11 +270,14 @@ def search(relic: "Relic5", index: "Index", query: str, since: str | None = None
     more = len(hits) > off + limit
     repos = relic._repos({h["sid"] for h in page if h["sid"]})
     names = relic._names({h["sid"] for h in page if h["sid"]})
+    from . import vaults as vaults_
+    vs = vaults_.load(index.root) if any((h["sid"] or "").startswith("vault:") for h in page) else {}
     out: list[Json] = []
     for r in page:
+        vlt = vaults_.of(vs, r["sid"], r["machines"])
         out.append({"uid": r["uid"], "partition": r["month"], "session_uuid": r["sid"], "role": r["role"], "ts": r["ts"],
-                    "day": (r["ts_th"] or "")[:10] or None, "repo_key": repos.get(r["sid"]),
-                    "session_name": names.get(r["sid"]), "text_snippet": snippet(r["text"] or "", words), "score": round(float(r["_score"]), 4),
+                    "day": (r["ts_th"] or "")[:10] or None, "repo_key": vlt["repo_key"] if vlt else repos.get(r["sid"]),
+                    "session_name": vlt["name"] if vlt else names.get(r["sid"]), "text_snippet": snippet(r["text"] or "", words), "score": round(float(r["_score"]), 4),
                     "layer": r["layer"], "source_present": False,
                     "ephemeral": sorted(set(EPHEMERAL.findall(r["text"] or "")))[:5] or None, "machines": r["machines"], "title": r.get("title"),
                     "link": f"relic5://{r['month']}/{r['uid']}",
