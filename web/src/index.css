@@ -21,13 +21,15 @@
 }
 :root[data-theme="paper"] {
   color-scheme: light;
-  --bg:#f5f6fa; --panel:#ffffff; --raised:#e9edf6; --deep:#fbfcfe; --rail:#eceff5;
-  --line:#d6dbe7; --line-strong:#aeb7ca;
-  --text:#151b2b; --soft:#2d3548; --muted:#566074; --faint:#5d667a;
-  --amber:#8f5d12; --on-amber:#fffaf0; --amber-wash:rgb(183 121 31 / .10);
-  --accent:#1f6fa8; --on-accent:#ffffff; --accent-dim:#d4e8f6; --accent-wash:rgb(31 111 168 / .07); --accent-ink:#0d3554;
-  --ok:#1f8a57; --ok-wash:rgb(31 138 87 / .09);
-  --user:#1f6fa8; --assistant:#9a6414; --tool:#6d47b0;
+  /* dimmed 2026-10-24 (Nat: "too bright? low contrast?"): no pure-white page or card, cards a step off the page,
+     lines you can see; text soft 12.9:1, muted 7.5:1, faint 6.4:1 on the card; the accent 5.5:1, ok 5.3:1, amber 5.3:1 on the page */
+  --bg:#e4e7ee; --panel:#f1f3f7; --raised:#dfe3eb; --deep:#e9ecf2; --rail:#dce0e8;
+  --line:#c3cad8; --line-strong:#97a1b6;
+  --text:#0f1422; --soft:#232a3b; --muted:#454e62; --faint:#4f586c;
+  --amber:#82530e; --on-amber:#fffaf0; --amber-wash:rgb(183 121 31 / .10);
+  --accent:#1a5f92; --on-accent:#ffffff; --accent-dim:#cfe1f1; --accent-wash:rgb(31 111 168 / .07); --accent-ink:#0d3554;
+  --ok:#156b45; --ok-wash:rgb(21 107 69 / .10);
+  --user:#1a5f92; --assistant:#8a5810; --tool:#6d47b0;
   --warning:#a35a07; --warning-wash:rgb(163 90 7 / .08); --danger:#b42f25; --danger-wash:rgb(180 47 37 / .07); --focus:#7d8bb5; --code:#2f47a6;
 }
 
