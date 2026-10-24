@@ -63,7 +63,7 @@ def _put(relic: "Relic5", key: tuple[object, ...], out: Json) -> None:
 
 
 def keep_warm(relic: "Relic5", every: float = 60.0) -> None:
-    """Make the maps before anyone asks: at start, and again whenever the index gets a new generation (or the
+    """Make the maps and the biggest oracles' pages before anyone asks: at start, and again whenever the index gets a new generation (or the
     memory notes change). A background thread; any failure waits for the next round."""
     import threading, time
 
@@ -73,6 +73,12 @@ def keep_warm(relic: "Relic5", every: float = 60.0) -> None:
             try:
                 sessions_map(relic)
                 memory_map(relic)
+            except Exception:
+                pass
+            try:   # the biggest oracles' pages too: a first look at one cost 2.0-2.8 s (measured 2026-10-25)
+                from . import oracles
+                for o in oracles.listing(relic)["oracles"][:12]:
+                    oracles.portrait(relic, o["name"])
             except Exception:
                 pass
             time.sleep(every)
