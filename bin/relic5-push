@@ -14,7 +14,7 @@ set -u
 STAMP=                                          # set by bin/relic5-install on a copy outside this checkout
 # What this push sends, as a number: bumped only when the behaviour changes (streams, meta files, _sync.json, local
 # hub...). relic_status compares this, not the git hash, which differs after every commit (relic4-scan, 2026-10-23).
-PUSH_FORMAT=6
+PUSH_FORMAT=7
 # The ssh target. RELIC5_HUB_SSH wins; RELIC5_HUB may be the hub's HTTP url (relic-chain sets it for its SYNC check):
 # then the ssh target is nat@<its host>, not the url.
 HUB="${RELIC5_HUB_SSH:-${RELIC5_HUB:-nat@white.follow-rankine.ts.net}}"
