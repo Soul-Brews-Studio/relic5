@@ -64,9 +64,14 @@ def test_retire_a_machine_moved_to_the_attic(root):
     shutil.move(os.path.join(root, "parts/mba"), os.path.join(root, "attic-mba"))
     missing = seals.verify(root)["problems"]
     assert missing and all(p.startswith("mba 2026-09 ") and p.endswith("part missing") for p in missing)
-    assert seals.retire(root, "mba", "moved to the attic") == 1
+    import pytest
+    with pytest.raises(ValueError):
+        seals.retire(root, "mba", "moved to the attic", " ")                         # trinity: no successor, no retire
+    assert seals.retire(root, "mba", "moved to the attic", "m5") == 1
     assert "mba" not in seals.load(root) and seals.verify(root)["problems"] == []
     kept = json.load(open(os.path.join(root, "index/_seals/retired.json")))
     (k, v), = kept.items()
-    assert k.startswith("mba@") and v["why"] == "moved to the attic" and v["months"]["2026-09"]["sealed_keys"] == "k1"
-    assert seals.retire(root, "mba", "again") == 0
+    assert k.startswith("mba@") and v["why"] == "moved to the attic" and v["succeeded_by"] == "m5" and v["months"]["2026-09"]["sealed_keys"] == "k1"
+    ev = json.loads(open(os.path.join(root, "logs/jobs.jsonl")).readlines()[-1])
+    assert ev["verb"] == "retire" and "succeeded by m5" in ev["message"]
+    assert seals.retire(root, "mba", "again", "m5") == 0

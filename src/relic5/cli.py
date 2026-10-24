@@ -5,7 +5,7 @@
   relic5 index [--root ~/relic5] [--force] [YYYY-MM ...]   on the hub: month manifests, BM25 tables, names (fast lane)
   relic5 index --vectors                     on the hub: vector tables and watermarks only (slow lane, after shards land)
   relic5 seals [--verify]                    on the hub: each machine's sealed months as the hub holds them (exit 1: a seal broke)
-  relic5 seals --retire <machine> [--why W]  on the hub: a machine moved to the attic; its seal records kept in retired.json
+  relic5 seals --retire <machine> --succeeded-by S [--why W]   on the hub: a machine moved to the attic (docs/RETIRED.md)
   relic5 seal-day [YYYY-MM]                  on the hub: reconcile closed months end to end (exit 1: one is blocked)
   relic5 import relic3 [--weeks 2026W40-2026-09-28,...] [--all] [--out ~/.relic-import/relic3]
                                   old relic3 weeks -> relic-scan month files of the sessions no machine holds
@@ -342,7 +342,10 @@ def _main(argv: list[str] | None = None) -> None:
         root = os.path.abspath(os.path.expanduser(_opt(rest, "--root", ROOT)))
         if "--retire" in rest:   # relic5 seals --retire <machine> --why "..."  (after its parts went to the attic)
             m = _opt(rest, "--retire", "")
-            n = seals.retire(root, m, _opt(rest, "--why", "parts moved to the attic"))
+            by = _opt(rest, "--succeeded-by", "")
+            if not by:
+                sys.exit(print("relic5 seals --retire needs --succeeded-by <machine | 'nothing: reason'> (docs/RETIRED.md)", file=sys.stderr) or 2)
+            n = seals.retire(root, m, _opt(rest, "--why", "parts moved to the attic"), by)
             sys.exit(print(f"{m}: {n} sealed months moved to index/_seals/retired.json") if n else print(f"{m}: no seal records", file=sys.stderr) or 1)
         vf = seals.verify(root) if "--verify" in rest else None
         for m, x in seals.summary(root)["machines"].items():
