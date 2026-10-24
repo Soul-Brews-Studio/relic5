@@ -88,3 +88,30 @@ def test_probe_rows_carry_stored_vectors(withvec):
     root, _, have = withvec
     rows = vec.probe_rows(root, duckdb.connect(), M, n=50)
     assert rows and all(r["key"] in have and len(r["vector"]) == 3 for r in rows)
+
+
+def test_near_duplicates_collapse():
+    """Issue #25: a templated prompt per worktree differs only in its paths; it is one hit that counts the others."""
+    from relic5.search import collapse, near_key
+    tpl = "You are auditing ONE git worktree of the maw-js repo at {} (branch fix-{}). Report findings as a table."
+    rows = [{"uid": "target", "text": "delete it, no backup, git can restore", "_score": 0.9}] + \
+           [{"uid": f"t{i}", "text": tpl.format(f"/opt/Code/wt/maw-{i}-issue{300 + i}", i), "_score": 0.8 - i / 100} for i in range(8)] + \
+           [{"uid": "other", "text": "The user sent a new message while you were working: ship the release", "_score": 0.5},
+            {"uid": "other2", "text": "The user sent a new message while you were working: revert the bump", "_score": 0.4}]
+    got = collapse(rows)
+    assert [r["uid"] for r in got] == ["target", "t0", "other", "other2"]        # same opening, different words: kept
+    assert got[1]["_dups"] == 7 and "_dups" not in got[0]
+    assert near_key(rows[1]) == near_key(rows[5]) != near_key(rows[9])
+
+
+def test_semantic_reply_says_how_fresh_it_is(withvec):
+    root, _, _ = withvec
+    res = Relic5(root, duckdb.connect()).search("anything", vector=unit([1.0, 0.0, 0.0]))
+    f = res["freshness"]
+    assert f["index_built"] and f["vectors_at"] is None and f["vectors_pending"] is None   # no vectors.json: unknown, not 0
+    assert res["collapsed"] == 0
+    import json as _j
+    _j.dump({"at": "2026-10-24T03:00:00+0700", "models": {M: {"m5": {"at": "x", "pending": 4}, "mba": {"at": "y", "pending": 1}}}},
+            open(os.path.join(fts.search_dir(root), "vectors.json"), "w"))
+    f = Relic5(root, duckdb.connect()).search("anything", vector=unit([1.0, 0.0, 0.0]))["freshness"]
+    assert f["vectors_at"] == "2026-10-24T03:00:00+0700" and f["vectors_pending"] == 5

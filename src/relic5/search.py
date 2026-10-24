@@ -50,6 +50,39 @@ def fold(rows: list[Json], seen: set[tuple[object, ...]]) -> list[Json]:
     return out
 
 
+# Near-duplicates (issue #25): a templated prompt sent once per worktree differs only in its paths, ids and numbers, and
+# filled 8 of a semantic top 10. Two hits are the same when their first 400 characters agree after lowercasing,
+# collapsing whitespace and replacing paths, hex ids and numbers; the best one stays and counts the rest.
+_VARYING = re.compile(r"(?:~|\.{0,2})?(?:/[\w.@%+-]+)+/?|\b[0-9a-f]{7,}\b|\d+")
+
+
+def near_key(r: Json) -> str:
+    return _VARYING.sub("#", " ".join((r.get("text") or "").lower().split())[:400])
+
+
+def collapse(rows: list[Json]) -> list[Json]:
+    """Keep the first (best) hit of each near-duplicate group; it carries near_duplicates = how many it stands for."""
+    kept: dict[str, Json] = {}
+    for r in rows:
+        k = near_key(r)
+        if k in kept:
+            kept[k]["_dups"] = kept[k].get("_dups", 0) + 1
+        else:
+            kept[k] = r
+    return list(kept.values())
+
+
+def vector_hits(index: "Index", slug: str, vector: Sequence[float], vf: "VecFilter", want: int) -> list[Json]:
+    """Semantic hits, folded and collapsed; fetches more while the collapse thins the page."""
+    k = int(want * 1.5) + 8
+    while True:
+        raw = index.vector(slug, vector, vf, k)
+        got = collapse(fold(raw, set()))
+        if len(got) >= want or len(raw) < k or k >= CAP:
+            return got
+        k = min(k * 4, CAP)
+
+
 def run(index: "Index", query: str, layers: list[str], where: str | None, want: int) -> list[Json]:
     """Folded hits of every layer, prose first; fetches more while the fold drops rows."""
     seen: set[tuple[object, ...]] = set()
@@ -184,7 +217,7 @@ def search(relic: "Relic5", index: "Index", query: str, since: str | None = None
         tried.append(hz)
         if vector is not None and hybrid:   # reciprocal-rank fusion (k = 60) of the BM25 and the vector lists
             k = int(want * 1.5) + 8
-            lists = [run(index, query, ["prose"], where, k), fold(index.vector(slug, vector, vf, k), set())]
+            lists = [run(index, query, ["prose"], where, k), vector_hits(index, slug, vector, vf, k)]
             fused: dict[str, list[Any]] = {}   # uid -> [fused score, row]
             for lst in lists:
                 for rank, r in enumerate(lst):
@@ -193,9 +226,9 @@ def search(relic: "Relic5", index: "Index", query: str, since: str | None = None
             hits = []
             for sc, r in sorted(fused.values(), key=lambda x: -x[0]):
                 hits.append(r | {"_score": sc})
-            hits = fold(hits, set())
+            hits = collapse(fold(hits, set()))
         elif vector is not None:
-            hits = fold(index.vector(slug, vector, vf, int(want * 1.5) + 8), set())
+            hits = vector_hits(index, slug, vector, vf, want)
         else:
             hits = run(index, query, layers, where, want)
         chosen = hz
@@ -233,9 +266,30 @@ def search(relic: "Relic5", index: "Index", query: str, since: str | None = None
                     "layer": r["layer"], "source_present": False,
                     "ephemeral": sorted(set(EPHEMERAL.findall(r["text"] or "")))[:5] or None, "machines": r["machines"], "title": r.get("title"),
                     "link": f"relic5://{r['month']}/{r['uid']}",
-                    "locator": {"month": r["month"], "stream": r["layer"], "key": r["key"], "chunk": r["chunk"]}})
+                    "locator": {"month": r["month"], "stream": r["layer"], "key": r["key"], "chunk": r["chunk"]}}
+                   | ({"near_duplicates": r["_dups"]} if r.get("_dups") else {}))
     nxt = base64.urlsafe_b64encode(json.dumps({"o": off + limit, "q": sig, "h": chosen}).encode()).decode().rstrip("=") if more else None
     months = sorted({h["month"] for h in hits if h.get("month")})
     extra: Json = {"semantic": True, "model": slug, "hybrid": bool(hybrid)} if vector is not None else {}
     return {**extra, "hits": out, "next_cursor": nxt, "horizon": chosen, "horizons_tried": tried, "widened": len(tried) > 1,
-            "searched_weeks": months, "searched_months": months, "older_hits": older, "note": note}
+            "searched_weeks": months, "searched_months": months, "older_hits": older, "note": note,
+            "collapsed": sum(h.get("near_duplicates", 0) for h in out), "freshness": freshness(index.root)}
+
+
+def freshness(root: str) -> Json:
+    """How current a result is (issue #25): when the published BM25 generation was built, when vectors were last
+    published, and how many messages still wait for one. Cheap: two small files, no scan."""
+    import os
+    from datetime import datetime, timezone
+    from .fts import search_dir
+    sd = search_dir(root)
+    cur = os.path.join(sd, "current.json")
+    built = datetime.fromtimestamp(os.path.getmtime(cur), timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") if os.path.exists(cur) else None
+    vp = os.path.join(sd, "vectors.json")
+    try:
+        vs = json.load(open(vp))
+        pending: int | None = sum(int(v["pending"]) for w in vs.get("models", {}).values() for v in w.values())
+        vat = vs.get("at")
+    except (OSError, ValueError, KeyError):
+        pending, vat = None, None
+    return {"index_built": built, "vectors_at": vat, "vectors_pending": pending}
