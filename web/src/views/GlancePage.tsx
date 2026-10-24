@@ -104,7 +104,7 @@ export function GlancePage({ s, error, at, theme, setTheme }:
   const log = usePoll<JobEvent[]>("/api/log?n=300", 30000);
   const sessions = usePoll<{ total: number; events: number }>("/api/sessions?limit=0", 0);
   const top = <TopBar theme={theme} setTheme={setTheme} note={error ? "hub unreachable" : at ? `read ${at.toLocaleTimeString()} · every 15 s` : "reading…"}
-    link={<a href="#tab=search" className={pill}>Open the hub <Arrow size={16} /></a>} />;
+    link={<a href="#tab=live" className={pill}>Open the hub <Arrow size={16} /></a>} />;
   if (!s) return <div className="h-dvh overflow-y-auto">{top}<p className="mx-auto max-w-[1200px] px-5 py-16 font-sans text-lg text-muted">{error ?? "Reading the hub…"}</p></div>;
 
   const list = checks(s, log.data ?? []).sort((a, b) => rank[a.level] - rank[b.level]);

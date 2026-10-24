@@ -11,7 +11,7 @@ import { CompareView } from "./views/CompareView";
 import { StoreView } from "./views/StoreView";
 import { GlancePage } from "./views/GlancePage";
 
-const TABS = ["search", "live", "jobs", "queries", "compare", "store"] as const;
+const TABS = ["live", "search", "jobs", "queries", "compare", "store"] as const;
 type Tab = (typeof TABS)[number];
 
 /** The URL hash holds the view: #tab=search&q=...&horizon=...&with=...&repo=...&machine=..., so a view is a link and
@@ -21,7 +21,7 @@ const isGlance = () => !location.hash || location.hash === "#" || location.hash.
 
 function readHash() {
   const h = new URLSearchParams(location.hash.slice(1));
-  const tab = (TABS as readonly string[]).includes(h.get("tab") ?? "") ? (h.get("tab") as Tab) : "search";
+  const tab = (TABS as readonly string[]).includes(h.get("tab") ?? "") ? (h.get("tab") as Tab) : "live";   // the hub opens on Live (Nat, 2026-10-24)
   return { tab, machine: h.get("machine") ?? "", search: { q: h.get("q") ?? "", horizon: h.get("horizon") ?? "", with: h.get("with") ?? "", repo: h.get("repo") ?? "" } };
 }
 function writeHash(tab: Tab, machine: string, s: SearchState) {
