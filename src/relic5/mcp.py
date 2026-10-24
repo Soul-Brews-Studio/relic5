@@ -58,7 +58,9 @@ TOOLS = [
     {"name": "relic_sessions", "description": "List top-level sessions, newest first. Subagent and workflow-agent sessions are not listed: each folds "
                     "into its parent's `children` count, so `total` is smaller than relic-scan's session count (it counts every tier).",
      "inputSchema": {"type": "object", "properties": {"repo": STR, "since": STR, "until": STR, "limit": INT,
-                     "via": SEARCH_PROPS["via"], "chat": SEARCH_PROPS["chat"], "from_user": SEARCH_PROPS["from_user"]}, "additionalProperties": False}},
+                     "via": SEARCH_PROPS["via"], "chat": SEARCH_PROPS["chat"], "from_user": SEARCH_PROPS["from_user"],
+                     "by_repo": {"type": "boolean", "description": "also return repos: sessions and events per repo for the same window and filters, most first (a session with no repo counts as '(no repo) <tenant>')"}},
+                     "additionalProperties": False}},
     {"name": "relic_session", "description": "Resolve a session id prefix to its session record and subagent tree.",
      "inputSchema": {"type": "object", "properties": {"id": STR}, "required": ["id"], "additionalProperties": False}},
     {"name": "relic_status", "description": "Months, per-machine watermarks, totals, jobs and warnings (StatusReport).",
@@ -122,9 +124,9 @@ def run_tool(relic: Relic5, name: str, a: Json, door: str | None = None) -> Json
         return relic.show(_str(a, "id"), seq=_int(a, "seq"), before=min(2 if before is None else before, 50),
                           after=min(2 if after is None else after, 50))
     if name == "relic_sessions":
-        _check(a, ["repo", "since", "until", "limit", "via", "chat", "from_user"])
+        _check(a, ["repo", "since", "until", "limit", "via", "chat", "from_user", "by_repo"])
         return relic.sessions(repo=_str(a, "repo"), since=_str(a, "since"), until=_str(a, "until"), limit=min(_int(a, "limit") or DEFAULT_LIMIT, 500),
-                              via=_str(a, "via"), chat=_str(a, "chat"), from_user=_str(a, "from_user"))
+                              via=_str(a, "via"), chat=_str(a, "chat"), from_user=_str(a, "from_user"), by_repo=a.get("by_repo") is True)
     if name == "relic_session":
         _check(a, ["id"])
         return relic.session(_str(a, "id"))
