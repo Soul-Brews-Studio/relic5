@@ -159,3 +159,13 @@ def test_tokens_from_the_ui(hub_with_tokens):
     assert t.check(new) == "phone" and t.check(secret) == "phone"                     # the old one lasts the grace hour
     assert c.post("/api/tokens", json={"action": "revoke", "name": "phone"}, headers=J).json() == {"name": "phone", "action": "revoke"}
     assert t.check(new) is None and c.get("/api/tokens", headers={"Host": "127.0.0.1"}).json() == []
+
+
+def test_big_answers_are_gzipped(client):
+    import glob, os
+    import relic5
+    js = sorted(glob.glob(os.path.join(os.path.dirname(relic5.__file__), "web", "assets", "index-*.js")))[0]
+    r = client.get("/assets/" + os.path.basename(js), headers={**H, "Accept-Encoding": "gzip"})
+    assert r.status_code == 200 and r.headers.get("content-encoding") == "gzip"     # the page's JS: gzipped
+    small = client.get("/health", headers={**H, "Accept-Encoding": "gzip"})
+    assert small.headers.get("content-encoding") is None                            # under 1 KB: as it is
