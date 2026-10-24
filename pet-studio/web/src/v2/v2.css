@@ -1,0 +1,64 @@
+/* Hallmark · macrostructure: Workbench (custom, sticker-sheet) · tone: tactile-utilitarian · anchor hue: magenta 350°
+ * Hallmark · pre-emit critique: P4 H4 E4 S5 R4 V5
+ * impeccable · seed 0e3f60a4 · direction 6/7 "kiss-cut sticker sheet" · raises: metro (state words), signage (next band), catalog (stamp thumbnails)
+ */
+@import "tailwindcss";
+@import "@fontsource-variable/archivo/wdth.css";
+
+/* Pet Studio Designer: a kiss-cut sticker sheet.
+   Ground = the sheet's silicone liner (cool pale grey, printed grid). Panels and the artboard are
+   white die-cut stickers, lifted a hair off the liner. Selection and cut lines are the printer's
+   CutContour magenta, dashed. Process colours are roles: magenta = act / cut, cyan = selected /
+   linked, yellow = the next step, key = ink. Type: Archivo (width axis) for everything. */
+@theme {
+  --color-liner: #e7ebf0;
+  --color-liner-ink: #c9d1db;      /* the printed grid on the liner */
+  --color-sticker: #ffffff;
+  --color-ink: #16181d;            /* key */
+  --color-ink-2: #4a5160;          /* secondary text on white: 7.9:1 */
+  --color-ink-3: #6b7383;          /* tertiary on white: 4.7:1 */
+  --color-cut: #d6006f;            /* CutContour magenta, darkened for 5.3:1 on white */
+  --color-cyan: #0087c9;
+  --color-yellow: #ffdd00;
+  --color-ok: #138a52;
+  --color-bad: #c42b1c;
+  --font-sans: "Archivo Variable", system-ui, sans-serif;
+  --shadow-sticker: 0 1px 0 rgba(22, 24, 29, .06), 0 2px 6px -1px rgba(22, 24, 29, .12), 0 10px 24px -12px rgba(22, 24, 29, .18);
+  --shadow-lift: 0 2px 0 rgba(22, 24, 29, .06), 0 8px 18px -4px rgba(22, 24, 29, .2), 0 22px 40px -18px rgba(22, 24, 29, .25);
+}
+
+@layer base {
+  :root { color-scheme: light; }
+  html, body { @apply h-full; overflow-x: clip; }
+  body {
+    @apply m-0 bg-liner font-sans text-[13px] leading-snug text-ink antialiased;
+    background-image:
+      linear-gradient(var(--color-liner-ink) 1px, transparent 1px),
+      linear-gradient(90deg, var(--color-liner-ink) 1px, transparent 1px);
+    background-size: 24px 24px;
+    background-position: -1px -1px;
+  }
+  ::selection { background: color-mix(in srgb, var(--color-yellow) 70%, transparent); color: var(--color-ink); }
+  :focus-visible { outline: 2px dashed var(--color-cut); outline-offset: 2px; }
+  input, select, textarea { font: inherit; color: inherit; }
+  input[type="range"] { accent-color: var(--color-cut); }
+  input[type="checkbox"] { accent-color: var(--color-cut); }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: var(--color-liner-ink); border-radius: 10px; border: 3px solid transparent; background-clip: padding-box; }
+  ::-webkit-scrollbar-track { background: transparent; }
+}
+
+@layer components {
+  /* a die-cut sticker: white, rounded, a white "bleed" ring, lifted off the liner */
+  .sticker { @apply rounded-[14px] bg-sticker; box-shadow: 0 0 0 3px #fff, var(--shadow-sticker); }
+  .sticker-lift { box-shadow: 0 0 0 3px #fff, var(--shadow-lift); }
+  .label { @apply text-[11px] font-semibold tracking-[0.02em] text-ink-3; font-stretch: 112%; }
+  .field { @apply h-8 w-full rounded-lg border border-liner-ink bg-white px-2.5 text-[13px] text-ink placeholder:text-ink-3 focus:border-cut focus:outline-none; }
+  .btn { @apply inline-flex h-8 cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-liner-ink bg-white px-3 text-[13px] font-medium text-ink transition-[transform,box-shadow,border-color] duration-150 ease-out hover:enabled:border-ink-3 active:enabled:translate-y-px disabled:cursor-not-allowed disabled:opacity-45; }
+  .btn-cut { @apply border-cut bg-cut font-semibold text-white hover:enabled:border-[#b0005b] hover:enabled:bg-[#b0005b]; }
+  .tool { @apply grid size-10 cursor-pointer place-items-center rounded-[10px] text-ink-2 transition-colors duration-150 hover:bg-liner hover:text-ink; }
+  .tool[aria-pressed="true"] { @apply bg-ink text-white; }
+  .icon-btn { @apply grid size-7 cursor-pointer place-items-center rounded-md text-ink-3 transition-colors hover:bg-liner hover:text-ink; }
+  /* a printer's registration target, drawn at the artboard's corners */
+  .reg { @apply pointer-events-none absolute size-5; }
+}

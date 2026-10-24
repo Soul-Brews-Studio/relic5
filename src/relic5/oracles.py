@@ -148,10 +148,24 @@ Retrospectives:
 
 From these notes only: what has {name} come to understand? Name the 3 to 5 insights that run through them, each with the notes that show it, then one thing {name} should carry forward and one it should let go. Say plainly where the notes are thin."""
 
+    pet = f"""Design the desk pet for {name}, for Pet Studio (studio_auto_sprite / studio_create_pack: one character
+picture, then its seven state animations: idle, busy, attention, celebrate, dizzy, heart, sleep).
+
+Draw one small character, front-facing, on a plain background, readable at 64x80 pixels, that shows who {name} is
+from its own notes below. Pick one body colour and one accent, a simple silhouette, and one prop or mark that stands
+for what it does. Then say in one line each how it moves in the seven states.
+
+Who {name} says it is:
+{lines(soul[:4], 300)}
+
+What it works on (the words its notes use most): {", ".join(w for w, _ in words.most_common(12)) or "(not enough notes yet)"}
+
+When the pack is made, keep it on {name}'s page: relic_artifact_put {{"oracle": "{name}", "filename": "<state>.gif", "data": "<base64>", "prompt": "<this prompt>"}}."""
+
     return {"name": name, "path": row.get("path"), "machines": row["machines"], "notes": row["notes"], "sections": row["sections"],
             "newest": row.get("newest"), "repo": short, "soul": [{"title": x["title"], "path": x["path"], "ts": x["ts"], "text": _first(x["text"], 900)} for x in soul],
             "learnings": [{"title": x["title"], "path": x["path"], "ts": x["ts"], "text": _first(x["text"], 400)} for x in learn],
             "retros": [{"title": x["title"], "path": x["path"], "ts": x["ts"], "text": _first(x["text"], 400)} for x in retro],
             "rules": [{"title": r.get("title"), "description": r.get("description"), "link": r.get("link")} for r in rules],
             "sessions": sessions, "words": [[w, n] for w, n in words.most_common(30)],
-            "prompts": {"character": character, "enlighten": enlighten}}
+            "prompts": {"character": character, "enlighten": enlighten, "pet": pet}}

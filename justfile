@@ -47,3 +47,7 @@ web:
 # The UI with hot reload, its /api proxied to a hub (default white).
 web-dev hub="http://white.follow-rankine.ts.net:8795":
     cd web && RELIC5_DEV_HUB={{hub}} bun run dev
+
+# Pet Studio (pet-studio/, from esp32-oracle): the desk-pet designer + its MCP, on the Mac that holds the pets.
+pet-studio:
+    cd pet-studio && bun install && bun run build && bun server/index.ts
