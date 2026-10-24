@@ -4,7 +4,7 @@ import { get } from "./api";
 import { usePoll } from "./api";
 import { ago, bkk, clock } from "./format";
 import type { Queries, ShowResult, Status } from "./types";
-import { Palette, TabBar, TopNav, type HubState, type PaletteSession, type Theme, type View, VIEWS } from "./components/Shell";
+import { Palette, Sidebar, TabBar, TopNav, type Layout, type HubState, type PaletteSession, type Theme, type View, VIEWS } from "./components/Shell";
 import { Drawer } from "./components/Drawer";
 import { Mark, Search as SearchIcon } from "./components/Icons";
 import { cx, Loading, State } from "./components/ui";
@@ -44,6 +44,8 @@ export function App() {
   const [st, setSt] = useState(readHash);
   const [theme, setTheme] = useState<Theme>(() => (localStorage.getItem("relic5-theme") as Theme) || "dark");
   const [focusKey, setFocusKey] = useState(0);
+  const [layout, setLayoutState] = useState<Layout>(() => (localStorage.getItem("relic5-layout") as Layout) || "top");
+  const setLayout = (l: Layout) => { localStorage.setItem("relic5-layout", l); setLayoutState(l); };
   const [palette, setPalette] = useState(false);
   const status = usePoll<Status>("/api/status", 15000);
   const queries = usePoll<Queries>("/api/queries", 60000);
@@ -74,8 +76,8 @@ export function App() {
     if (d.startViewTransition && !matchMedia("(prefers-reduced-motion: reduce)").matches) d.startViewTransition(() => flushSync(f)); else f(); };
   const go = (view: View) => { shift(() => setSt(v => ({ ...v, view }))); document.getElementById("main")?.scrollTo({ top: 0 }); };
   const search = (q: string) => { setSt(v => ({ ...v, view: "search", search: { ...v.search, q } })); setFocusKey(k => k + 1); };
-  const recent = useMemo(() => [...new Set((queries.data?.last ?? [])
-    .filter(r => r.tool === "relic_search" && !(r.client ?? "").startsWith("eval") && r.query && r.query.length < 60).map(r => r.query.trim()))], [queries.data]);
+  const recent = useMemo(() => [...new Set([...(queries.data?.searches ?? []), ...(queries.data?.last ?? []).filter(r => r.tool === "relic_search")]
+    .filter(r => r.query && r.query.length < 60).map(r => r.query.trim()))], [queries.data]);
   const hub: HubState = status.error ? "failed" : !s ? "unknown" : s.warnings.length ? "warning" : "ok";
   const machines = s ? Object.keys({ ...s.machines, ...s.versions }).sort().filter(m => !m.endsWith("-import")) : [];
   const foot = status.error ? <>The hub did not answer.</> : s ? <span title={`relic5 ${s.code.version} · door ${s.you}`}>{s.warnings.length ? `${s.warnings.length} warning${s.warnings.length === 1 ? "" : "s"}, see Home.` : "Every machine is in."} Read {clock(status.at)}.</span> : <>Reading the hub…</>;
@@ -85,16 +87,18 @@ export function App() {
     <div className="h-dvh">
       <a href="#main" onClick={e => { e.preventDefault(); document.getElementById("main")?.focus(); }}
         className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:rounded-lg focus:bg-panel focus:px-4 focus:py-3 focus:text-sm">Skip to content</a>
-      <div id="main" tabIndex={-1} className="h-dvh overflow-y-auto focus:outline-none">
-        <TopNav view={st.view} go={go} state={hub} foot={foot} theme={theme} setTheme={setTheme} badges={{ jobs: s?.jobs.running.length }}
-          onPalette={() => setPalette(true)} version={s?.code.version} />
+      {layout === "side" && <Sidebar view={st.view} go={go} state={hub} foot={foot} theme={theme} setTheme={setTheme} badges={{ jobs: s?.jobs.running.length }}
+        onPalette={() => setPalette(true)} onLayout={() => setLayout("top")} />}
+      <div id="main" tabIndex={-1} className={cx("h-dvh overflow-y-auto focus:outline-none", layout === "side" && "sm:pl-[232px] max-[1100px]:sm:pl-[68px]")}>
+        {layout === "top" && <TopNav view={st.view} go={go} state={hub} foot={foot} theme={theme} setTheme={setTheme} badges={{ jobs: s?.jobs.running.length }}
+          onPalette={() => setPalette(true)} onLayout={() => setLayout("side")} version={s?.code.version} />}
         {/* phone: a slim top bar (mark, state, the palette); the views sit in the bottom bar */}
         <header className="sticky top-0 z-10 flex items-center gap-3 border-b border-line bg-[color-mix(in_srgb,var(--bg)_90%,transparent)] px-4 py-2.5 backdrop-blur sm:hidden">
           <Mark size={30} /><b className="text-base font-bold text-accent">relic5</b>
           <span className={cx("flex items-center gap-1.5 truncate text-xs font-semibold", hub === "ok" ? "text-ok" : hub === "failed" ? "text-danger" : hub === "warning" ? "text-warning" : "text-muted")}><span className="size-2 rounded-full bg-current" />{hub === "ok" ? "All in" : hub === "failed" ? "Hub unreachable" : hub === "warning" ? `${s?.warnings.length} warning${s?.warnings.length === 1 ? "" : "s"}` : "Reading"} · {clock(status.at)}</span>
           <button type="button" onClick={() => setPalette(true)} aria-label="Search or jump" className="ml-auto grid size-11 place-items-center rounded-lg border border-line text-muted"><SearchIcon size={18} /></button>
         </header>
-        <main className={cx(st.view === "search" ? "max-w-[1800px]" : st.view === "home" ? "max-w-[1600px]" : "max-w-[1240px]", "mx-auto px-5 pt-6 pb-28 sm:px-10 sm:pt-10")}>
+        <main className="mx-auto max-w-[1600px] px-5 pt-6 pb-28 sm:px-10 sm:pt-10">
           {st.view !== "home" && s?.copy && (
             <p className="m-0 mb-6 rounded-xl border border-line bg-panel px-5 py-3 text-sm text-soft">
               A copy of {s.copy.of}'s hub, as of {bkk(s.copy.at)} Bangkok ({ago(s.copy.at)}, snapshot {s.copy.snapshot}). Search works; nothing new arrives here, so push, backup and seal checks are off.

@@ -26,6 +26,7 @@ export const Note = (p: P) => <svg {...base(p)}><path d="M7 3.5h7.5L19 8v12a.5.5
 export const Plug = (p: P) => <svg {...base(p)}><path d="M9 3v4.5M15 3v4.5M6.5 7.5h11V11a5.5 5.5 0 01-11 0V7.5zM12 16.5V21" /></svg>;
 export const Jobs = (p: P) => <svg {...base(p)}><path d="M9 6.5h11M9 12h11M9 17.5h11" /><path d="M4 6.5l1 1 2-2M4 12l1 1 2-2M4 17.5l1 1 2-2" /></svg>;
 export const Asked = (p: P) => <svg {...base(p)}><path d="M5 5.5h14a1 1 0 011 1v9a1 1 0 01-1 1h-7.5L7 20v-3.5H5a1 1 0 01-1-1v-9a1 1 0 011-1z" /><path d="M9.8 9.4a2.2 2.2 0 014.2.8c0 1.4-2 1.6-2 2.8M12 14.6v.01" /></svg>;
+export const Rows = (p: P) => <svg {...base(p)}><rect x="3.5" y="4.5" width="17" height="5" rx="1.5" /><rect x="3.5" y="11.5" width="17" height="8" rx="1.5" /></svg>;
 export const Columns = (p: P) => <svg {...base(p)}><rect x="3.5" y="4.5" width="7" height="15" rx="1.5" /><rect x="13.5" y="4.5" width="7" height="15" rx="1.5" /><path d="M6 9h2M16 9h2M6 12.5h2M16 12.5h2" /></svg>;
 export const Filter = (p: P) => <svg {...base(p)}><path d="M4 5.5h16l-6.2 7.3V19l-3.6-1.8v-4.4L4 5.5z" /></svg>;
 export const Session = (p: P) => <svg {...base(p)}><path d="M4.5 6.5a2 2 0 012-2h11a2 2 0 012 2v8a2 2 0 01-2 2H11l-4.5 3.5v-3.5h0a2 2 0 01-2-2v-8z" /><path d="M8.5 9.5h7M8.5 12.5h4.5" /></svg>;

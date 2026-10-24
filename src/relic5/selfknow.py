@@ -88,7 +88,18 @@ def queries(root: str) -> Json:
     zero = [r for r in real if r.get("hits") == 0 and r.get("query")]
     with LOCK:
         running = [v | {"for_s": round(now - time.mktime(time.strptime(v["at"], "%Y-%m-%dT%H:%M:%SZ")) + time.timezone)} for v in RUNNING.values()]
+    # the newest distinct searches: "last" is every call (shows, sessions, status), so on a busy hub it held no search at all
+    searches: list[Json] = []
+    seen: set[str] = set()
+    for r in reversed(real):
+        q = str(r.get("query") or "").strip()
+        if r.get("tool") == "relic_search" and q and q not in seen:
+            seen.add(q)
+            searches.append({"at": r["at"], "query": q, "hits": r.get("hits"), "client": r.get("client")})
+            if len(searches) == 20:
+                break
     return {"running": running, "total_logged": len(rows), "eval_logged": len(rows) - len(real), "last": real[-20:][::-1], "per_hour": per_hour,
+            "searches": searches,
             "top": sorted((TopQuery(query=q, n=n) for q, n in counts.items() if n > 1), key=lambda x: -x["n"])[:15],
             "zero_hits": [{"at": r["at"], "query": r["query"], "tool": r.get("tool")} for r in zero[-20:][::-1]]}
 

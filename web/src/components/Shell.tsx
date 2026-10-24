@@ -1,10 +1,11 @@
 // The hub's shell, after the old ARRA Oracle Studio: a sticky top header on desktop, a bottom tab bar on a phone, and a Cmd/Ctrl-K palette to jump or search from anywhere.
 import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
 import { cx } from "./ui";
-import { Asked, Columns, Disk, Home, Jobs, Live, Mark, More, Moon, Note, Plug, Search, Session, Sun } from "./Icons";
+import { Asked, Columns, Rows, Disk, Home, Jobs, Live, Mark, More, Moon, Note, Plug, Search, Session, Sun } from "./Icons";
 
 export type View = "home" | "search" | "live" | "memory" | "jobs" | "queries" | "compare" | "store" | "connect";
 export type Theme = "dark" | "paper";
+export type Layout = "top" | "side";
 
 export const VIEWS: { id: View; label: string; icon: ComponentType<{ size?: number }>; phone?: boolean; group: 0 | 1 }[] = [
   { id: "home", label: "Home", icon: Home, phone: true, group: 0 },
@@ -22,19 +23,76 @@ export type HubState = "ok" | "warning" | "failed" | "unknown";
 const dot: Record<HubState, string> = { ok: "bg-ok", warning: "bg-warning", failed: "bg-danger", unknown: "bg-muted" };
 const word: Record<HubState, string> = { ok: "Hub ready", warning: "Needs a look", failed: "Failing", unknown: "Reading" };
 
+/** Desktop, the other layout: relic-scan's left sidebar (icons only from 1100px down), in relic5's blue. Nat,
+ *  2026-10-24: "top menu cool but sidebar too is good", so the hub offers both and remembers the pick. */
+export function Sidebar({ view, go, state, foot, theme, setTheme, badges, onPalette, onLayout }: {
+  view: View; go: (v: View) => void; state: HubState; foot: ReactNode; theme: Theme; setTheme: (t: Theme) => void;
+  badges?: Partial<Record<View, number>>; onPalette: () => void; onLayout: () => void;
+}) {
+  const item = (v: (typeof VIEWS)[number]) => {
+    const I = v.icon, on = view === v.id;
+    return (
+      <a key={v.id} href={v.id === "home" ? "#" : `#tab=${v.id}`} aria-current={on ? "page" : undefined} title={v.label}
+        onClick={e => { e.preventDefault(); go(v.id); }}
+        className={cx("group flex min-h-11 items-center gap-3 rounded-lg px-2.5 text-sm font-medium whitespace-nowrap transition-colors duration-[120ms] ease-[var(--ease-out)] max-[1100px]:justify-center max-[1100px]:px-0",
+          on ? "bg-raised text-text" : "text-soft hover:bg-[color-mix(in_srgb,var(--raised)_60%,transparent)] hover:text-text")}>
+        <span className={cx("flex-none transition-colors", on ? "text-accent" : "text-muted group-hover:text-text")}><I size={20} /></span>
+        <span className="max-[1100px]:hidden">{v.label}</span>
+        {!!badges?.[v.id] && <span className="ml-auto rounded-full bg-accent px-1.5 text-xs font-bold text-on-accent max-[1100px]:hidden">{badges[v.id]}</span>}
+      </a>
+    );
+  };
+  return (
+    <aside className="fixed inset-y-0 left-0 z-20 hidden w-[232px] flex-col border-r border-line bg-rail px-3 pt-5 pb-4 sm:flex max-[1100px]:w-[68px] max-[1100px]:px-2.5">
+      <a href="#" onClick={e => { e.preventDefault(); go("home"); }} className="mb-7 flex items-center gap-3 rounded-xl px-1.5 max-[1100px]:justify-center max-[1100px]:px-0">
+        <Mark size={40} />
+        <span className="max-[1100px]:hidden">
+          <b className="block text-lg leading-tight font-bold text-accent">relic5</b>
+          <i className="block font-mono text-xs not-italic tracking-[0.28em] text-muted">hub</i>
+        </span>
+      </a>
+      <button type="button" onClick={onPalette} title="Search or jump (⌘K)"
+        className="mb-4 flex min-h-10 items-center gap-2.5 rounded-lg border border-line bg-deep px-3 text-xs text-muted hover:border-line-strong hover:text-text max-[1100px]:justify-center max-[1100px]:px-0">
+        <Search size={15} /><span className="max-[1100px]:hidden">Search or jump</span>
+        <kbd className="ml-auto rounded border border-line px-1 font-mono text-xs max-[1100px]:hidden">⌘K</kbd>
+      </button>
+      <nav aria-label="Views" className="flex flex-col gap-0.5">
+        {VIEWS.filter(v => v.group === 0).map(item)}
+        <div className="mx-2.5 my-3 h-px bg-line" />
+        {VIEWS.filter(v => v.group === 1).map(item)}
+      </nav>
+      <div className="mt-auto flex flex-col gap-3 px-2 max-[1100px]:items-center max-[1100px]:px-0">
+        <div className="flex gap-2 max-[1100px]:flex-col">
+        <button type="button" onClick={onLayout} aria-label="Menu across the top" title="Menu across the top"
+          className="grid size-11 place-items-center rounded-lg border border-line text-muted hover:border-line-strong hover:text-text"><Rows size={18} /></button>
+        <button type="button" onClick={() => setTheme(theme === "dark" ? "paper" : "dark")} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"}`}
+          className="grid size-11 place-items-center rounded-lg border border-line text-muted hover:border-line-strong hover:text-text">
+          {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
+        </button>
+        </div>
+        <div className="text-xs leading-relaxed text-muted max-[1100px]:hidden">
+          <b className="flex items-center gap-2 text-xs font-bold tracking-[0.14em] text-text uppercase"><span className={cx("size-2 rounded-full", dot[state])} />{word[state]}</b>
+          {foot}
+        </div>
+        <span title={word[state]} className={cx("hidden size-2.5 rounded-full max-[1100px]:block", dot[state])} />
+      </div>
+    </aside>
+  );
+}
+
 /** Desktop: the old ARRA Oracle Studio's header (ui-oracle apps/studio Header.tsx, 2026-04-19), not relic-scan's
  *  sidebar (Nat, 2026-10-24: "make this ui diff from relic scanner"): one sticky bar, the name in the accent, the views
  *  as text links in two groups split by a hairline, the palette, the theme and the hub's state on the right. */
-export function TopNav({ view, go, state, foot, theme, setTheme, badges, onPalette, version }: {
+export function TopNav({ view, go, state, foot, theme, setTheme, badges, onPalette, onLayout, version }: {
   view: View; go: (v: View) => void; state: HubState; foot: ReactNode; theme: Theme; setTheme: (t: Theme) => void;
-  badges?: Partial<Record<View, number>>; onPalette: () => void; version?: string;
+  badges?: Partial<Record<View, number>>; onPalette: () => void; onLayout: () => void; version?: string;
 }) {
   const link = (v: (typeof VIEWS)[number]) => {
     const on = view === v.id;
     return (
       <a key={v.id} href={v.id === "home" ? "#" : `#tab=${v.id}`} aria-current={on ? "page" : undefined}
         onClick={e => { e.preventDefault(); go(v.id); }}
-        className={cx("flex min-h-10 flex-none items-center gap-2 rounded-lg px-3 text-sm whitespace-nowrap transition-colors duration-[120ms]",
+        className={cx("flex min-h-10 flex-none items-center gap-2 rounded-lg px-3 text-sm whitespace-nowrap transition-colors duration-[120ms] focus-visible:outline-offset-[-2px]",
           on ? "bg-raised font-semibold text-text" : "text-soft hover:bg-[color-mix(in_srgb,var(--raised)_60%,transparent)] hover:text-text")}>
         {v.label}
         {!!badges?.[v.id] && <span className="rounded-full bg-accent px-1.5 text-xs font-bold text-on-accent">{badges[v.id]}</span>}
@@ -59,6 +117,8 @@ export function TopNav({ view, go, state, foot, theme, setTheme, badges, onPalet
           <Search size={15} /><span className="max-[1280px]:hidden">Search or jump</span>
           <kbd className="rounded border border-line px-1 font-mono text-xs">⌘K</kbd>
         </button>
+        <button type="button" onClick={onLayout} aria-label="Menu on the left" title="Menu on the left"
+          className="grid size-10 place-items-center rounded-lg text-muted hover:bg-raised hover:text-text"><Columns size={18} /></button>
         <button type="button" onClick={() => setTheme(theme === "dark" ? "paper" : "dark")} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"}`}
           className="grid size-10 place-items-center rounded-lg text-muted hover:bg-raised hover:text-text">
           {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
