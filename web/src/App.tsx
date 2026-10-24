@@ -3,7 +3,8 @@ import { usePoll } from "./api";
 import type { Status } from "./types";
 import { pill, TopBar, type Theme } from "./components/TopBar";
 import { cx, Kbd, Seg, State } from "./components/ui";
-import { SearchView, type SearchState } from "./views/SearchView";
+import { SearchView, WhoPick, type SearchState } from "./views/SearchView";
+import { MemoryView } from "./views/MemoryView";
 import { LiveView } from "./views/LiveView";
 import { JobsView } from "./views/JobsView";
 import { QueriesView } from "./views/QueriesView";
@@ -11,7 +12,7 @@ import { CompareView } from "./views/CompareView";
 import { StoreView } from "./views/StoreView";
 import { GlancePage } from "./views/GlancePage";
 
-const TABS = ["live", "search", "jobs", "queries", "compare", "store"] as const;
+const TABS = ["search", "live", "memory", "jobs", "queries", "compare", "store"] as const;
 type Tab = (typeof TABS)[number];
 
 /** The URL hash holds the view: #tab=search&q=...&horizon=...&with=...&repo=...&machine=..., so a view is a link and
@@ -21,8 +22,8 @@ const isGlance = () => !location.hash || location.hash === "#" || location.hash.
 
 function readHash() {
   const h = new URLSearchParams(location.hash.slice(1));
-  const tab = (TABS as readonly string[]).includes(h.get("tab") ?? "") ? (h.get("tab") as Tab) : "live";   // the hub opens on Live (Nat, 2026-10-24)
-  return { tab, machine: h.get("machine") ?? "", search: { q: h.get("q") ?? "", horizon: h.get("horizon") ?? "", with: h.get("with") ?? "", repo: h.get("repo") ?? "" } };
+  const tab = (TABS as readonly string[]).includes(h.get("tab") ?? "") ? (h.get("tab") as Tab) : "search";   // Search first; the glance page's Open the hub lands on Live (Nat, 2026-10-24)
+  return { tab, machine: h.get("machine") ?? "", search: { q: h.get("q") ?? "", horizon: h.get("horizon") ?? "", with: h.get("with") ?? "", repo: h.get("repo") ?? "", role: h.get("role") ?? "" } };
 }
 function writeHash(tab: Tab, machine: string, s: SearchState) {
   const h = new URLSearchParams({ tab });
@@ -70,6 +71,10 @@ export function App() {
               </button>
             ))}
           </nav>
+          {view.tab === "live" && (
+            <span className="flex items-center gap-2.5 text-[13px] text-muted">Who
+              <WhoPick role={view.search.role} onChange={role => setView(v => ({ ...v, search: { ...v.search, role } }))} /></span>
+          )}
           {machines.length > 0 && (view.tab === "search" || view.tab === "live") && (
             <span className="ml-auto flex items-center gap-2.5 text-[13px] text-muted">Machine
               <Seg label="Machine" value={view.machine} onChange={m => setView(v => ({ ...v, machine: m }))}
@@ -86,7 +91,8 @@ export function App() {
         )}
         <div className="mt-6 overflow-hidden rounded-2xl border border-line bg-bg">
           <div hidden={view.tab !== "search"}><SearchView st={view.search} setSt={st => setView(v => ({ ...v, search: st }))} machine={view.machine} focusKey={focusKey} /></div>
-          {view.tab === "live" && <LiveView machine={view.machine} on />}
+          {view.tab === "live" && <LiveView machine={view.machine} role={view.search.role} on />}
+          {view.tab === "memory" && <MemoryView />}
           {view.tab === "jobs" && <JobsView s={s} on />}
           {view.tab === "queries" && <QueriesView on />}
           {view.tab === "compare" && <CompareView on />}

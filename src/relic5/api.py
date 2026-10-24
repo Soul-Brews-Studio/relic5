@@ -107,6 +107,11 @@ def make_app(root, tokens, doors=None):
             return JSONResponse({"error": "not found"}, status_code=404)
         return Response(open(path, "rb").read(), media_type=TYPES[ext], headers={"cache-control": "public, max-age=31536000, immutable"})
 
+    @app.get("/api/memory")
+    def memory_route():
+        from . import memory
+        return memory.listing(relic.parts.root)
+
     @app.get("/api/log")
     def log(n: int = 100):
         from .jobs import read

@@ -120,3 +120,23 @@ def counts(root):
     for role in pq.read_table(p, columns=["role"]).column("role").to_pylist():
         out[role[7:]] = out.get(role[7:], 0) + 1
     return out
+
+
+def listing(root):
+    """Every note without its body, newest first, for the hub's Memory tab: title, description, type, project, when,
+    machines, link. The body is one relic_show away."""
+    p = os.path.join(root, "index", "_memory", "notes.parquet")
+    if not os.path.exists(p):
+        return {"notes": [], "types": {}, "projects": {}}
+    import pyarrow.parquet as pq
+    notes, types, projects = [], {}, {}
+    for r in pq.read_table(p, columns=["msgkey", "month", "ts", "role", "cat", "title", "text", "machines", "engine"]).to_pylist():
+        typ = r["role"][7:]
+        head = (r["text"] or "").split("\n\n", 1)[0]
+        desc = head[len(r["title"]) + 2:] if head.startswith(r["title"] + ": ") else head
+        notes.append({"uid": r["msgkey"], "link": f"relic5://{r['month']}/{r['msgkey']}", "ts": r["ts"], "type": typ,
+                      "project": r["cat"], "title": r["title"], "description": desc[:400], "machines": r["machines"], "home": r["engine"]})
+        types[typ] = types.get(typ, 0) + 1
+        projects[r["cat"]] = projects.get(r["cat"], 0) + 1
+    notes.sort(key=lambda n: n["ts"] or "", reverse=True)
+    return {"notes": notes, "types": types, "projects": dict(sorted(projects.items(), key=lambda kv: -kv[1]))}
