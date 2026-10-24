@@ -1,4 +1,4 @@
-import{A as mr,h as Ri,u as Go}from"./index-CjAhsrdl.js";/**
+import{A as mr,h as Ri,u as Go}from"./index-CclUxBR5.js";/**
  * @license
  * Copyright 2010-2024 Three.js Authors
  * SPDX-License-Identifier: MIT
