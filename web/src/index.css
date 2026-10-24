@@ -21,11 +21,12 @@
 }
 :root[data-theme="paper"] {
   color-scheme: light;
-  /* dimmed 2026-10-24 (Nat: "too bright? low contrast?"): no pure-white page or card, cards a step off the page,
-     lines you can see; text soft 12.9:1, muted 7.5:1, faint 6.4:1 on the card; the accent 5.5:1, ok 5.3:1, amber 5.3:1 on the page */
-  --bg:#e4e7ee; --panel:#f1f3f7; --raised:#dfe3eb; --deep:#e9ecf2; --rail:#dce0e8;
-  --line:#c3cad8; --line-strong:#97a1b6;
-  --text:#0f1422; --soft:#232a3b; --muted:#454e62; --faint:#4f586c;
+  /* paper, 2026-10-25 (Nat: "white mode in paper color is better"): a warm page and cards a step lighter, ink
+     not grey; the contrast of the 10-24 pass kept: soft 12.4:1, muted 7.4:1, faint 6.5:1 on a card, accent 5.4:1,
+     ok 5.2:1, amber 5.2:1 on the page */
+  --bg:#ece5d6; --panel:#f7f2e8; --raised:#e6dece; --deep:#f1ebdf; --rail:#e4dccb;
+  --line:#d3c9b6; --line-strong:#a69b85;
+  --text:#1d1a15; --soft:#322c23; --muted:#564d40; --faint:#5f5649;
   --amber:#82530e; --on-amber:#fffaf0; --amber-wash:rgb(183 121 31 / .10);
   --accent:#1a5f92; --on-accent:#ffffff; --accent-dim:#cfe1f1; --accent-wash:rgb(31 111 168 / .07); --accent-ink:#0d3554;
   --ok:#156b45; --ok-wash:rgb(21 107 69 / .10);

@@ -26,8 +26,9 @@ class FakeIndex:
 
 
 class FakeRelic:
-    def __init__(self, mats):
+    def __init__(self, mats, root="/tmp"):
         self.index = FakeIndex(mats)
+        self.parts = type("P", (), {"root": str(root)})()
 
     def _names(self, sids):
         return {s: s.upper() for s in sids}
@@ -36,7 +37,7 @@ class FakeRelic:
         return {s: "repo-" + s for s in sids}
 
 
-def test_sessions_map_groups_projects_and_orders():
+def test_sessions_map_groups_projects_and_orders(tmp_path):
     universe._CACHE.clear()
     rng = np.random.default_rng(1)
     a, b = rng.normal(size=8), rng.normal(size=8)
@@ -44,7 +45,7 @@ def test_sessions_map_groups_projects_and_orders():
     rows += [("s3", "2026-10-20", a), ("s3", "2026-10-21", a)]   # two chunks: under MIN_CHUNKS, left out
     open_m = FakeMatrix([r[0] for r in rows[:4]], [r[1] for r in rows[:4]], [r[2] for r in rows[:4]], [["m5"]] * 4)
     hist_m = FakeMatrix([r[0] for r in rows[4:]], [r[1] for r in rows[4:]], [r[2] for r in rows[4:]], [["white"]] * (len(rows) - 4))
-    out = universe.sessions_map(FakeRelic([open_m, hist_m]))
+    out = universe.sessions_map(FakeRelic([open_m, hist_m], tmp_path))
     assert [p["sid"] for p in out["points"]] == ["s2", "s1"]          # newest first, s3 dropped
     s2 = out["points"][0]
     assert s2["n"] == 4 and s2["ts"] == "2026-10-14" and s2["repo"] == "repo-s2" and s2["name"] == "S2"
@@ -52,3 +53,8 @@ def test_sessions_map_groups_projects_and_orders():
     for p in out["points"]:
         assert all(-1.0001 <= p[k] <= 1.0001 for k in "xyz")
     assert abs(sum(out["explained"]) - 1) < 1e-6 or len(out["explained"]) <= 3
+
+    universe._CACHE.clear()                                  # a restart: the map comes back from disk, not rebuilt
+    again = universe.sessions_map(FakeRelic([], tmp_path))   # no matrices: only a cached map can answer
+    assert [p["sid"] for p in again["points"]] == ["s2", "s1"]
+    assert len(list((tmp_path / "index" / "_maps").glob("*.json"))) == 1

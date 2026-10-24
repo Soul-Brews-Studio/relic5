@@ -18,6 +18,65 @@ if TYPE_CHECKING:
 
 _LOCK = threading.Lock()
 _CACHE: dict[tuple[object, ...], Json] = {}
+KEEP = 8          # maps kept in memory and on disk (sessions maps of a few limits, the memory map)
+
+
+def _file(relic: "Relic5", key: tuple[object, ...]) -> str:
+    import hashlib, os
+    d = os.path.join(relic.parts.root, "index", "_maps")
+    os.makedirs(d, exist_ok=True)
+    return os.path.join(d, hashlib.sha1(repr(key).encode()).hexdigest()[:16] + ".json")
+
+
+def _get(relic: "Relic5", key: tuple[object, ...]) -> Json | None:
+    """A map already made: in memory, else on disk (a map outlives a restart or a deploy: 41.6 s cold, measured
+    2026-10-25 on white, for 3,000 sessions)."""
+    import json, os
+    with _LOCK:
+        if key in _CACHE:
+            return _CACHE[key]
+    f = _file(relic, key)
+    if os.path.exists(f):
+        try:
+            out: Json = json.load(open(f))
+        except (OSError, ValueError):
+            return None
+        with _LOCK:
+            _CACHE[key] = out
+        return out
+    return None
+
+
+def _put(relic: "Relic5", key: tuple[object, ...], out: Json) -> None:
+    import glob, json, os
+    with _LOCK:
+        _CACHE[key] = out
+        while len(_CACHE) > KEEP:            # the oldest first (dicts keep insertion order)
+            _CACHE.pop(next(iter(_CACHE)))
+    f = _file(relic, key)
+    with open(f + ".tmp", "w") as fh:
+        json.dump(out, fh)
+    os.replace(f + ".tmp", f)
+    old = sorted(glob.glob(os.path.join(os.path.dirname(f), "*.json")), key=os.path.getmtime)[:-KEEP]
+    for x in old:
+        os.remove(x)
+
+
+def keep_warm(relic: "Relic5", every: float = 60.0) -> None:
+    """Make the maps before anyone asks: at start, and again whenever the index gets a new generation (or the
+    memory notes change). A background thread; any failure waits for the next round."""
+    import threading, time
+
+    def loop() -> None:
+        time.sleep(5)
+        while True:
+            try:
+                sessions_map(relic)
+                memory_map(relic)
+            except Exception:
+                pass
+            time.sleep(every)
+    threading.Thread(target=loop, name="relic5-maps", daemon=True).start()
 MIN_CHUNKS = 3   # a session with one or two embedded lines lands wherever its one sentence points: noise on the map
 
 
@@ -29,10 +88,10 @@ def sessions_map(relic: "Relic5", model: str | None = None, limit: int = 3000, m
     index = relic.index
     slug = pick_model(index, model)
     mats = index.matrices(slug)
-    key = (index.seen, slug, int(limit), int(min_chunks))
-    with _LOCK:
-        if key in _CACHE:
-            return _CACHE[key]
+    key = ("sessions", index.seen, slug, int(limit), int(min_chunks))
+    hit = _get(relic, key)
+    if hit is not None:
+        return hit
     if not mats:
         return {"model": slug, "sessions": 0, "chunks": 0, "explained": [], "points": []}
 
@@ -77,9 +136,7 @@ def sessions_map(relic: "Relic5", model: str | None = None, limit: int = 3000, m
                           for x, p, g in zip(sids, xyz, keep)]
     out: Json = {"model": slug, "sessions": len(points), "chunks": int(counts[keep].sum()), "explained": explained,
                  "projection": "pca-3d of per-session mean vectors", "points": points}
-    with _LOCK:
-        _CACHE.clear()
-        _CACHE[key] = out
+    _put(relic, key, out)
     return out
 
 
@@ -113,10 +170,10 @@ def memory_map(relic: "Relic5", model: str | None = None) -> Json:
         return {"model": model or V.DEFAULT, "notes": 0, "embedded": 0, "explained": [], "points": []}
     m = mem.replace("'", "''")
     total = relic._rows(f"SELECT count(*) AS n FROM read_parquet('{m}')")[0]["n"]
-    key = (os.path.getmtime(mem), "memory", model or "", total)
-    with _LOCK:
-        if key in _CACHE:
-            return _CACHE[key]
+    key = ("memory", os.path.getmtime(mem), model or "", total, os.path.getmtime(vd) if os.path.isdir(vd := os.path.join(root, V.VDIR, model or V.DEFAULT)) else 0)
+    hit = _get(relic, key)
+    if hit is not None:
+        return hit
     if have is None:
         return {"model": model or V.DEFAULT, "notes": total, "embedded": 0, "explained": [], "points": []}
     cur = relic.con.cursor()
@@ -132,6 +189,5 @@ def memory_map(relic: "Relic5", model: str | None = None) -> Json:
                           for r, p in zip(rows, xyz)]
     out: Json = {"model": model or V.DEFAULT, "notes": total, "embedded": len(points), "explained": explained,
                  "projection": "pca-3d of each note's own vector", "points": points}
-    with _LOCK:
-        _CACHE[key] = out
+    _put(relic, key, out)
     return out
