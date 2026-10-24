@@ -672,7 +672,6 @@ export function Designer() {
             <span className={`size-2 rounded-full ${connected ? "bg-cyan" : "bg-liner-ink"}`} />
             {connected ? connected.name : "no pet linked"}
           </span>
-          <a href="/" className="label underline decoration-dashed underline-offset-4 hover:text-ink">studio v1</a>
         </div>
       </header>
 

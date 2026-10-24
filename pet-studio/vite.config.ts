@@ -8,7 +8,8 @@ import { resolve } from "node:path";
 export default defineConfig({
   root: "web",
   plugins: [react(), tailwindcss()],
-  // two pages: index.html (v1: blocks, code, firmware) and v2.html (the designer)
-  build: { outDir: "../dist", emptyOutDir: true, sourcemap: true, rollupOptions: { input: { main: resolve(import.meta.dirname, "web/index.html"), v2: resolve(import.meta.dirname, "web/v2.html") } } },
+  // one page in relic5: v2.html, the designer canvas (Nat, 2026-10-21: "studio v2 but no block please"; 2026-10-24:
+  // "it should only graphic canvas not blockly"). Blocks, apps and firmware stay on the server API and the MCP tools.
+  build: { outDir: "../dist", emptyOutDir: true, sourcemap: true, rollupOptions: { input: { v2: resolve(import.meta.dirname, "web/v2.html") } } },
   server: { host: "127.0.0.1", port: 5174, proxy: { "/api": "http://127.0.0.1:4810" } },
 });

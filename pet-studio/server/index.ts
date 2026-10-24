@@ -886,8 +886,9 @@ const server = Bun.serve<WsData>({
         if (ops[path]) { const j = ops[path](body); return json({ job: j.id, title: j.title }); }
       }
       if (!path.startsWith("/api/") && existsSync(DIST)) {
-        const p = join(DIST, path === "/" ? "index.html" : path.slice(1));
-        return existsSync(p) && statSync(p).isFile() ? file(p) : file(join(DIST, "index.html"));
+        // relic5: the designer canvas is the only page, at / and /v2 (and any page path falls back to it)
+        const p = join(DIST, path === "/" ? "v2.html" : path.slice(1));
+        return existsSync(p) && statSync(p).isFile() ? file(p) : file(join(DIST, "v2.html"));
       }
       return json({ error: `no route ${req.method} ${path}` }, 404);
     } catch (e: any) {
