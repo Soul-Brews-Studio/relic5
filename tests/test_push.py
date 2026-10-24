@@ -118,3 +118,18 @@ def test_push_sends_the_chain_sync_line(env, tmp_path):
     assert push(dict(e, RELIC5_CHAIN_LOG=str(log))).returncode == 0
     import json as _j
     assert _j.load(open(hub / "relic5/parts/m5/_sync.json"))["line"] == "2026-10-23 23:10:15 SYNC OK  text|868825 thinking|1 tools|2"
+
+
+def test_extra_memory_root_gets_its_own_home(env, tmp_path):
+    """RELIC5_MEMORY_ROOTS: another user's exported notes go to <parent>-<home>, never on top of this account's."""
+    src, hub, e = env
+    home, export = tmp_path / "me", tmp_path / "nat-export"
+    for h, text in ((home / ".claude", "mine"), (export / ".claude", "nat's")):
+        d = h / "projects/-opt-x/memory"
+        d.mkdir(parents=True)
+        (d / "note.md").write_text(text)
+    r = push(dict(e, HOME=str(home), RELIC5_MEMORY_ROOTS=str(export / ".claude")))
+    assert r.returncode == 0, r.stderr
+    mem = hub / "relic5/parts/m5/memory"
+    assert (mem / "claude/-opt-x/memory/note.md").read_text() == "mine"
+    assert (mem / "nat-export-claude/-opt-x/memory/note.md").read_text() == "nat's"

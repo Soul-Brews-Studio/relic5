@@ -120,9 +120,13 @@ fi
 # Claude Code's memory notes, raw (relic5 memory.py makes them the "memory" search layer): every
 # ~/.claude*/projects/<project>/memory/*.md -> parts/<machine>/memory/<home>/<project>/memory/. relic-scan reads only
 # .jsonl and ψ vaults, so without this the one-fact rules and decisions of every project were nowhere (Nat, 2026-10-24).
-for H in "$HOME"/.claude "$HOME"/.claude-*; do
+# RELIC5_MEMORY_ROOTS (space-separated) adds homes this account does not own, e.g. another user's export
+# (/Users/Shared/nat-export/.claude, 2026-10-24: nat's notes, m5-nat retired). Their folder on the hub is
+# <parent>-<home> (nat-export-claude), so they never land on top of this account's "claude".
+for H in "$HOME"/.claude "$HOME"/.claude-* ${RELIC5_MEMORY_ROOTS:-}; do
   [ -d "$H/projects" ] || continue
   name=$(basename "$H" | sed 's/^\.//')
+  case " ${RELIC5_MEMORY_ROOTS:-} " in *" $H "*) name="$(basename "$(dirname "$H")")-$name" ;; esac
   [ -z "$DRY" ] && { on_hub "mkdir -p '$target/memory/$name'" || { rc=1; continue; }; }
   out=$(rsync -a $DRY --timeout=120 --stats --prune-empty-dirs --include='*/' --include='*/memory/*.md' --exclude='*' \
     "$H/projects/" "$R$target/memory/$name/" 2>&1) || { echo "$out" >&2; rc=1; continue; }
