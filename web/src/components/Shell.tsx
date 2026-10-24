@@ -14,8 +14,8 @@ export const VIEWS: { id: View; label: string; icon: ComponentType<{ size?: numb
   { id: "live", label: "Live", icon: Live, phone: true, group: 0 },
   { id: "memory", label: "Knowledge", icon: Note, phone: true, group: 0 },
   { id: "oracles", label: "Oracles", icon: Psi, group: 0 },
-  { id: "family", label: "Family", icon: Tree, group: 0 },
-  { id: "jobs", label: "Jobs", icon: Jobs, phone: true, group: 1 },
+  { id: "family", label: "Family", icon: Tree, group: 1 },
+  { id: "jobs", label: "Jobs", icon: Jobs, group: 1 },
   { id: "store", label: "Disk", icon: Disk, group: 1 },
   { id: "queries", label: "Asked", icon: Asked, group: 1 },
   { id: "compare", label: "Quality", icon: Columns, group: 1 },
@@ -133,8 +133,9 @@ export function NavDrawer({ open, onClose, view, go, state, foot, badges, onPale
   );
 }
 
-/** The hub's own pages (jobs, disk, what was asked, search quality, connect) in one menu, so the top bar holds
- *  only what people come for (Nat, 2026-10-24: "too long menu"). Escape or a click outside closes it. */
+/** Everything past the six main views (Family, Jobs, Disk, Asked, Quality, Connect) in one "More" menu, so the
+ *  top bar holds six items (Nat, 2026-10-24: "too long menu"; relic4-scan's review: 5-7 visible). Escape or a click
+ *  outside closes it. */
 function HubMenu({ view, go, badges }: { view: View; go: (v: View) => void; badges?: Partial<Record<View, number>> }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -152,7 +153,7 @@ function HubMenu({ view, go, badges }: { view: View; go: (v: View) => void; badg
     <div ref={ref} className="relative flex-none">
       <button type="button" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}
         className={cx("flex min-h-10 items-center gap-1.5 rounded-lg px-3 text-sm whitespace-nowrap transition-colors", here ? "bg-raised font-semibold text-text" : "text-soft hover:bg-raised hover:text-text")}>
-        {here ? here.label : "Hub"}
+        {here ? here.label : "More"}
         {busy > 0 && <span className="rounded-full bg-accent px-1.5 text-xs font-bold text-on-accent">{busy}</span>}
         <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden className={cx("transition-transform", open && "rotate-180")}><path d="M3 4.5l3 3 3-3" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
       </button>
@@ -229,7 +230,7 @@ export function TopNav({ view, go, state, foot, theme, setTheme, badges, onPalet
 /** Phone: the five views people use there, as a bottom bar; the rest are one tap away in the palette. */
 export function TabBar({ view, go, onMore }: { view: View; go: (v: View) => void; onMore: () => void }) {
   return (
-    <nav aria-label="Views" className="fixed inset-x-0 bottom-0 z-20 grid grid-cols-6 border-t border-line bg-[color-mix(in_srgb,var(--rail)_94%,transparent)] pb-[env(safe-area-inset-bottom)] backdrop-blur sm:hidden">
+    <nav aria-label="Views" className="fixed inset-x-0 bottom-0 z-20 grid grid-cols-5 border-t border-line bg-[color-mix(in_srgb,var(--rail)_94%,transparent)] pb-[env(safe-area-inset-bottom)] backdrop-blur sm:hidden">
       {VIEWS.filter(v => v.phone).map(v => {
         const I = v.icon, on = view === v.id;
         return (
