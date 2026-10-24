@@ -99,3 +99,7 @@ Search is keyword: every word must occur, with ILIKE over the parquet in place. 
 4. Embed by watermark. Each machine and stream has a watermark (the newest `ts` embedded): a run embeds only rows after
    it, then moves it. The key cache (blake2b-128 of the chunk, seeded from m5's `~/relic4-scratch/vec/_cache`) catches
    the rare late-arriving old chunk. gb300 first, on demand only (its GPU is shared). After that, semantic `relic_search`.
+
+## License
+
+GNU AGPL v3 or later (`LICENSE`), the same as Relic Scan (relic4-scan). If you run a changed hub as a service for others, share the changes.

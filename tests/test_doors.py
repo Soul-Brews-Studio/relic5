@@ -2,7 +2,7 @@ from relic5.doors import Doors
 
 OWNER = "nat.wrw@gmail.com"
 NODES = {"100.111.101.21": {"node": "m5.follow-rankine.ts.net", "login": OWNER},
-         "100.84.206.23": {"node": "yd-linux.tail436f93.ts.net", "login": "windeachawat9938@gmail.com"}}
+         "100.84.206.23": {"node": "yd-linux.tail436f93.ts.net", "login": "someone-else@example.com"}}
 
 
 def doors():

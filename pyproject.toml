@@ -1,4 +1,5 @@
 [project]
+license = "AGPL-3.0-or-later"
 name = "relic5"
 version = "26.10.24a2308"
 description = "One hub on white for every machine's extracted history and vectors: push, import, embed, serve"
