@@ -141,3 +141,28 @@ def test_fast_lane_recount_keeps_publish_time(withvec):
     assert after["at"] == first["at"] and sum(v["pending"] for v in after["models"][M].values()) == before + 1
     f = Relic5(root, duckdb.connect()).search("anything", vector=unit([1.0, 0.0, 0.0]))["freshness"]
     assert f["pending_counted_at"] == after["counted_at"]
+
+
+def test_an_open_month_shard_rebuilds_only_the_open_table(withvec):
+    """Every shard rebuilt both tables: 50 s of history for 100 October chunks (2026-10-24)."""
+    root, keys, have = withvec
+    con = duckdb.connect()
+    oct_keys = [k for (k,) in con.execute(f"SELECT DISTINCT key FROM read_parquet('{root}/parts/*/text/2026-10.parquet')").fetchall()
+                if k not in have]
+    assert oct_keys, "the fixture has an October key without a vector"
+    d = os.path.join(root, "vectors", M)
+    con.execute(f"COPY (SELECT '{oct_keys[0]}' AS key, {unit([0.0, 0.1, 1.0])}::FLOAT[] AS vector) TO '{d}/m5-ane-new.parquet' (FORMAT parquet)")
+    done = fts.build(root, con, log=lambda s: None, lane="vectors")
+    assert done == [f"vec_{vec.slug(M)}_open"]
+    assert vec.shard_months(root, M, con, Parts(root))["m5-ane-new.parquet"] == ["2026-10"]
+    assert fts.build(root, con, log=lambda s: None, lane="vectors") == []                   # nothing new: nothing rebuilt
+
+
+def test_parity_is_checked_once_a_day(tmp_path, monkeypatch):
+    from relic5 import worker
+    monkeypatch.setattr(worker, "PARITY", str(tmp_path / "parity.json"))
+    assert not worker.parity_fresh(M, "ane")
+    worker.parity_ok(M, "ane", 0.999)
+    import time
+    assert worker.parity_fresh(M, "ane") and not worker.parity_fresh(M, "mps")
+    assert not worker.parity_fresh(M, "ane", now=time.time() + worker.PARITY_TTL_S + 1)
