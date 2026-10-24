@@ -151,8 +151,8 @@ export function Toggle({ pressed, onClick, children, dot }: { pressed: boolean; 
 }
 
 /** Machine picker (Search rail, Live head): "all" plus each machine. */
+/** Which machine: the same segmented control as every other "pick one" (Search, Live). */
 export function MachinePick({ machine, machines, onChange, counts }: { machine: string; machines: string[]; onChange: (m: string) => void; counts?: Record<string, number> }) {
   if (machines.length < 2) return null;
-  return <span role="group" aria-label="Machine" className="inline-flex flex-wrap gap-1.5">{["", ...machines].map(m => (
-    <Toggle key={m || "all"} pressed={machine === m} onClick={() => onChange(m)}>{m || "all"}{counts && <span className="font-mono text-xs text-faint">{counts[m] ?? 0}</span>}</Toggle>))}</span>;
+  return <Seg label="Machine" value={machine} onChange={onChange} options={["", ...machines].map(m => ({ value: m, label: `${m || "all machines"}${counts ? ` · ${counts[m] ?? 0}` : ""}` }))} />;
 }
