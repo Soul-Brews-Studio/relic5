@@ -189,6 +189,16 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
             return JSONResponse({"error": f"no recap for {month} yet"}, status_code=404)
         return Response(open(p, encoding="utf-8").read(), media_type="text/markdown; charset=utf-8")
 
+    @app.get("/api/map", response_model=None)
+    def map_route(model: str | None = None, limit: int = 3000) -> Json:
+        """The sessions as points: per-session mean vector, PCA to 3D (universe.py), for the Map view."""
+        from . import universe
+        from .query import UsageError
+        try:
+            return universe.sessions_map(relic, model, max(10, min(limit, 20000)))
+        except UsageError as ex:
+            return JSONResponse({"error": str(ex)}, status_code=400)   # type: ignore[return-value]
+
     @app.get("/api/memory", response_model=None)
     def memory_route() -> "Listing":
         from . import memory
