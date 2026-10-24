@@ -142,15 +142,15 @@ def search(relic: "Relic5", index: "Index", query: str, since: str | None = None
     if sort not in (None, "", "relevant", "newest"):
         raise UsageError("sort is relevant | newest")
     words = query.split()
-    if with_ == "memory":   # the memory notes alone: rules, decisions, references (memory.py); not mixed with talk
-        layers = ["memory"]
+    if with_ in ("memory", "git"):   # memory notes (memory.py) or git commits (gitlog.py) alone, not mixed with talk
+        layers = [with_]
     else:
-        layers = ["prose"] + ([w for w in (with_ or "").split(",") if w] if with_ != "all" else ["tools", "thinking", "memory"])
+        layers = ["prose"] + ([w for w in (with_ or "").split(",") if w] if with_ != "all" else ["tools", "thinking", "memory", "git"])
     layers = ["prose" if l == "vault" else l for l in layers]
     layers = list(dict.fromkeys(layers))
     for l in layers:
-        if l not in ("prose", "tools", "thinking", "memory"):
-            raise UsageError(f"with {l}: one of tools, thinking, vault, memory, all")
+        if l not in ("prose", "tools", "thinking", "memory", "git"):
+            raise UsageError(f"with {l}: one of tools, thinking, vault, memory, git, all")
     try:
         lo, hi, _ = window(since, until, None)
     except ValueError as ex:
@@ -276,7 +276,7 @@ def search(relic: "Relic5", index: "Index", query: str, since: str | None = None
     for r in page:
         vlt = vaults_.of(vs, r["sid"], r["machines"])
         out.append({"uid": r["uid"], "partition": r["month"], "session_uuid": r["sid"], "role": r["role"], "ts": r["ts"],
-                    "day": (r["ts_th"] or "")[:10] or None, "repo_key": vlt["repo_key"] if vlt else repos.get(r["sid"]),
+                    "day": (r["ts_th"] or "")[:10] or None, "repo_key": vlt["repo_key"] if vlt else r["sid"][4:] if (r["sid"] or "").startswith("git:") else repos.get(r["sid"]),
                     "session_name": vlt["name"] if vlt else names.get(r["sid"]), "text_snippet": snippet(r["text"] or "", words), "score": round(float(r["_score"]), 4),
                     "layer": r["layer"], "source_present": False,
                     "ephemeral": sorted(set(EPHEMERAL.findall(r["text"] or "")))[:5] or None, "machines": r["machines"], "title": r.get("title"),
