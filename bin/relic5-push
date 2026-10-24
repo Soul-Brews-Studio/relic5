@@ -14,7 +14,7 @@ set -u
 STAMP=                                          # set by bin/relic5-install on a copy outside this checkout
 # What this push sends, as a number: bumped only when the behaviour changes (streams, meta files, _sync.json, local
 # hub...). relic_status compares this, not the git hash, which differs after every commit (relic4-scan, 2026-10-23).
-PUSH_FORMAT=5
+PUSH_FORMAT=6
 # The ssh target. RELIC5_HUB_SSH wins; RELIC5_HUB may be the hub's HTTP url (relic-chain sets it for its SYNC check):
 # then the ssh target is nat@<its host>, not the url.
 HUB="${RELIC5_HUB_SSH:-${RELIC5_HUB:-nat@white.follow-rankine.ts.net}}"
@@ -77,6 +77,44 @@ META=$(for f in sessions.parquet months.json; do [ -f "$SCAN/$f" ] && printf '%s
 if [ -n "$META" ] && on_hub "mkdir -p '$target/meta'"; then   # openrsync (macOS) has no --mkpath
   out=$(rsync -a $DRY --timeout=120 --stats $META "$R$target/meta/" 2>&1) || { echo "$out" >&2; rc=1; }
   report meta "$out"
+fi
+# Seal receipts (relic5 sealday.py): for every month relic-scan sealed, the sha256 and size of each extracted part
+# as this machine holds it, so the hub can prove its copy is byte-identical before it reconciles the month. Hashes
+# are cached by size + mtime in $SRC/.receipts-cache.json: an unchanged sealed month costs nothing the next time.
+if [ -f "$SCAN/months.json" ] && command -v python3 >/dev/null 2>&1; then
+  python3 - "$SCAN/months.json" "$SRC" "$MACHINE" "$STREAMS" > "${TMPDIR:-/tmp}/relic5-receipts.$$" <<'PY' && \
+    { [ -n "$DRY" ] || rsync -a --timeout=60 "${TMPDIR:-/tmp}/relic5-receipts.$$" "$R$target/meta/receipts.json" >/dev/null 2>&1 || rc=1; }
+import hashlib, json, os, sys, time
+months_p, src, machine, streams = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4].split()
+cache_p = os.path.join(src, ".receipts-cache.json")
+try:
+    cache = json.load(open(cache_p))
+except (OSError, ValueError):
+    cache = {}
+out = {"version": 1, "machine": machine, "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "months": {}}
+for m in json.load(open(months_p)).get("months", []):
+    if not (m.get("sealed") and m.get("sealed_keys")):
+        continue
+    parts = {}
+    for s in streams:
+        p = os.path.join(src, s, m["month"] + ".parquet")
+        if not os.path.isfile(p):
+            continue
+        st = os.stat(p)
+        c = cache.get(p)
+        if not c or c[0] != st.st_size or c[1] != int(st.st_mtime):
+            h = hashlib.sha256()
+            with open(p, "rb") as f:
+                for b in iter(lambda: f.read(1 << 20), b""):
+                    h.update(b)
+            c = cache[p] = [st.st_size, int(st.st_mtime), h.hexdigest()]
+        parts[s] = {"bytes": c[0], "sha256": c[2]}
+    out["months"][m["month"]] = {"sealed_keys": m["sealed_keys"], "sealed_rows": m.get("sealed_rows"), "parts": parts}
+json.dump(cache, open(cache_p + ".tmp", "w"))
+os.replace(cache_p + ".tmp", cache_p)
+print(json.dumps(out))
+PY
+  rm -f "${TMPDIR:-/tmp}/relic5-receipts.$$"
 fi
 # Claude Code's memory notes, raw (relic5 memory.py makes them the "memory" search layer): every
 # ~/.claude*/projects/<project>/memory/*.md -> parts/<machine>/memory/<home>/<project>/memory/. relic-scan reads only

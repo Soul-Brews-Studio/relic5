@@ -90,6 +90,9 @@ def status(root: str, now: _datetime | None = None) -> Json:
     vfy = seal_info["verify"]
     for prob in ((vfy.get("problems") if vfy else None) or [])[:3]:
         warnings.append(f"seal: {prob}")
+    from . import sealday as SD
+    seal_days = SD.summary(p.root)
+    warnings += SD.overdue(seal_days, now)
     backup = last_backup(evs, now)
     if backup["at"] is None:
         warnings.append("no backup yet (bin/relic5-backup on m5 pulls one; see docs/RESTORE.md)")
@@ -156,5 +159,6 @@ def status(root: str, now: _datetime | None = None) -> Json:
         "backup": backup,
         "memory": __import__("relic5.memory", fromlist=["counts"]).counts(p.root),
         "seals": seal_info,
+        "seal_days": seal_days,
         "warnings": warnings,
     }

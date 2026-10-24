@@ -173,6 +173,27 @@ export function GlancePage({ s, error, at, theme, setTheme }:
           </div>
         </Section>
 
+        {(s.seal_days?.length ?? 0) > 0 && (
+          <Section title="Months" sub="Each Bangkok month seals when it ends. On seal day the hub checks every machine's copy byte for byte, then writes the month down with a fingerprint; a late row adds an amendment, never a rewrite.">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
+              {s.seal_days!.map(d => {
+                const tone = d.state === "reconciled" ? "border-accent-dim bg-accent-wash" : d.state === "blocked" ? "border-danger bg-danger-wash" : d.state === "sealing" ? "border-warning" : "border-line bg-panel";
+                const word = d.state === "reconciled" ? "sealed" : d.state === "blocked" ? "blocked" : d.state === "sealing" ? "sealing" : "open";
+                const why = d.state === "reconciled" ? `fingerprint ${d.fingerprint}${d.amendments ? ` · ${d.amendments} amendment(s)` : ""}` : [...d.problems, ...d.waiting].join("\n") || "this month is still being written";
+                return (
+                  <div key={d.month} title={why} className={cx("rounded-xl border px-3.5 py-3", tone)}>
+                    <div className="text-[15px] font-semibold tabular-nums text-text">{d.month}</div>
+                    <div className={cx("text-[12px] font-semibold", d.state === "reconciled" ? "text-accent" : d.state === "blocked" ? "text-danger" : d.state === "sealing" ? "text-warning" : "text-muted")}>
+                      {word}{d.amendments ? ` +${d.amendments}` : ""}
+                    </div>
+                    <div className="mt-1 truncate font-mono text-[10px] text-faint">{d.fingerprint ?? (d.state === "open" ? "live" : (d.problems[0] ?? d.waiting[0] ?? "").split(":")[0])}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </Section>
+        )}
+
         <Section title="Machines" sub="Who feeds the hub: what each one sent, when it last pushed, and what its own chain says about the sync.">
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{machines.map(m => <MachineCard key={m} s={s} m={m} />)}</div>
         </Section>
