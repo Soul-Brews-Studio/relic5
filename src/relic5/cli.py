@@ -185,11 +185,7 @@ def _main(argv: list[str] | None = None) -> None:
                 tabs = fts.build(root, con, force=force, lane="vectors", log=echo)
                 j.progress(done=len(tabs), unit="tables", message="vectors: " + (",".join(tabs) or "none changed"))
                 from . import vec as V
-                marks = {m: V.watermarks(root, con, m) for m in V.models(root)}
-                p = os.path.join(fts.search_dir(root), "vectors.json")
-                with open(p + ".tmp", "w") as f:
-                    json.dump({"at": time.strftime("%FT%T%z"), "models": marks}, f, indent=1)
-                os.replace(p + ".tmp", p)
+                marks = V.write_marks(root, con, published=True)
                 for m, w in marks.items():
                     print(f"vectors {m}: " + ", ".join(f"{k} pending {v['pending']:,} at {v['at']}" for k, v in sorted(w.items())))
             return
@@ -210,6 +206,10 @@ def _main(argv: list[str] | None = None) -> None:
             days = sealday.run(os.path.abspath(root))
             j.progress(done=sum(d["state"] == "reconciled" for d in days), unit="months",
                        message="seal day: " + ", ".join(f"{d['month']} {d['state']}" for d in days if d["state"] != "open")[-300:])
+            from . import vec as V
+            if V.models(root):   # recount what still waits for a vector (the vector lane alone left it stale for hours)
+                marks = V.write_marks(root, con, published=False)
+                j.progress(done=sum(v["pending"] for w in marks.values() for v in w.values()), unit="pending", message="vectors pending recounted")
             from . import selfknow
             selfknow.record_size(root)
     elif cmd == "tui":

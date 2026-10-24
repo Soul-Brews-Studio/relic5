@@ -304,7 +304,7 @@ def freshness(root: str) -> Json:
     try:
         vs = json.load(open(vp))
         pending: int | None = sum(int(v["pending"]) for w in vs.get("models", {}).values() for v in w.values())
-        vat = vs.get("at")
+        vat, counted = vs.get("at"), vs.get("counted_at")
     except (OSError, ValueError, KeyError):
-        pending, vat = None, None
-    return {"index_built": built, "vectors_at": vat, "vectors_pending": pending}
+        pending, vat, counted = None, None, None
+    return {"index_built": built, "vectors_at": vat, "vectors_pending": pending, "pending_counted_at": counted}
