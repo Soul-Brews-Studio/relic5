@@ -14,7 +14,7 @@
 // Binds 127.0.0.1 only: it runs builds and flashes boards, so it is not for the network.
 import { appendFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, join, resolve, extname } from "node:path";
-import { homedir, tmpdir } from "node:os";
+import { homedir, tmpdir, userInfo } from "node:os";
 import { blocksToC, EXAMPLE, SUPPORTED } from "../shared/petblocks";
 
 const STUDIO = resolve(import.meta.dir, "..");
@@ -45,6 +45,19 @@ const BOARDS: Record<string, { label: string; project: string; dir: string; defs
   lcd28: { label: "2.8in ILI9341", project: "oraclepet_lcd28", dir: "build-lcd28", defs: "-DPET_BOARD=lcd28 -DSDKCONFIG=build-lcd28/sdkconfig" },
   sc01: { label: "WT32-SC01 Plus", project: "oraclepet_sc01", dir: "build-sc01", defs: "-DPET_BOARD=sc01 -DSDKCONFIG=build-sc01/sdkconfig" },
 };
+// One build folder per ESP-IDF: a folder CMake configured with another ESP-IDF (another account's ~/esp, say
+// nat's on m5) refuses to build ("does not match the source … used to generate cache"). Rather than wiping that
+// account's build, use <dir>-<user> beside it, carrying over its sdkconfig the first time.
+for (const b of Object.values(BOARDS)) {
+  // the app's cache and the bootloader's own sub-build cache: either one made with another ESP-IDF breaks the build
+  const caches = [join(FW, b.dir, "CMakeCache.txt"), join(FW, b.dir, "bootloader", "CMakeCache.txt")].filter(existsSync);
+  if (!caches.length || caches.every((c) => !/esp-idf/.test(readFileSync(c, "utf8")) || readFileSync(c, "utf8").includes(IDF) && !readFileSync(c, "utf8").replaceAll(IDF, "").match(/\/Users\/[^/]+\/esp\/esp-idf/))) continue;
+  const mine = `${b.dir}-${userInfo().username}`;
+  const old = join(FW, b.dir, "sdkconfig");
+  if (!existsSync(join(FW, mine, "sdkconfig")) && existsSync(old)) { mkdirSync(join(FW, mine), { recursive: true }); cpSync(old, join(FW, mine, "sdkconfig")); }
+  b.defs = b.defs.replaceAll(`${b.dir}/`, `${mine}/`);
+  b.dir = mine;
+}
 const firmwareBin = (b: string) => join(FW, BOARDS[b].dir, `${BOARDS[b].project}.bin`);
 
 const NAME = /^[a-z0-9_-]{1,23}$/;
@@ -560,7 +573,13 @@ function stageFlasher(body: any) {
   if (autorun && !apps.includes(autorun)) throw new Error(`autorun ${autorun} is not one of apps`);
   const b = BOARDS[board], bdir = join(FW, b.dir), id = `${board}-${pack}`, out = join(WS, "flasher", id);
   return job("flasher", `web flasher ${id}${packs.length > 1 ? ` (+${packs.length - 1} packs)` : ""}${apps.length ? ` + ${apps.join(", ")}` : ""}`, "idf", async (j) => {
-    await idf(j, `idf.py -B ${b.dir} ${b.defs} -DPET_DEFAULT_PACK=${pack} build`);
+    // One pack in the bundle: build without PET_DEFAULT_PACK. The firmware boots "the first pack found"
+    // (gif.cpp) and storage holds only this one, so the same firmware serves every pack: a new sprite costs a
+    // storage image, not a recompile and relink (18-20 s, measured 2026-10-24 on m5). idf.py has no -U, so the value
+    // is empty rather than unset: gif.cpp then copies "" into the name and falls through to find_first_pack(), and
+    // the compiled define is the same for every pack, so nothing rebuilds. Several packs still name the one that boots.
+    const def = packs.length === 1 ? "-DPET_DEFAULT_PACK=" : `-DPET_DEFAULT_PACK=${pack}`;
+    await idf(j, `idf.py -B ${b.dir} ${b.defs} ${def} build`);
     rmSync(out, { recursive: true, force: true });
     mkdirSync(out, { recursive: true });
     // storage: the firmware's data/ without its characters, plus just the chosen packs

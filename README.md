@@ -100,6 +100,14 @@ Search is keyword: every word must occur, with ILIKE over the parquet in place. 
    it, then moves it. The key cache (blake2b-128 of the chunk, seeded from m5's `~/relic4-scratch/vec/_cache`) catches
    the rare late-arriving old chunk. gb300 first, on demand only (its GPU is shared). After that, semantic `relic_search`.
 
+## Pet Studio
+
+`pet-studio/` makes things for the desk pet and puts them on it: a designer canvas any agent can draw on live
+(Claude, Codex, omx), sprites, WebAssembly pet apps and firmware bundles. It runs on the Mac that holds the pets
+(`just pet-studio`). Walkthrough with pictures: [pet-studio/docs/neo-pet.md](pet-studio/docs/neo-pet.md).
+
+<img src="pet-studio/docs/images/neo-codex-idle.png" width="140"> <img src="pet-studio/docs/images/neo-idle.gif"> <img src="pet-studio/docs/images/neo-busy.gif"> <img src="pet-studio/docs/images/neo-heart.gif"> <img src="pet-studio/docs/images/neo-sleep.gif">
+
 ## License
 
 GNU AGPL v3 or later (`LICENSE`), the same as Relic Scan (relic4-scan). If you run a changed hub as a service for others, share the changes.
