@@ -5,7 +5,7 @@ import { Chip, cx, Lbl, type Tone } from "./ui";
 
 function Section({ title, note, children }: { title: string; note?: ReactNode; children: ReactNode }) {
   return (
-    <section className="border-b border-line px-4 py-3.5">
+    <section className="border-b border-line px-5 py-4">
       <div className="mb-2.5 flex items-baseline justify-between gap-2"><Lbl>{title}</Lbl><span className="truncate text-[10px] text-faint">{note}</span></div>
       <div className="flex flex-col gap-1">{children}</div>
     </section>
@@ -49,7 +49,7 @@ export function Rail({ s, machine, setMachine }: { s: Status; machine: string; s
   const shown = s.months.list.filter(m => m.rows.text + m.rows.tools > 0), open = shown.filter(m => !m.sealed).length;
   const w = s.watermarks, st = s.store, r = s.resources;
   return (
-    <aside className="min-h-0 overflow-y-auto border-r border-line bg-rail">
+    <aside className="hidden min-h-0 overflow-y-auto border-r border-line bg-rail md:block">
       <Section title="Machines" note={`${names.length} pushing`}>
         <RailItem name="all machines" count={num(sum(Object.fromEntries(names.map(n => [n, s.machines[n]?.text?.rows ?? 0]))))}
           pressed={!machine} onClick={() => setMachine("")} detail="text rows, folded per machine" />
@@ -63,11 +63,21 @@ export function Rail({ s, machine, setMachine }: { s: Status; machine: string; s
         })}
       </Section>
       <Section title="Months" note={`${s.months.sealed} sealed · ${open} open`}>
-        {shown.slice().reverse().map(m => (
-          <RailItem key={m.month} name={m.month} count={num(m.rows.text)}
-            detail={<span className="flex gap-1.5">{m.sealed ? <Chip>sealed</Chip> : <Chip tone="ok">open</Chip>}
-              <span>tools {num(m.rows.tools)} · thinking {num(m.rows.thinking)}</span></span>} />
-        ))}
+        <div className="grid grid-cols-4 gap-1.5">
+          {shown.map(m => {
+            const max = Math.max(...shown.map(x => x.rows.text)), h = Math.max(6, Math.round((m.rows.text / max) * 22));
+            return (
+              <div key={m.month} title={`${m.month} · ${m.sealed ? "sealed" : "open"} · ${num(m.rows.text)} messages · ${num(m.rows.tools)} tool calls · ${num(m.rows.thinking)} thinking`}
+                className={cx("flex flex-col justify-end rounded-md border px-1.5 pt-1.5 pb-1", m.sealed ? "border-line bg-panel" : "border-accent-dim bg-accent-wash")}>
+                <div className="flex h-[22px] items-end"><div className={cx("w-full rounded-sm", m.sealed ? "bg-muted/70" : "bg-accent")} style={{ height: h }} /></div>
+                <div className={cx("mt-1 text-[10px] leading-tight tabular-nums", m.sealed ? "text-muted" : "font-semibold text-accent")}>
+                  {m.month.slice(2).replace("-", "·")}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <small className="mt-1 block text-[10px] text-faint">bar = messages that month; hover a month for its counts</small>
       </Section>
       <Section title="Hub">
         <Ledger rows={[
