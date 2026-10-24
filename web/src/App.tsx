@@ -10,8 +10,9 @@ import { JobsView } from "./views/JobsView";
 import { QueriesView } from "./views/QueriesView";
 import { CompareView } from "./views/CompareView";
 import { StoreView } from "./views/StoreView";
+import { OverviewView } from "./views/OverviewView";
 
-const TABS = ["search", "live", "jobs", "queries", "compare", "store"] as const;
+const TABS = ["overview", "search", "live", "jobs", "queries", "compare", "store"] as const;
 type Tab = (typeof TABS)[number];
 type Theme = "dark" | "paper";
 
@@ -19,7 +20,7 @@ type Theme = "dark" | "paper";
  *  back/forward work (relic4-scan src/page/shell.js ?view= deep links). */
 function readHash() {
   const h = new URLSearchParams(location.hash.slice(1));
-  const tab = (TABS as readonly string[]).includes(h.get("tab") ?? "") ? (h.get("tab") as Tab) : "search";
+  const tab = (TABS as readonly string[]).includes(h.get("tab") ?? "") ? (h.get("tab") as Tab) : "overview";
   return { tab, machine: h.get("machine") ?? "", search: { q: h.get("q") ?? "", horizon: h.get("horizon") ?? "", with: h.get("with") ?? "", repo: h.get("repo") ?? "" } };
 }
 function writeHash(tab: Tab, machine: string, s: SearchState) {
@@ -52,7 +53,7 @@ export function App() {
   return (
     <div className="grid h-dvh grid-rows-[auto_minmax(0,1fr)] overflow-hidden">
       <header className="z-10 flex min-h-[58px] flex-wrap items-center gap-3.5 border-b border-line bg-panel px-4 py-2">
-        <a href="#tab=search" className="flex items-baseline whitespace-nowrap font-sans text-[15px] font-bold text-accent">
+        <a href="#tab=overview" className="flex items-baseline whitespace-nowrap font-sans text-[15px] font-bold text-accent">
           RELIC<span className="font-medium text-faint">5</span><small className="ml-2.5 font-mono text-[10px] text-faint">{s ? `${s.code.name} ${s.code.version}` : "hub"}</small>
         </a>
         <Seg label="Theme" value={theme} onChange={setTheme} options={[{ value: "dark", label: "Dark" }, { value: "paper", label: "Paper" }]} />
@@ -78,6 +79,7 @@ export function App() {
               </button>
             ))}
           </nav>
+          {view.tab === "overview" && (s ? <OverviewView s={s} on /> : <State>loading…</State>)}
           <div hidden={view.tab !== "search"}><SearchView st={view.search} setSt={st => setView(v => ({ ...v, search: st }))} machine={view.machine} focusKey={focusKey} /></div>
           {view.tab === "live" && <LiveView machine={view.machine} on />}
           {view.tab === "jobs" && <JobsView s={s} on />}
