@@ -6,3 +6,5 @@ tests/eval/generated/
 tests/eval/runs/
 feeder/.build/
 feeder/*.app/
+.impeccable/review/
+.impeccable/*.json
