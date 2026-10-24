@@ -16,7 +16,7 @@ DRY=""
 FROM=${1:?usage: claude-sync [-n] <the other account .claude>}
 TO="${CLAUDE_SYNC_TO:-$HOME/.claude}"
 [ "$(cd "$FROM" 2>/dev/null && pwd -P)" = "$(cd "$TO" && pwd -P)" ] && { echo "refuse: $FROM is this account's own home" >&2; exit 2; }
-who=$(stat -f %Su "$FROM" 2>/dev/null || stat -c %U "$FROM")
+who=$(stat -c %U "$FROM" 2>/dev/null || stat -f %Su "$FROM")   # GNU first: Linux `stat -f` is filesystem info
 t0=$(date +%s); rc=0
 sync1() {   # src dst label [rsync options]
   [ -d "$1" ] || return 0

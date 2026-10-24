@@ -140,7 +140,8 @@ done
 GITC="${RELIC5_GIT_CACHE:-$HOME/.cache/relic5/git}"
 if [ "${RELIC5_GIT:-1}" != 0 ] && command -v ghq >/dev/null 2>&1; then
   mkdir -p "$GITC"
-  age=$(( $(date +%s) - $(stat -f %m "$GITC/.stamp" 2>/dev/null || stat -c %Y "$GITC/.stamp" 2>/dev/null || echo 0) ))
+  # GNU first: on Linux `stat -f` is filesystem info and exits 0, so BSD-first fed that into $(( )) (white, 2026-10-24 20:09)
+  age=$(( $(date +%s) - $(stat -c %Y "$GITC/.stamp" 2>/dev/null || stat -f %m "$GITC/.stamp" 2>/dev/null || echo 0) ))
   if [ "$age" -ge "${RELIC5_GIT_EVERY:-3600}" ]; then
     groot=$(ghq root)
     ghq list -p | while IFS= read -r repo; do
