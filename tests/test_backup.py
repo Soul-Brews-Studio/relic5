@@ -89,6 +89,11 @@ def test_last_backup_and_its_warning(root):
         f.write(json.dumps(ev(datetime.now(timezone.utc) - timedelta(hours=40))) + "\n")
     s = status(root)
     assert s["backup"]["at"] and any(w.startswith("last backup 40 h ago") for w in s["warnings"])
+    assert s["offsite"]["at"] is None and not any("offsite" in w for w in s["warnings"])   # none yet: no warning
+    with open(os.path.join(root, "logs/jobs.jsonl"), "a") as f:
+        f.write(json.dumps(ev(datetime.now(timezone.utc) - timedelta(hours=50), verb="offsite")) + "\n")
+    s = status(root)
+    assert s["offsite"]["bytes"] == 123 and any(w.startswith("last offsite copy 50 h ago") for w in s["warnings"])
 
 
 def test_restore_test_rebuilds_a_snapshot_and_matches(root, tmp_path):

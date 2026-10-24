@@ -17,11 +17,12 @@ from .types_ import JobEvent, Json
 BACKUP_STALE_S = 36 * 3600   # nightly, plus a day of slack (relic4-scan, 2026-10-24)
 
 
-def last_backup(evs: list[JobEvent], now: _datetime | None = None) -> Json:
-    """The newest finished backup (bin/relic5-backup writes a JobEvent "backup"): when, how big, how old."""
+def last_backup(evs: list[JobEvent], now: _datetime | None = None, verb: str = "backup") -> Json:
+    """The newest finished backup (bin/relic5-backup writes a JobEvent "backup"; bin/relic5-offsite one "offsite"):
+    when, how big, how old."""
     from datetime import datetime
     from .window import utcnow
-    b = next((e for e in evs if e.get("verb") == "backup" and e.get("state") == "done"), None)
+    b = next((e for e in evs if e.get("verb") == verb and e.get("state") == "done"), None)
     if not b:
         return {"at": None, "bytes": None, "message": None, "age_s": None, "host": None}
     try:
@@ -107,6 +108,9 @@ def status(root: str, now: _datetime | None = None) -> Json:
     if not copy:   # a copy gets no pushes, backups or seals of its own: those checks belong to the live hub
         warnings += SD.overdue(seal_days, now)
     backup = last_backup(evs, now)
+    offsite = last_backup(evs, now, "offsite")   # white -> black RustFS bucket relic5-hub (bin/relic5-offsite)
+    if not copy and offsite["age_s"] is not None and offsite["age_s"] > BACKUP_STALE_S:
+        warnings.append(f"last offsite copy {offsite['age_s'] // 3600} h ago, at {offsite['at']} (should run nightly)")
     if copy:
         pass
     elif backup["at"] is None:
@@ -172,6 +176,7 @@ def status(root: str, now: _datetime | None = None) -> Json:
                  "tools": rows["tools"], "sessions": None, "files": sum(len(p.files(s)) for s in MONTH_STREAMS)},
         "jobs": {"running": running, "recent": evs[:10], "last_error": last_error},
         "backup": backup,
+        "offsite": offsite,
         "copy": copy,
         "memory": __import__("relic5.memory", fromlist=["counts"]).counts(p.root),
         "git": __import__("relic5.gitlog", fromlist=["counts"]).counts(p.root),

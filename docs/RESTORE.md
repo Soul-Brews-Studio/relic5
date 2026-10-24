@@ -20,6 +20,18 @@ Snapshots are `~/relic5-backup/white/<UTC yyyymmdd-hhmmss>/` on m5, `latest` poi
 hardlinks the files that did not change since the previous one, so a night costs only what changed. The newest 14
 are kept (`RELIC5_BACKUP_KEEP`). The directories are 700.
 
+## The offsite copy (black RustFS)
+
+`bin/relic5-offsite` runs on white every night at 03:45 (`deploy/systemd/relic5-offsite.timer`) and copies `parts/`,
+`vectors/`, `resolve/`, `logs/`, `attic/` and `hub-status.json` into relic5's own bucket, `s3://relic5-hub` on
+`http://black.follow-rankine.ts.net:9200` (region `black-ssd-rustfs`). It runs `aws s3 sync` without `--delete`; the
+bucket keeps versions, and black's nightly `mirror-to-odin` copies it to odin's Garage. Key: user `relic5`, read/write on
+`relic5-hub` only, kept in `pass rustfs-black/relic5-key` and in white's `~/.config/relic5/s3-black` (0600). Each run is a
+JobEvent `offsite`; `relic_status` shows it as `offsite` and warns when the newest is older than 36 h.
+
+Install on white: `cp deploy/systemd/relic5-offsite.* ~/.config/systemd/user/ && systemctl --user daemon-reload && systemctl --user enable --now relic5-offsite.timer`.
+Restore from it: `aws --endpoint-url http://black.follow-rankine.ts.net:9200 --region black-ssd-rustfs s3 sync s3://relic5-hub/ ~/relic5/`, then `just index`.
+
 ## Schedule and the hub's view
 
 - `deploy/launchd/studio.soulbrews.relic5-backup.plist`: 03:30 every night, backup then restore test.
