@@ -5,6 +5,7 @@
   relic5 index [--root ~/relic5] [--force] [YYYY-MM ...]   on the hub: month manifests, BM25 tables, names (fast lane)
   relic5 index --vectors                     on the hub: vector tables and watermarks only (slow lane, after shards land)
   relic5 seals [--verify]                    on the hub: each machine's sealed months as the hub holds them (exit 1: a seal broke)
+  relic5 seal-day [YYYY-MM]                  on the hub: reconcile closed months end to end (exit 1: one is blocked)
   relic5 import relic3 [--weeks 2026W40-2026-09-28,...] [--all] [--out ~/.relic-import/relic3]
                                   old relic3 weeks -> relic-scan month files of the sessions no machine holds
   relic5 tui [--token]            the hub in a terminal: status, live, search (+ show), jobs, queries
@@ -205,6 +206,10 @@ def _main(argv: list[str] | None = None) -> None:
             from . import seals
             _, v = seals.update(os.path.abspath(root))
             j.progress(done=v["checked"], unit="seals", message=f"seals: {v['checked']} checked, {len(v['problems'])} problems")
+            from . import sealday
+            days = sealday.run(os.path.abspath(root))
+            j.progress(done=sum(d["state"] == "reconciled" for d in days), unit="months",
+                       message="seal day: " + ", ".join(f"{d['month']} {d['state']}" for d in days if d["state"] != "open")[-300:])
             from . import selfknow
             selfknow.record_size(root)
     elif cmd == "tui":
@@ -320,6 +325,17 @@ def _main(argv: list[str] | None = None) -> None:
             if not follow:
                 break
             _t.sleep(30)
+    elif cmd == "seal-day":   # on the hub: reconcile closed months (sealday.py); every index runs it too
+        from . import sealday
+        root = os.path.abspath(os.path.expanduser(_opt(rest, "--root", ROOT)))
+        want = [a for a in rest if len(a) == 7 and a[4] == "-"]
+        states = [sealday.reconcile(root, m) for m in want] if want else sealday.run(root)
+        for d in states:
+            if d["state"] == "open":
+                continue
+            extra = d["fingerprint"] or "; ".join((d["problems"] or d["waiting"])[:3])
+            print(f"{d['month']}  {d['state']:<10} {extra}" + (f"  ({d['amendments']} amendment(s))" if d["amendments"] else ""))
+        sys.exit(1 if any(d["state"] == "blocked" for d in states) else 0)
     elif cmd == "seals":   # on the hub: the machines' month seals as the hub holds them; --verify exits 1 on a difference
         from . import seals
         root = os.path.abspath(os.path.expanduser(_opt(rest, "--root", ROOT)))
