@@ -42,3 +42,37 @@ def test_policy_chooses_by_backlog(tmp_path, monkeypatch):
     cfg.write_text('[embed]\nbacklog_gb300 = 1000\nsmall = "mps"\n')
     monkeypatch.setattr(worker, "CONFIG", str(cfg))
     assert worker.choose(1_200) == ("gb300", "backlog 1,200 > 1,000: gb300") and worker.choose(10)[0] == "mps"
+
+
+def test_a_failed_query_embedding_is_said_in_the_reply(monkeypatch):
+    """The fallback to keyword hits is never silent: the reason comes back in `note`, before the hub's own note."""
+    import relic5.encode as E, relic5.worker as W
+    monkeypatch.setattr(W, "policy", lambda: {"query": ["ane"]})
+    def down(texts, model, engine):
+        raise ConnectionError("ANE engine busy")
+    monkeypatch.setattr(E, "encode", down)
+    seen = []
+    def hub(url, msg):
+        seen.append(msg)
+        body = {"hits": [], "note": "semantic needs the query embedded by the client: these are keyword hits"}
+        return {"jsonrpc": "2.0", "id": msg["id"], "result": {"content": [{"type": "text", "text": json.dumps(body)}]}}
+    monkeypatch.setattr(shim, "forward", hub)
+    out = io.StringIO()
+    req = {"jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": {"name": "relic_search", "arguments": {"query": "x", "semantic": True}}}
+    shim.serve("http://hub", io.StringIO(json.dumps(req) + "\n"), out, None)
+    note = json.loads(json.loads(out.getvalue())["result"]["content"][0]["text"])["note"]
+    assert note.startswith("query embedding failed on this Mac (ane: ConnectionError: ANE engine busy)")
+    assert "keyword hits" in note.split(" · ", 1)[1] and "_embed_failed" not in seen[0]   # never sent to the hub
+
+
+def test_hub_keeps_both_notes(root):
+    from relic5 import mcp
+    from relic5.query import Relic5
+    import duckdb
+    from relic5 import fts
+    from relic5.parts import Parts
+    con = duckdb.connect()
+    Parts(root).index(con, log=lambda s: None)
+    fts.build(root, con, log=lambda s: None)
+    ok, r = mcp.call_tool(Relic5(root, con), "relic_search", {"query": "hub", "semantic": True, "limit": 1}, "loopback")
+    assert ok and r["note"].startswith("semantic needs the query embedded")
