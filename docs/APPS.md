@@ -201,3 +201,17 @@ relic-extract, relic-lessons (docs).
   shares the hub's port number, so a local test of `relic5 serve` on 8795 would collide with it.
 - Hub session counts skip Codex sessions (`repo` was null on all 161 Codex sessions among the 500 newest the hub returned for the window). A
   `repo` derived from Codex's `session_meta.cwd` in relic-scan meta would fix that.
+
+## Disk neighbours on white (2026-10-24)
+
+What fills white's disk besides relic5 itself, for Nat to decide on; relic5 never touches them (`relic5 gc` lists them
+with sizes, including the build cache per buildx builder):
+
+- `~/.relic3-gens` (81 GB): relic3's index generations. Frozen since its push/indexer agents were unloaded (09:25).
+- Docker images and volumes of other services (kestra, apisix, kafka, esphome-build-server...): not relic5's.
+- buildx builder `mybuilder` (48 GB of build cache): white's *current* builder for user nat, so every
+  `docker compose build` lands there, relic5's `just up` included. Part of its growth on 2026-10-24 was relic5's:
+  the Dockerfile reinstalled all dependencies and ran `chown -R` over the venv on every deploy. Fixed: dependencies
+  are their own layer and nothing is chowned after install, so a deploy now adds only the small source layer. The
+  rest of that cache is other builds'. It is all reclaimable cache; pruning a shared builder is Nat's call.
+- relic4-scan's release builds use their own context builder (`white`) and the default cache, which relic4-scan prunes.

@@ -76,4 +76,22 @@ def not_ours(home: str | None = None) -> list[NotOurs]:
             out.append({"what": f"docker {d.get('Type')}", "about": f"size {d.get('Size')}, reclaimable {d.get('Reclaimable')}", "bytes": None})
     except (OSError, ValueError, subprocess.TimeoutExpired):
         pass
+    return out + builders()
+
+
+def builders() -> list[NotOurs]:
+    """Build cache per buildx builder. The current one (marked * by `docker buildx ls`) is where `docker compose build`
+    lands, relic5's `just up` included; on white that is "mybuilder", shared with other builds (2026-10-24)."""
+    out: list[NotOurs] = []
+    try:
+        ls = subprocess.run(["docker", "buildx", "ls"], capture_output=True, text=True, timeout=30).stdout
+        names = [(ln.split()[0].rstrip("*"), ln.split()[0].endswith("*")) for ln in ls.splitlines()[1:]
+                 if ln.strip() and not ln.startswith((" ", "\t")) and not ln.lstrip().startswith("\\_")]
+        for name, cur in names:
+            du = subprocess.run(["docker", "buildx", "du", "--builder", name], capture_output=True, text=True, timeout=60).stdout
+            total = next((ln.split(":", 1)[1].strip() for ln in du.splitlines() if ln.startswith("Total:")), "unknown")
+            about = f"build cache {total}" + (" · current builder: relic5's compose builds land here" if cur else "")
+            out.append({"what": f"buildx builder {name}", "about": about, "bytes": None})
+    except (OSError, subprocess.TimeoutExpired):
+        pass
     return out
