@@ -77,6 +77,7 @@ export interface QueryRow {
 export interface Queries {
   running: QueryRow[]; last: QueryRow[]; per_hour: Record<string, { n: number; p50_ms: number; p95_ms: number }>;
   top: { query: string; n: number }[]; zero_hits: QueryRow[];
+  searches?: { at: string; query: string; hits?: number | null; client?: string | null }[];
 }
 
 export interface EvalRow {
