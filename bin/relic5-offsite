@@ -1,0 +1,50 @@
+#!/bin/sh
+# relic5 offsite: copy the hub's data from white to relic5's own bucket in black's RustFS, so relic5 keeps a copy of
+# itself away from both white and m5 (Nat, 2026-10-24: "can we take care our self?"). black's nightly mirror-to-odin
+# copies the bucket on to odin, so the hub's data ends up on three boxes.
+#
+#   bin/relic5-offsite         # on white, nightly from deploy/systemd/relic5-offsite.timer
+#   bin/relic5-offsite -n      # dry run
+#
+# What goes in: the same as bin/relic5-backup (parts, vectors, resolve, logs, attic) plus hub-status.json. Not the token
+# file, and not index/ (rebuilt from parts). `aws s3 sync` without --delete: a file removed on the hub stays in the
+# bucket, and the bucket's versioning keeps every overwritten version. The key (user relic5, rw on relic5-hub only) is
+# ~/.config/relic5/s3-black, 0600: line 1 the access key, line 2 the secret. It is never printed.
+# Each run is one JobEvent "offsite" in logs/jobs.jsonl; relic_status shows it as `offsite` and warns after 36 h.
+set -u
+ROOT="${RELIC5_ROOT:-$HOME/relic5}"
+KEY="${RELIC5_S3_KEY:-$HOME/.config/relic5/s3-black}"
+BUCKET="${RELIC5_S3_BUCKET:-relic5-hub}"
+EP="${RELIC5_S3_ENDPOINT:-http://black.follow-rankine.ts.net:9200}"
+REGION="${RELIC5_S3_REGION:-black-ssd-rustfs}"
+DIRS="${RELIC5_OFFSITE_DIRS:-parts vectors resolve logs attic}"
+STATUS_URL="${RELIC5_HUB_URL:-http://127.0.0.1:8795}/api/status"
+DRY=""
+[ "${1:-}" = "-n" ] && DRY="--dryrun"
+[ -r "$KEY" ] || { echo "no key at $KEY" >&2; exit 2; }
+AWS_ACCESS_KEY_ID=$(sed -n 1p "$KEY"); AWS_SECRET_ACCESS_KEY=$(sed -n 2p "$KEY"); export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
+JOB="offsite-$(hostname -s)-$(date -u +%Y%m%d-%H%M%S)-$$"
+jobev() {   # state, extra JSON fields
+  [ -n "$DRY" ] && return 0
+  printf '{"job": "%s", "verb": "offsite", "state": "%s", "at": "%s", "pid": %s, "host": "%s"%s}\n' \
+    "$JOB" "$1" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$$" "$(hostname -s)" "${2:+, $2}" >> "$ROOT/logs/jobs.jsonl"
+}
+jobev start
+t0=$(date +%s); rc=0; n=0
+for d in $DIRS; do
+  [ -d "$ROOT/$d" ] || continue
+  out=$(aws --endpoint-url "$EP" --region "$REGION" s3 sync $DRY --only-show-errors --no-progress "$ROOT/$d/" "s3://$BUCKET/$d/" 2>&1) \
+    || { echo "$d: $out" | tail -3 >&2; rc=1; }
+done
+curl -fsS -H "Host: 127.0.0.1" "$STATUS_URL" > "${TMPDIR:-/tmp}/relic5-hub-status.$$" 2>/dev/null \
+  && aws --endpoint-url "$EP" --region "$REGION" s3 cp $DRY --only-show-errors "${TMPDIR:-/tmp}/relic5-hub-status.$$" "s3://$BUCKET/hub-status.json" || true
+rm -f "${TMPDIR:-/tmp}/relic5-hub-status.$$"
+bytes=$(du -sb $(for d in $DIRS; do [ -d "$ROOT/$d" ] && printf '%s ' "$ROOT/$d"; done) 2>/dev/null | awk '{t+=$1} END {print t+0}')
+secs=$(( $(date +%s) - t0 ))
+if [ $rc -eq 0 ]; then
+  jobev done "\"rc\": 0, \"done\": $bytes, \"unit\": \"bytes\", \"message\": \"s3://$BUCKET on black: $(( bytes / 1000000 )) MB in sync, ${secs}s\""
+else
+  jobev error "\"rc\": $rc"
+fi
+echo "$(date '+%F %T') relic5 offsite -> s3://$BUCKET ($EP) rc=$rc ${secs}s${DRY:+ (dry run)}"
+exit $rc

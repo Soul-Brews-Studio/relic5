@@ -1,0 +1,8 @@
+[Unit]
+Description=relic5 offsite: copy the hub's data to black RustFS bucket relic5-hub (never deletes)
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/relic5/app/bin/relic5-offsite
+Nice=10
