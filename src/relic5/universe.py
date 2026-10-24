@@ -9,7 +9,7 @@ lanceglass ships as deterministic-pca-3d: no random seed, the same hub gives the
 Points carry the session's id, name, repo, newest time, chunk count and machines; the page colours them by repo.
 """
 import threading
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .types_ import Json
 
@@ -62,17 +62,7 @@ def sessions_map(relic: "Relic5", model: str | None = None, limit: int = 3000, m
         means[j] = acc
     means /= np.linalg.norm(means, axis=1, keepdims=True) + 1e-9
 
-    centred = means - means.mean(axis=0)
-    _, s, vt = np.linalg.svd(centred, full_matrices=False)
-    k = min(3, vt.shape[0])   # fewer sessions than axes: the missing axes stay 0
-    xyz = np.zeros((len(keep), 3), dtype=np.float32)
-    xyz[:, :k] = centred @ vt[:k].T
-    # a fixed sign per axis (the largest loading positive), so the map does not mirror between rebuilds
-    xyz[:, :k] *= np.sign(vt[:k][np.arange(k), np.abs(vt[:k]).argmax(axis=1)])
-    span = np.abs(xyz).max(axis=0)
-    xyz /= np.where(span > 0, span, 1)
-    var = s ** 2
-    explained = [round(float(v / var.sum()), 4) for v in var[:k]] if var.sum() > 0 else []
+    xyz, explained = project(means)
 
     sids = [str(sid_s[starts[g]]) for g in keep]
     names, repos = relic._names(sids), relic._repos(sids)
@@ -92,3 +82,56 @@ def sessions_map(relic: "Relic5", model: str | None = None, limit: int = 3000, m
         _CACHE[key] = out
     return out
 
+
+def project(vecs: "Any") -> "tuple[Any, list[float]]":
+    """Unit vectors -> (n, 3) coordinates in [-1, 1] by PCA, and the share of variance each axis explains.
+    Deterministic: no random seed, and a fixed sign per axis (the largest loading positive) so a rebuild never
+    mirrors the map. Fewer rows than axes: the missing axes stay 0."""
+    import numpy as np
+    centred = vecs - vecs.mean(axis=0)
+    _, s, vt = np.linalg.svd(centred, full_matrices=False)
+    k = min(3, vt.shape[0])
+    xyz = np.zeros((len(vecs), 3), dtype=np.float32)
+    xyz[:, :k] = centred @ vt[:k].T
+    xyz[:, :k] *= np.sign(vt[:k][np.arange(k), np.abs(vt[:k]).argmax(axis=1)])
+    span = np.abs(xyz).max(axis=0)
+    xyz /= np.where(span > 0, span, 1)
+    var = s ** 2
+    return xyz, ([round(float(v / var.sum()), 4) for v in var[:k]] if var.sum() > 0 else [])
+
+
+def memory_map(relic: "Relic5", model: str | None = None) -> Json:
+    """Every memory note with a vector of its own (vec.missing hands the notes to the embed worker), one point each.
+    -> {model, notes, embedded, explained, points: [{uid, x, y, z, type, project, title, ts, machines}]}"""
+    import os
+    import numpy as np
+    from . import vec as V
+    root = relic.parts.root
+    mem = os.path.join(root, "index", "_memory", "notes.parquet")
+    have = V.vectors_sql(root, model or V.DEFAULT)
+    if not os.path.exists(mem):
+        return {"model": model or V.DEFAULT, "notes": 0, "embedded": 0, "explained": [], "points": []}
+    m = mem.replace("'", "''")
+    total = relic._rows(f"SELECT count(*) AS n FROM read_parquet('{m}')")[0]["n"]
+    key = (os.path.getmtime(mem), "memory", model or "", total)
+    with _LOCK:
+        if key in _CACHE:
+            return _CACHE[key]
+    if have is None:
+        return {"model": model or V.DEFAULT, "notes": total, "embedded": 0, "explained": [], "points": []}
+    cur = relic.con.cursor()
+    rows = cur.execute(f"""SELECT n.msgkey, n.ts, n.role, n.cat, n.title, n.machines, v.vector::FLOAT[] AS vector
+                           FROM read_parquet('{m}') n JOIN (SELECT key, any_value(vector) AS vector FROM {have} GROUP BY key) v USING (key)""").fetchall()
+    if not rows:
+        return {"model": model or V.DEFAULT, "notes": total, "embedded": 0, "explained": [], "points": []}
+    vecs = np.asarray([r[6] for r in rows], dtype=np.float32)
+    vecs /= np.linalg.norm(vecs, axis=1, keepdims=True) + 1e-9
+    xyz, explained = project(vecs)
+    points: list[Json] = [{"uid": r[0], "x": round(float(p[0]), 4), "y": round(float(p[1]), 4), "z": round(float(p[2]), 4),
+                           "ts": r[1], "type": (r[2] or "memory-note")[7:], "project": r[3], "title": r[4], "machines": list(r[5] or [])}
+                          for r, p in zip(rows, xyz)]
+    out: Json = {"model": model or V.DEFAULT, "notes": total, "embedded": len(points), "explained": explained,
+                 "projection": "pca-3d of each note's own vector", "points": points}
+    with _LOCK:
+        _CACHE[key] = out
+    return out
