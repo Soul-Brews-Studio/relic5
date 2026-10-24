@@ -11,7 +11,12 @@ struct RelicFeederApp: App {
         MenuBarExtra {
             Panel(model: model).frame(width: 440)
         } label: {
-            Image(systemName: model.symbol)
+            // while a pass runs: the turning icon and the time left; for a few seconds after: its sync verdict
+            if let left = model.chain?.running == true ? model.chain?.etaS : nil, left > 0 {
+                HStack(spacing: 3) { Image(systemName: model.symbol); Text(clock(left)).monospacedDigit() }
+            } else {
+                Image(systemName: model.symbol)
+            }
         }
         .menuBarExtraStyle(.window)
     }
@@ -35,6 +40,11 @@ final class Model: ObservableObject {
     /// While the old LaunchAgent studio.soulbrews.relic-chain is loaded it runs the passes; this app only watches
     /// (one scheduler, no doubled runs). Unloading it is Nat's call (relic4-scan, 2026-10-23).
     @Published var oldChainLoaded = false
+    /// relic-scan's own view of the pass in flight (relic-scan ops --json), polled: 3 s while running, 15 s idle.
+    @Published var chain: ChainSnapshot?
+    @Published var ended: String?
+    private var watch = ChainWatch(hold: 8)
+    let relicScan = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin/relic-scan")
     private var feeder: Feeder!
     private var timer: Timer?
 
@@ -46,6 +56,22 @@ final class Model: ObservableObject {
         refresh()
         if !oldChainLoaded { schedule(after: 5) }
         Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in Task { @MainActor in self?.refresh() } }
+        pollChain()
+    }
+
+    func pollChain() {
+        Task {
+            if let s = try? await readOps(relicScan) {
+                if watch.see(s) {
+                    ended = s.sync
+                    refresh()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + watch.hold) { [weak self] in self?.ended = nil }
+                }
+                chain = s
+            }
+            let next: TimeInterval = (chain?.running ?? false) || running ? 3 : 15
+            DispatchQueue.main.asyncAfter(deadline: .now() + next) { [weak self] in self?.pollChain() }
+        }
     }
 
     static func launchAgentLoaded(_ label: String) -> Bool {
@@ -58,7 +84,8 @@ final class Model: ObservableObject {
     }
 
     var symbol: String {
-        if running { return "arrow.triangle.2.circlepath" }
+        if running || chain?.running == true { return "arrow.triangle.2.circlepath" }
+        if let e = ended { return e.contains("MISMATCH") ? "xmark.octagon" : "checkmark.circle" }
         if error != nil || !missing.isEmpty || !(status?.warnings.isEmpty ?? true) { return "exclamationmark.triangle" }
         return "archivebox"
     }
@@ -130,6 +157,8 @@ struct Panel: View {
             }
             ForEach(model.status?.warnings ?? [], id: \.self) { Text("⚠︎ \($0)").font(.caption).foregroundStyle(.orange) }
             Divider()
+            Activity(chain: model.chain, ended: model.ended)
+            Divider()
             if model.oldChainLoaded {
                 Text("watching: the LaunchAgent studio.soulbrews.relic-chain runs the passes (Run now still works)")
                     .font(.caption).foregroundStyle(.secondary)
@@ -148,5 +177,43 @@ struct Panel: View {
                 Button("Quit") { NSApplication.shared.terminate(nil) }
             }
         }.padding(14)
+    }
+}
+
+/// The pass in flight, as relic-scan sees it: the stages (✓ done, ● running, · waiting), a bar of elapsed over the
+/// typical total, the time left; when idle, how long the last pass took and when the next starts.
+struct Activity: View {
+    let chain: ChainSnapshot?
+    let ended: String?
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if let c = chain {
+                HStack {
+                    Text(c.running ? "pass running" : "idle").font(.subheadline.bold())
+                    Spacer()
+                    if c.running, let e = c.elapsedS {
+                        Text("\(clock(e))\(c.typicalTotalS.map { " / typical \(clock($0))" } ?? "")").font(.caption.monospacedDigit())
+                    } else if let took = c.tookS {
+                        Text("took \(clock(took))\(c.nextInS.map { " · next in \(clock($0))" } ?? "")").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                    }
+                }
+                if let p = c.progress { ProgressView(value: p) }
+                if let left = c.leftLine { Text(left).font(.caption).foregroundStyle(.secondary) }
+                ForEach(Array(c.stages.enumerated()), id: \.offset) { _, st in
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(st.mark).frame(width: 12).foregroundStyle(st.state == "running" ? Color.accentColor : st.state == "done" ? .green : .secondary)
+                        Text(st.name).frame(width: 118, alignment: .leading)
+                        Text(st.secs.map { clock($0) } ?? (st.state == "running" ? "…" : "")).frame(width: 40, alignment: .trailing).monospacedDigit()
+                        Text(st.typicalS.map { "~\(clock($0))" } ?? "").frame(width: 44, alignment: .trailing).foregroundStyle(.secondary).monospacedDigit()
+                        Text(st.detail ?? "").foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                    }.font(.caption)
+                }
+                if let e = ended {
+                    Text(e).font(.caption.bold()).foregroundStyle(e.contains("MISMATCH") ? .red : .green)
+                }
+            } else {
+                Text("relic-scan ops: no snapshot (is relic-scan 26.10.24-alpha.1312+ in ~/.local/bin?)").font(.caption).foregroundStyle(.secondary)
+            }
+        }
     }
 }
