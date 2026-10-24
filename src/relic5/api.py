@@ -57,6 +57,9 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
     con = duckdb.connect(":memory:", config={"threads": min(os.cpu_count() or 4, 16)})
     relic = Relic5(root, con)
     app = FastAPI(title="relic5", docs_url=None, redoc_url=None, openapi_url=None)
+    if os.environ.get("RELIC5_WARM", "1") != "0":   # the Map and the Knowledge map, made before anyone asks (universe.py)
+        from . import universe
+        universe.keep_warm(relic)
 
     from . import selfknow
 

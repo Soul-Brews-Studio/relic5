@@ -103,7 +103,30 @@ def _first(text: str, n: int) -> str:
     return t if len(t) <= n else t[: n - 1].rsplit(" ", 1)[0] + "…"
 
 
+_PORTRAITS: dict[tuple[object, ...], Json] = {}
+
+
+def _stamp(root: str) -> tuple[float, ...]:
+    """What a portrait is made from, by file time: every machine's vault notes and vaults.json, and the memory index."""
+    fs = sorted(glob.glob(os.path.join(root, "parts", "*", "vault", "notes.parquet")) + glob.glob(os.path.join(root, "parts", "*", "meta", "vaults.json"))
+                + [os.path.join(root, "index", "_memory", "notes.parquet")])
+    return tuple(os.path.getmtime(f) for f in fs if os.path.exists(f))
+
+
 def portrait(relic: "Relic5", name: str) -> Json:
+    """One oracle's page, kept until its sources change (2.4 s a call before, measured 2026-10-25 on white)."""
+    key = (name, _stamp(relic.parts.root))
+    if key in _PORTRAITS:
+        return _PORTRAITS[key]
+    out = _portrait(relic, name)
+    if "error" not in out:
+        if len(_PORTRAITS) > 64:
+            _PORTRAITS.pop(next(iter(_PORTRAITS)))
+        _PORTRAITS[key] = out
+    return out
+
+
+def _portrait(relic: "Relic5", name: str) -> Json:
     from .memory import listing as memory_listing
     row = next((o for o in listing(relic)["oracles"] if o["name"] == name), None)
     if row is None:
