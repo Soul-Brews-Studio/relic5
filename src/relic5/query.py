@@ -320,14 +320,16 @@ class Relic5:
             if parts:
                 layer = s
                 break
-        if not parts:   # a memory note (memory.py): its own table, no session neighbours
-            mp = os.path.join(self.parts.root, "index", "_memory", "notes.parquet")
-            if os.path.exists(mp):
-                hit = self._rows(f"SELECT * EXCLUDE (machine) FROM read_parquet('{mp}') WHERE msgkey = ?", [msgkey])
-                if hit:
-                    t = hit[0] | {"link": f"relic5://{hit[0]['month']}/{msgkey}", "uid": msgkey}
-                    return {"link": t["link"], "target": t, "notes": [f"memory note ({t['role']}) from {t['path']}"],
-                            "parts": [t], "before": [], "after": [], "raw": None, "layer": "memory"}
+        # a memory note (memory.py) or a git commit (gitlog.py): its own table, no session neighbours
+        for side, (d, f), what in (("memory", ("_memory", "notes.parquet"), "memory note"), ("git", ("_git", "commits.parquet"), "git commit")):
+            mp = os.path.join(self.parts.root, "index", d, f)
+            if parts or not os.path.exists(mp):
+                continue
+            hit = self._rows(f"SELECT * EXCLUDE (machine) FROM read_parquet('{mp}') WHERE msgkey = ?", [msgkey])
+            if hit:
+                t = hit[0] | {"link": f"relic5://{hit[0]['month']}/{msgkey}", "uid": msgkey}
+                note = f"{what} ({t['role']}) from {t['path']}" + (f", {t['hash']} in {', '.join(t['repos'])}" if side == "git" else "")
+                return {"link": t["link"], "target": t, "notes": [note], "parts": [t], "before": [], "after": [], "raw": None, "layer": side}
         if not parts:
             raise NotFound(f"no message {msgkey}" + (f" in {month}" if month else ""))
         target = next((p for p in parts if p["chunk"] == chunk), parts[0])

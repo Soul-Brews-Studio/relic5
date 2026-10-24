@@ -19,6 +19,7 @@ One hub on white for every machine's extracted history: push, month store, MCP. 
 | `src/relic5/query.py` | search / show / sessions / session over the parts, folded by `msgkey` across machines | result shapes from agent-relic-v3 `src/search/query.ts` @9f0bdb5 |
 | `src/relic5/mcp.py` | the five tools with v3 names and input schemas, JSON-RPC | agent-relic-v3 `src/mcp/tools.ts`, `server.ts` @9f0bdb5 |
 | `src/relic5/api.py` | `POST /mcp`, `GET /api/*`, `/health`; a bearer token on every request | agent-relic-v4 `api.py`, PR #5 @febfdb7 and PR #6 @b399119 |
+| `src/relic5/gitlog.py` | git commits of every ghq repo as the `git` search layer (`relic_search with: "git"`): the record from 2025-03-25, the first Claude commit, back to before the oldest surviving transcript (2025-09-19). Our identities in the hub's `git-own` file; open-source clones keep only our commits | new |
 | `deploy/systemd/relic5-serve.service` | the serve unit on white | agent-relic-v3 `hub/systemd/relic3-serve.service` |
 
 Changed on purpose from the ports:

@@ -24,7 +24,7 @@ def env(tmp_path):
     (fb / "ssh").write_text(FAKE_SSH)
     (fb / "ssh").chmod(0o755)
     e = dict(os.environ, PATH=f"{fb}:{os.environ['PATH']}", FAKE_HUB_HOME=str(hub), RELIC5_SRC=str(src),
-             RELIC5_HUB="hub", RELIC5_MACHINE="m5")
+             RELIC5_HUB="hub", RELIC5_MACHINE="m5", RELIC5_GIT="0")   # never walk this machine's real ghq tree
     return src, hub, e
 
 
@@ -133,3 +133,33 @@ def test_extra_memory_root_gets_its_own_home(env, tmp_path):
     mem = hub / "relic5/parts/m5/memory"
     assert (mem / "claude/-opt-x/memory/note.md").read_text() == "mine"
     assert (mem / "nat-export-claude/-opt-x/memory/note.md").read_text() == "nat's"
+
+
+def test_git_logs_of_every_ghq_repo(env, tmp_path):
+    """Each repo of `ghq list` goes as one raw git log; a repo whose refs did not move is not read again."""
+    src, hub, e = env
+    root, fb = tmp_path / "ghq", tmp_path / "fakebin"
+    repo = root / "github.com/acme/widget"
+    repo.mkdir(parents=True)
+    g = lambda *a: subprocess.run(["git", "-C", str(repo), *a], check=True, capture_output=True,
+                                  env=dict(os.environ, GIT_AUTHOR_DATE="2025-03-25T16:28:00+07:00", GIT_COMMITTER_DATE="2025-03-25T16:28:00+07:00"))
+    g("init", "-q")
+    g("-c", "user.name=Nat", "-c", "user.email=n@x", "commit", "-q", "--allow-empty", "-m",
+      "Fix template paths\n\n🤖 Generated with [Claude Code](https://claude.ai/code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>")
+    (root / "github.com/acme/empty").mkdir(parents=True)   # not a repo: skipped, nothing sent
+    (fb / "ghq").write_text(f"#!/bin/sh\n[ \"$1\" = root ] && echo {root} && exit 0\nprintf '%s\\n' {repo} {root}/github.com/acme/empty\n")
+    (fb / "ghq").chmod(0o755)
+    cache = tmp_path / "gitcache"
+    e = dict(e, RELIC5_GIT="1", RELIC5_GIT_CACHE=str(cache))
+    r = push(e)
+    assert r.returncode == 0, r.stderr
+    log = (hub / "relic5/parts/m5/git/github.com/acme/widget.log").read_text()
+    h, author, _, name, _, subject, body = log.rstrip("\x1e\n").split("\x1f")
+    assert len(h) == 40 and author == "2025-03-25T16:28:00+07:00" and name == "Nat" and subject == "Fix template paths"
+    assert "Co-Authored-By: Claude" in body
+    assert not list((hub / "relic5/parts/m5/git").rglob("*.refs")) and not (hub / "relic5/parts/m5/git/github.com/acme/empty.log").exists()
+    assert "stream git" in r.stdout
+    before = os.path.getmtime(cache / "github.com/acme/widget.log")
+    os.utime(cache / ".stamp", (0, 0))   # due again, but the refs did not move
+    assert push(e).returncode == 0
+    assert os.path.getmtime(cache / "github.com/acme/widget.log") == before

@@ -38,7 +38,9 @@ class FtsSettings(TypedDict):
 
 FTS_SETTINGS = FtsSettings(base_tokenizer="icu", stem=False, remove_stop_words=False, max_token_length=128,
                     with_position=True)   # positions: exact-phrase hits rank first (eval 2026-10-23: common-word misses)
-LAYERS = {"prose": ("text", "vault"), "tools": ("tools",), "thinking": ("thinking",), "memory": ("memory",)}
+LAYERS = {"prose": ("text", "vault"), "tools": ("tools",), "thinking": ("thinking",), "memory": ("memory",), "git": ("git",)}
+SIDE = {"memory": ("_memory", "notes.parquet"), "git": ("_git", "commits.parquet")}
+"""Layers built from a table the hub folds itself (memory.py, gitlog.py), not from month parts: history only."""
 COLS = ["uid", "msgkey", "chunk", "key", "month", "sid", "ts", "ts_th", "role", "engine", "cat", "layer", "machines", "text", "title"]
 KEEP = 3
 
@@ -53,13 +55,13 @@ def current(root: str) -> dict[str, str]:
 
 
 def _select(parts: Parts, layer: str, months: Collection[str]) -> str | None:
-    """SQL for the folded rows of one layer over some months (vault, a single file, goes to history; so does memory,
-    already folded by memory.py)."""
-    if layer == "memory":
-        p = os.path.join(parts.root, "index", "_memory", "notes.parquet")
+    """SQL for the folded rows of one layer over some months (vault, a single file, goes to history; so do memory and
+    git, already folded by memory.py and gitlog.py)."""
+    if layer in SIDE:
+        p = os.path.join(parts.root, "index", *SIDE[layer])
         if "history" not in months or not os.path.exists(p):
             return None
-        return f"""SELECT msgkey AS uid, msgkey, chunk, key, month, sid, ts, ts_th, role, engine, cat, 'memory' AS layer,
+        return f"""SELECT msgkey AS uid, msgkey, chunk, key, month, sid, ts, ts_th, role, engine, cat, '{layer}' AS layer,
                    machines, text, title FROM read_parquet({sql_list([p])}) ORDER BY ts, msgkey"""
     srcs: list[str] = []
     for s in LAYERS[layer]:
@@ -108,18 +110,20 @@ def build(root: str, con: "duckdb.DuckDBPyConnection", log: Callable[[str], obje
     state_p = os.path.join(sd, "state.json")
     state = json.load(open(state_p)) if os.path.exists(state_p) else {}
     vault = [p for _, _, p in parts.files("vault")]
-    from . import memory
-    memory.build(root) if lane == "fts" else None
-    mem_sig = memory.sig(root)
+    from . import gitlog, memory
+    if lane == "fts":
+        memory.build(root)
+        gitlog.build(root)
+    side_sig = {"memory": {"notes": memory.sig(root)}, "git": {"logs": gitlog.sig(root)}}
     plan: dict[str, tuple[str, list[str], Json]] = {}
     for layer in (LAYERS if lane == "fts" else ()):
         for part, ms in groups.items():
             name = f"{layer}_{part}"
             sig = _sig(parts, layer, ms) | ({"vault": [os.path.getmtime(p) for p in vault]} if layer == "prose" and part == "history" else {})
-            if layer == "memory":
-                if part != "history":
+            if layer in SIDE:
+                if part != "history" or not next(iter(side_sig[layer].values())):   # no notes / no logs pushed: no table
                     continue
-                sig = {"notes": mem_sig}
+                sig = side_sig[layer]
             sig = json.loads(json.dumps(sig))
             if force or state.get(name, {}).get("sig") != sig or name not in current(root):
                 plan[name] = (layer, ms + (["history"] if part == "history" else []), sig)

@@ -37,7 +37,7 @@ SEARCH_PROPS = {
     "cwd": {**STR, "description": "sessions that began in this folder or below it (relic-scan meta cwd)"},
     "branch": {**STR, "description": "sessions on this git branch"},
     "title": {**STR, "description": "sessions whose host title contains this (case-blind)"},
-    "with": {**STR, "enum": ["tools", "thinking", "vault", "memory", "all"], "description": "also search tool calls, thinking, ψ notes, or all; memory = only the agents' memory notes (rules, decisions, references; role memory-feedback / memory-project / memory-reference / memory-user)"},
+    "with": {**STR, "enum": ["tools", "thinking", "vault", "memory", "git", "all"], "description": "also search tool calls, thinking, ψ notes, or all; memory = only the agents' memory notes (rules, decisions, references; role memory-feedback / memory-project / memory-reference / memory-user); git = only git commits of every ghq repo, back to 2025 when no transcript survives (role commit-claude = Claude co-wrote it, commit-codex, commit)"},
     "limit": {"type": "integer", "minimum": 1, "description": f"default {DEFAULT_LIMIT}"},
     "cursor": {**STR, "description": "next_cursor from a previous result"},
     "semantic": {"type": "boolean", "description": "route to semantic search (errors if unavailable)"},
