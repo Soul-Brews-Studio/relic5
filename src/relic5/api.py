@@ -194,6 +194,17 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
         from . import memory
         return memory.listing(relic.parts.root)
 
+    @app.get("/api/memory/file", response_model=None)
+    def memory_file(path: str) -> Response:
+        """One memory note as its file holds it (frontmatter and all), for the Knowledge page's raw view. Only a .md under
+        parts/<machine>/memory/: anything else, or a path that resolves outside, is refused."""
+        base = os.path.realpath(os.path.join(relic.parts.root, "parts"))
+        full = os.path.realpath(os.path.join(relic.parts.root, path))
+        rel = os.path.relpath(full, base)
+        if rel.startswith("..") or "/memory/" not in "/" + rel or not full.endswith(".md") or not os.path.isfile(full):
+            return JSONResponse({"error": "not a memory note on this hub"}, status_code=404)
+        return Response(open(full, encoding="utf-8", errors="replace").read(), media_type="text/markdown; charset=utf-8")
+
     @app.get("/api/log", response_model=None)
     def log(n: int = 100) -> list[JobEvent]:
         from .jobs import read

@@ -26,8 +26,11 @@ export function usePoll<T>(path: string | null, every = 0, on = true): Polled<T>
     live.current = true;
     if (!on) return () => { live.current = false; };
     load();
-    const t = every ? setInterval(load, every) : undefined;
-    return () => { live.current = false; if (t) clearInterval(t); };
+    const tick = () => { if (!document.hidden) load(); };   // a background tab polls nothing (36 KB per /api/tail)
+    const t = every ? setInterval(tick, every) : undefined;
+    const vis = () => { if (!document.hidden && every) load(); };
+    document.addEventListener("visibilitychange", vis);
+    return () => { live.current = false; if (t) clearInterval(t); document.removeEventListener("visibilitychange", vis); };
   }, [load, every, on]);
   return { data, error, at, reload: load };
 }

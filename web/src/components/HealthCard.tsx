@@ -5,7 +5,7 @@ import { cx } from "./ui";
 export type Level = "ok" | "warning" | "failed" | "unknown";
 
 const tone: Record<Level, { ring: string; text: string; word: string; Icon: ComponentType<{ size?: number }> }> = {
-  ok: { ring: "bg-accent-wash text-accent", text: "text-accent", word: "OK", Icon: Check },
+  ok: { ring: "bg-ok-wash text-ok", text: "text-ok", word: "OK", Icon: Check },
   warning: { ring: "bg-[color-mix(in_srgb,var(--warning)_16%,transparent)] text-warning", text: "text-warning", word: "Needs a look", Icon: Alert },
   failed: { ring: "bg-danger-wash text-danger", text: "text-danger", word: "Failing", Icon: Cross },
   unknown: { ring: "bg-raised text-muted", text: "text-muted", word: "Unknown", Icon: Question },
@@ -30,19 +30,19 @@ export function HealthCard({ title, level, children, command, big, icon: I }: {
 }) {
   const loud = level === "failed" || level === "warning";
   return (
-    <div className={cx("flex flex-col gap-3 rounded-2xl border p-5",
+    <div className={cx("flex flex-col gap-3 rounded-2xl border p-6",
       level === "failed" ? "border-danger bg-danger-wash" : level === "warning" ? "border-warning bg-[color-mix(in_srgb,var(--warning)_7%,var(--panel))]" : "border-line bg-panel")}>
       <div className="flex items-center gap-3.5">
         <Badge level={level} />
         <div className="min-w-0">
-          <div className="flex items-center gap-1.5 truncate font-sans text-[15px] font-semibold text-text">{I && <span className="text-muted"><I size={16} /></span>}{title}</div>
-          <div className={cx("font-sans text-[12px] font-semibold", tone[level].text)}>{tone[level].word}</div>
+          <div className="flex items-center gap-1.5 truncate text-base font-bold text-text">{I && <span className="text-muted"><I size={16} /></span>}{title}</div>
+          <div className={cx("text-xs font-semibold", tone[level].text)}>{tone[level].word}</div>
         </div>
-        {big != null && <div className={cx("ml-auto font-sans text-2xl font-bold tabular-nums", loud ? tone[level].text : "text-text")}>{big}</div>}
+        {big != null && <div className={cx("ml-auto text-lg font-extrabold tabular-nums", loud ? tone[level].text : "text-text")}>{big}</div>}
       </div>
-      <p className="m-0 font-sans text-[13px] leading-relaxed text-soft">{children}</p>
+      <p className="m-0 text-sm leading-relaxed text-soft">{children}</p>
       {command && (
-        <code className="mt-auto flex items-center gap-2 rounded-lg bg-deep px-3 py-2 text-[11px] text-soft">
+        <code className="mt-auto flex items-center gap-2 rounded-lg bg-deep px-3 py-2.5 font-mono text-xs text-soft">
           <span className="text-faint">$</span><span className="truncate select-all">{command}</span>
         </code>
       )}
