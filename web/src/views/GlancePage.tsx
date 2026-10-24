@@ -74,15 +74,15 @@ function Section({ title, sub, children }: { title: string; sub: string; childre
  *  four-line list per machine; a row lines the machines up so the eye compares them down a column. */
 function MachineRows({ s, machines }: { s: Status; machines: string[] }) {
   const cell = "border-b border-line px-4 py-3 align-middle [tr:last-child>&]:border-b-0";
-  const head = "border-b border-line px-4 py-3 text-xs font-bold tracking-[0.14em] text-muted uppercase";
+  const head = "border-b border-line px-4 py-3 text-xs font-bold tracking-[0.08em] whitespace-nowrap text-muted uppercase";
   return (
     <div className="overflow-x-auto rounded-2xl border border-line bg-panel">
-      <table className="w-full min-w-[860px] border-collapse text-sm">
+      <table className="w-full min-w-[760px] border-collapse text-sm">
         <thead><tr>
           <th className={head + " text-left"}>Machine</th><th className={head + " text-left"}>Sync</th>
-          <th className={head + " text-right"}>Messages</th><th className={head + " text-right"}>Tool calls</th><th className={head + " text-right"}>Thinking</th>
-          <th className={head + " text-left"}>Last push</th><th className={head + " text-left"}>Newest message</th>
-          <th className={head + " text-right"}>On the hub</th><th className={head + " text-left"}>Sealed</th>
+          <th className={head + " text-right"}>Messages</th><th className={head + " text-right"}>Tools</th><th className={head + " text-right"}>Thinking</th>
+          <th className={head + " text-left"}>Pushed</th><th className={head + " text-left"}>Newest</th>
+          <th className={head + " text-right"}>Size</th><th className={head + " text-left"}>Sealed</th>
         </tr></thead>
         <tbody>{machines.map(m => {
           const f = s.freshness.machines[m] ?? {}, x = s.machines[m] ?? {}, v = s.versions[m] ?? {}, c = syncChip(f.sync), seal = s.seals?.machines[m];
@@ -92,14 +92,14 @@ function MachineRows({ s, machines }: { s: Status; machines: string[] }) {
             <tr key={m} className={cx(level === "failed" && "bg-danger-wash", imported && "text-muted")}>
               <td className={cell}><div className="flex items-center gap-3"><Badge level={level} />
                 <div className="min-w-0"><div className="font-bold text-text">{m}</div>
-                  <div className="truncate text-xs text-muted" title={v.os}>{imported ? "one-time import" : `relic-scan ${v["relic-scan"] ?? "unknown"}`}</div></div></div></td>
+                  <div className="truncate text-xs text-muted" title={v.os}>{imported ? "one-time import" : `relic-scan ${(v["relic-scan"] ?? "unknown").replace(/^26\./, "")}`}</div></div></div></td>
               <td className={cell}><span className={cx("text-xs font-semibold whitespace-nowrap", imported ? "text-muted" : levelText(level))}>{imported ? "no chain" : c.text}</span></td>
               <td className={cell + " text-right font-mono tabular-nums text-text"} title={num(x.text?.rows)}>{compact(x.text?.rows)}</td>
               <td className={cell + " text-right font-mono tabular-nums text-soft"} title={num(x.tools?.rows)}>{compact(x.tools?.rows)}</td>
               <td className={cell + " text-right font-mono tabular-nums text-soft"} title={num(x.thinking?.rows)}>{compact(x.thinking?.rows)}</td>
               <td className={cell + " whitespace-nowrap text-soft"}>{ago(f.pushed_at)}</td>
               <td className={cell + " whitespace-nowrap text-soft"} title={bkk(f.newest_ts)}>{ago(f.newest_ts)}</td>
-              <td className={cell + " text-right font-mono tabular-nums text-soft"}>{bytes(sum(s.store.parts[m]))}</td>
+              <td className={cell + " text-right font-mono whitespace-nowrap tabular-nums text-soft"}>{bytes(sum(s.store.parts[m]))}</td>
               <td className={cell + " whitespace-nowrap text-soft"}>{seal ? <>{seal.sealed} months{seal.resealed ? <span className="text-muted"> · {seal.resealed} resealed</span> : null}</> : imported ? "—" : "not yet"}</td>
             </tr>
           );
@@ -126,7 +126,7 @@ function Searched({ q, search }: { q: Queries | null; search: (q: string) => voi
         <div className="flex flex-wrap items-baseline gap-x-4 gap-y-2">
           {top.map(t => (
             <button key={t.query} type="button" onClick={() => search(t.query)} title={`asked ${t.n} times`}
-              className={cx("rounded-md px-1 py-0.5 text-left leading-snug transition-colors hover:bg-raised hover:text-amber", size(t.n))}>
+              className={cx("rounded-md px-1 py-0.5 text-left leading-snug transition-colors hover:bg-raised hover:text-accent", size(t.n))}>
               {t.query}<sup className="ml-0.5 font-mono text-xs font-normal text-faint">{t.n}</sup>
             </button>
           ))}
@@ -138,7 +138,7 @@ function Searched({ q, search }: { q: Queries | null; search: (q: string) => voi
           {recent.map(r => (
             <li key={r.at + r.query} className="border-b border-line last:border-b-0">
               <button type="button" onClick={() => search(r.query)} className="flex min-h-11 w-full items-center gap-3 text-left text-sm">
-                <span className="min-w-0 flex-1 truncate text-soft hover:text-amber">{r.query}</span>
+                <span className="min-w-0 flex-1 truncate text-soft hover:text-accent">{r.query}</span>
                 <span className="font-mono text-xs text-faint tabular-nums">{r.hits ?? "?"} hits · {ago(r.at)}</span>
               </button>
             </li>

@@ -39,7 +39,7 @@ export function Btn({ children, primary, size, ...p }: { primary?: boolean; size
     <button {...p} className={cx("inline-flex items-center justify-center gap-2 border font-semibold whitespace-nowrap",
       size === "lg" ? "min-h-14 rounded-xl px-7 text-base" : "min-h-11 rounded-lg px-4 text-sm",
       "transition-[background-color,border-color,color,filter] duration-[120ms] ease-[var(--ease-out)] disabled:cursor-not-allowed disabled:opacity-55",
-      primary ? "border-transparent bg-amber text-on-amber hover:brightness-110 active:translate-y-px active:brightness-95" : "border-line bg-raised text-soft hover:border-line-strong hover:text-text",
+      primary ? "border-transparent bg-accent text-on-accent hover:brightness-110 active:translate-y-px active:brightness-95" : "border-line bg-raised text-soft hover:border-line-strong hover:text-text",
       p.className)}>{children}</button>
   );
 }

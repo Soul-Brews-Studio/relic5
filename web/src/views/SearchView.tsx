@@ -8,7 +8,8 @@ import { get } from "../api";
 import { ago, bkk, repoColor } from "../format";
 import type { Hit, SearchResult, ShowResult } from "../types";
 import { Drawer } from "../components/Drawer";
-import { Btn, Chip, cx, inputCls, Kbd, Lbl, Loading, MachinePick, Marked, Seg, State, Toggle, Who } from "../components/ui";
+import { Markdown } from "../components/Markdown";
+import { Btn, Chip, cx, inputCls, Kbd, Lbl, Loading, Marked, Seg, State, Toggle, Who } from "../components/ui";
 import type { PaletteSession } from "../components/Shell";
 import { Close, Filter, Search, Session } from "../components/Icons";
 
@@ -26,6 +27,9 @@ const LAYERS = [
   { value: "git", label: "Git commits", note: "every repo, back to 2025-03" },
   { value: "all", label: "Everything", note: "all of the above" },
 ];
+
+/** A snippet without the Markdown marks it was cut from (Nat's screenshot: "**" and "#" in every row). */
+const clean = (t: string) => t.replace(/\*\*|__|`+/g, "").replace(/^#{1,4}\s+/gm, "").replace(/<\/?pasted_content[^>]*>/g, "");
 
 /** Hits that follow each other in one session fold under the first (Panel A: seven rows of one session buried the rest). */
 interface Row { h: Hit; i: number; more: Hit[] }
@@ -50,13 +54,12 @@ function HitRow({ h, q, active, onOpen, more, onMore }: { h: Hit; q: string; act
           <time className="tabular-nums text-soft">{bkk(h.ts)}</time>
           {h.layer === "memory" ? <Chip tone="ok">{h.role.replace("memory-", "")} note</Chip> : h.layer === "git" ? <Chip tone="ok">{h.role === "commit-claude" ? "commit · Claude" : h.role === "commit-codex" ? "commit · Codex" : "commit"}</Chip> : <><Who role={h.role} />{h.layer !== "prose" && <Chip>{h.layer}</Chip>}</>}
           <span title={`held by ${h.machines.join(", ")}`}>{h.machines.length > 1 ? `on ${h.machines.join(" + ")}` : h.machines[0]}</span>
-          <span className="ml-auto font-mono text-faint" title="Match score (BM25)">{h.score.toFixed(1)}</span>
         </span>
         <span className="mt-1.5 flex min-w-0 items-center gap-2 text-sm font-semibold text-text">
           <span className="size-2 flex-none rounded-full" style={{ background: repoColor(shortRepo(h.repo_key)) }} />
           <span className="truncate"><span style={{ color: repoColor(shortRepo(h.repo_key)) }}>{shortRepo(h.repo_key)}</span>{where ? <> · {where}</> : null}</span>
         </span>
-        <span className="mt-1.5 line-clamp-3 block max-w-[78ch] text-sm leading-[1.65] break-words whitespace-pre-wrap text-soft"><Marked text={h.text_snippet} q={q} /></span>
+        <span className="mt-1.5 line-clamp-3 block max-w-[78ch] text-sm leading-[1.65] break-words whitespace-pre-wrap text-soft"><Marked text={clean(h.text_snippet)} q={q} /></span>
       </button>
       {!!more && <button type="button" onClick={onMore} className="mb-2 ml-3 inline-flex min-h-9 items-center rounded-lg px-2 text-xs font-semibold text-accent hover:bg-raised">+{more} more in this session</button>}
     </div>
@@ -68,7 +71,7 @@ export function Context({ r, q }: { r: ShowResult; q: string }) {
   const one = (m: ShowResult["target"], target = false) => (
     <div key={m.ts + m.role + (target ? "t" : "")} className={cx("rounded-xl px-5 py-3", target && "bg-amber-wash")}>
       <div className="flex gap-3 text-xs text-muted"><time className="tabular-nums">{bkk(m.ts)}</time><Who role={m.role} /><span>{(m.machines ?? []).join(", ")}</span></div>
-      <div className="mt-1.5 max-w-[80ch] text-sm leading-[1.65] break-words whitespace-pre-wrap text-soft"><Marked text={m.text ?? ""} q={q} /></div>
+      <div className="mt-1.5 max-w-[80ch] break-words"><Markdown text={m.text ?? ""} q={q} compact /></div>
     </div>
   );
   return <div className="flex flex-col gap-1 px-3 py-3">{r.before.map(m => one(m))}{one(r.target, true)}{r.after.map(m => one(m))}</div>;
@@ -76,18 +79,7 @@ export function Context({ r, q }: { r: ShowResult; q: string }) {
 
 /** Human / assistant as two toggles, both on by default; at least one stays on. Both on = no role filter. */
 export function WhoPick({ role, onChange }: { role: string; onChange: (role: string) => void }) {
-  const on = { user: role !== "assistant", assistant: role !== "user" };
-  const flip = (k: "user" | "assistant") => {
-    const next = { ...on, [k]: !on[k] };
-    if (!next.user && !next.assistant) return;
-    onChange(next.user && next.assistant ? "" : next.user ? "user" : "assistant");
-  };
-  return (
-    <span role="group" aria-label="Who" className="inline-flex gap-1.5">
-      <Toggle pressed={on.user} onClick={() => flip("user")} dot="bg-user">human</Toggle>
-      <Toggle pressed={on.assistant} onClick={() => flip("assistant")} dot="bg-assistant">assistant</Toggle>
-    </span>
-  );
+  return <Seg label="Who" value={role} onChange={onChange} options={[{ value: "", label: "everyone" }, { value: "user", label: "human" }, { value: "assistant", label: "assistant" }]} />;
 }
 
 function RailGroup({ label, children, aside }: { label: string; children: ReactNode; aside?: ReactNode }) {
@@ -119,7 +111,7 @@ function Related({ hits, st, narrow }: { hits: Hit[]; st: SearchState; narrow: (
   if (!sessions.length && !repos.length) return null;
   return <>
     {sessions.length > 0 && (
-      <RailGroup label="Sessions in these hits" aside={st.session ? <button type="button" onClick={() => narrow({ session: "" })} className={linkBtn}>all sessions</button> : undefined}>
+      <RailGroup label="Sessions" aside={st.session ? <button type="button" onClick={() => narrow({ session: "" })} className={linkBtn}>all sessions</button> : undefined}>
         <ul className="m-0 flex list-none flex-col gap-1 p-0">
           {sessions.map(x => {
             const on = !!st.session && x.sid.startsWith(st.session);
@@ -253,7 +245,7 @@ export function SearchView({ st, setSt, machine, setMachine, machines, recent, t
   }
 
   const hits = useMemo(() => (res?.hits ?? []).filter(h => !machine || h.machines.includes(machine)), [res, machine]);
-  const rows = useMemo(() => fold(hits).flatMap(r => unfold.has(r.h.uid) ? [r, ...r.more.map((h, j) => ({ h, i: r.i + j + 1, more: [] as Hit[] }))] : [r]), [hits, unfold]);
+  const rows = useMemo(() => (st.session ? hits.map((h, i) => ({ h, i, more: [] as Hit[] })) : fold(hits)).flatMap(r => unfold.has(r.h.uid) ? [r, ...r.more.map((h, j) => ({ h, i: r.i + j + 1, more: [] as Hit[] }))] : [r]), [hits, unfold, st.session]);
   const selected = active >= 0 ? rows[Math.min(active, rows.length - 1)]?.h : undefined;
   // every repo with a session, for the repo box; the ones with a session this week, for the suggestions
   const repoNames = useMemo(() => [...new Set(sessions.map(x => x.repo).filter(r => r && r !== "(no repo)"))].sort(), [sessions]);
@@ -292,18 +284,22 @@ export function SearchView({ st, setSt, machine, setMachine, machines, recent, t
   // ONE scope row for every screen (prism: the filters lived twice, a rail on desktop and chips on a phone)
   const scope = (
     <div className="flex flex-col gap-3">
-      <div role="group" aria-label="What to search" className="-mx-5 flex gap-1.5 overflow-x-auto px-5 pb-1 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0">
-        {LAYERS.map(l => <span key={l.value} title={l.note} className="flex-none"><Toggle pressed={draft.with === l.value} onClick={() => narrow({ with: l.value })}>{l.label}</Toggle></span>)}
+      <div role="tablist" aria-label="What to search" className="-mx-5 flex gap-1 overflow-x-auto border-b border-line px-5 [scrollbar-width:none] sm:mx-0 sm:px-0">
+        {LAYERS.map(l => (
+          <button key={l.value} type="button" role="tab" aria-selected={draft.with === l.value} title={l.note} onClick={() => narrow({ with: l.value })}
+            className={cx("-mb-px min-h-11 flex-none border-b-2 px-3 text-sm font-semibold whitespace-nowrap transition-colors duration-[120ms]",
+              draft.with === l.value ? "border-accent text-text" : "border-transparent text-muted hover:text-text")}>{l.label}</button>
+        ))}
       </div>
-      <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
         <div className="-mx-5 overflow-x-auto px-5 [scrollbar-width:none] sm:mx-0 sm:px-0" title="auto starts at 7 days and widens until it finds enough">
           <Seg label="When" value={draft.horizon} onChange={v => narrow({ horizon: v })} options={HORIZONS} />
         </div>
         {draft.with !== "memory" && draft.with !== "git" && <WhoPick role={draft.role} onChange={role => narrow({ role })} />}
-        {machines.length > 1 && <MachinePick machine={machine} machines={machines} onChange={setMachine} counts={counts} />}
+        {machines.length > 1 && <Seg label="Machine" value={machine} onChange={setMachine} options={["", ...machines].map(m => ({ value: m, label: `${m || "all machines"}${counts ? ` · ${counts[m] ?? 0}` : ""}` }))} />}
         <label className="flex min-w-0 items-center gap-2 max-sm:w-full">
           <span className="text-xs font-semibold text-muted">in</span>
-          <input aria-label="Only this repo" list="search-repos" className={inputCls + " w-full font-mono sm:w-60"} placeholder="any repo" value={draft.repo}
+          <input aria-label="Only this repo" list="search-repos" className={inputCls + " h-9 min-h-9 w-full font-mono text-xs sm:w-56"} placeholder="any repo" value={draft.repo}
             onChange={e => { const v = e.target.value; setDraft({ ...draft, repo: v }); if (repoNames.includes(v)) go({ ...draft, repo: v }); }}
             onBlur={() => draft.repo !== st.repo && go(draft)} onKeyDown={e => e.key === "Enter" && go(draft)} />
           <datalist id="search-repos">{repoNames.map(r => <option key={r} value={r} />)}</datalist>
@@ -347,7 +343,7 @@ export function SearchView({ st, setSt, machine, setMachine, machines, recent, t
         </label>
         <Btn primary size="lg" type="submit">Search</Btn>
       </form>
-      <div className="mb-8 border-b border-line pb-5">{scope}</div>
+      <div className="mb-8">{scope}</div>
 
       {!searched ? <Launch recent={recent} top={top} repos={busyRepos} pick={q => go({ ...draft, q })}
         scopeRepo={r => { setDraft({ ...draft, repo: r }); input.current?.focus(); }}

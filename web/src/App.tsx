@@ -4,10 +4,10 @@ import { get } from "./api";
 import { usePoll } from "./api";
 import { ago, bkk, clock } from "./format";
 import type { Queries, ShowResult, Status } from "./types";
-import { Palette, Sidebar, TabBar, type HubState, type PaletteSession, type Theme, type View, VIEWS } from "./components/Shell";
+import { Palette, TabBar, TopNav, type HubState, type PaletteSession, type Theme, type View, VIEWS } from "./components/Shell";
 import { Drawer } from "./components/Drawer";
 import { Mark, Search as SearchIcon } from "./components/Icons";
-import { cx, Kbd, Loading, State } from "./components/ui";
+import { cx, Loading, State } from "./components/ui";
 import { Context, SearchView, shortRepo, type SearchState } from "./views/SearchView";
 import { MemoryView } from "./views/MemoryView";
 import { ConnectView } from "./views/ConnectView";
@@ -85,22 +85,16 @@ export function App() {
     <div className="h-dvh">
       <a href="#main" onClick={e => { e.preventDefault(); document.getElementById("main")?.focus(); }}
         className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:rounded-lg focus:bg-panel focus:px-4 focus:py-3 focus:text-sm">Skip to content</a>
-      <Sidebar view={st.view} go={go} state={hub} foot={foot} theme={theme} setTheme={setTheme} badges={{ jobs: s?.jobs.running.length }} />
-      <div id="main" tabIndex={-1} className="h-dvh overflow-y-auto focus:outline-none sm:pl-[232px] max-[1100px]:sm:pl-[68px]">
+      <div id="main" tabIndex={-1} className="h-dvh overflow-y-auto focus:outline-none">
+        <TopNav view={st.view} go={go} state={hub} foot={foot} theme={theme} setTheme={setTheme} badges={{ jobs: s?.jobs.running.length }}
+          onPalette={() => setPalette(true)} version={s?.code.version} />
         {/* phone: a slim top bar (mark, state, the palette); the views sit in the bottom bar */}
         <header className="sticky top-0 z-10 flex items-center gap-3 border-b border-line bg-[color-mix(in_srgb,var(--bg)_90%,transparent)] px-4 py-2.5 backdrop-blur sm:hidden">
-          <Mark size={30} /><b className="text-sm font-extrabold tracking-[0.12em]">RELIC5</b>
+          <Mark size={30} /><b className="text-base font-bold text-accent">relic5</b>
           <span className={cx("flex items-center gap-1.5 truncate text-xs font-semibold", hub === "ok" ? "text-ok" : hub === "failed" ? "text-danger" : hub === "warning" ? "text-warning" : "text-muted")}><span className="size-2 rounded-full bg-current" />{hub === "ok" ? "All in" : hub === "failed" ? "Hub unreachable" : hub === "warning" ? `${s?.warnings.length} warning${s?.warnings.length === 1 ? "" : "s"}` : "Reading"} · {clock(status.at)}</span>
           <button type="button" onClick={() => setPalette(true)} aria-label="Search or jump" className="ml-auto grid size-11 place-items-center rounded-lg border border-line text-muted"><SearchIcon size={18} /></button>
         </header>
-        <main className={cx(st.view === "search" ? "max-w-[1800px]" : st.view === "home" ? "max-w-[1600px]" : "max-w-[1240px]", "px-5 pt-6 pb-28 sm:px-12 sm:pt-5")}>
-        {/* desktop: the palette's hint on the content's right edge, the way relic-scan shows "search ⌘K" */}
-        <div className="mb-3 hidden justify-end sm:flex">
-          <button type="button" onClick={() => setPalette(true)}
-            className="flex min-h-10 items-center gap-2.5 rounded-lg border border-line bg-panel px-3.5 text-xs text-muted hover:border-line-strong hover:text-text">
-            <SearchIcon size={15} />Search or jump <Kbd>⌘K</Kbd>
-          </button>
-        </div>
+        <main className={cx(st.view === "search" ? "max-w-[1800px]" : st.view === "home" ? "max-w-[1600px]" : "max-w-[1240px]", "mx-auto px-5 pt-6 pb-28 sm:px-10 sm:pt-10")}>
           {st.view !== "home" && s?.copy && (
             <p className="m-0 mb-6 rounded-xl border border-line bg-panel px-5 py-3 text-sm text-soft">
               A copy of {s.copy.of}'s hub, as of {bkk(s.copy.at)} Bangkok ({ago(s.copy.at)}, snapshot {s.copy.snapshot}). Search works; nothing new arrives here, so push, backup and seal checks are off.

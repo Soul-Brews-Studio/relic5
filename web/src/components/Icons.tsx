@@ -31,14 +31,14 @@ export const Filter = (p: P) => <svg {...base(p)}><path d="M4 5.5h16l-6.2 7.3V19
 export const Session = (p: P) => <svg {...base(p)}><path d="M4.5 6.5a2 2 0 012-2h11a2 2 0 012 2v8a2 2 0 01-2 2H11l-4.5 3.5v-3.5h0a2 2 0 01-2-2v-8z" /><path d="M8.5 9.5h7M8.5 12.5h4.5" /></svg>;
 export const Close = (p: P) => <svg {...base(p)}><path d="M7 7l10 10M17 7L7 17" /></svg>;
 
-/** The hub's mark: relic-scan's serif Psi on an amber circle (ARRA Oracle Unconference #1 logo), with a small 5. SVG text in a
+/** The hub's mark: a serif Psi on a circle in relic5's blue (relic-scan keeps the amber one) (ARRA Oracle Unconference #1 logo), with a small 5. SVG text in a
  *  serif stack, so it needs no font file. */
 export function Mark({ size = 40 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 40 40" aria-hidden="true">
-      <circle cx="20" cy="20" r="18" fill="var(--amber)" />
-      <text x="19" y="27.5" textAnchor="middle" fontSize="22" fontFamily="'Instrument Serif', Georgia, 'Times New Roman', serif" fill="var(--on-amber)">Ψ</text>
-      <text x="29.5" y="31" textAnchor="middle" fontSize="9" fontWeight="700" fontFamily="-apple-system, system-ui, sans-serif" fill="var(--on-amber)">5</text>
+      <circle cx="20" cy="20" r="18" fill="var(--accent)" />
+      <text x="19" y="27.5" textAnchor="middle" fontSize="22" fontFamily="'Instrument Serif', Georgia, 'Times New Roman', serif" fill="var(--on-accent)">Ψ</text>
+      <text x="29.5" y="31" textAnchor="middle" fontSize="9" fontWeight="700" fontFamily="-apple-system, system-ui, sans-serif" fill="var(--on-accent)">5</text>
     </svg>
   );
 }
