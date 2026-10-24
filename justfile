@@ -34,3 +34,11 @@ status:
 # push this machine's parts (Mac native; white uses RELIC5_HUB=local)
 push:
     bin/relic5-push
+
+# Rebuild the web UI (web/, React + Tailwind) into src/relic5/web; commit the result so white needs no Node.
+web:
+    cd web && bun install --frozen-lockfile && bun run build
+
+# The UI with hot reload, its /api proxied to a hub (default white).
+web-dev hub="http://white.follow-rankine.ts.net:8795":
+    cd web && RELIC5_DEV_HUB={{hub}} bun run dev

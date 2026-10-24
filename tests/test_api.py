@@ -88,6 +88,21 @@ def test_ui_login_cookie(client):
     assert isinstance(client.get("/api/log").json(), list)
 
 
+def test_ui_assets(client):
+    """The React build's files are served from web/assets with long caching; nothing else under that path is."""
+    import re
+    client.get("/login", params={"t": "tok-mba"})
+    page = client.get("/").text
+    names = re.findall(r'assets/([\w.-]+\.(?:js|css))', page)
+    assert names, "the built index.html names its bundle"
+    for n in names:
+        r = client.get("/assets/" + n)
+        assert r.status_code == 200 and "immutable" in r.headers["cache-control"]
+    assert client.get("/assets/nope.js").status_code == 404
+    assert client.get("/assets/..%2Fapi.py").status_code == 404
+    assert client.get("/assets/index.html").status_code == 404                # only listed types
+
+
 def test_status_says_which_door(client):
     assert client.get("/api/status", headers={"Authorization": "Bearer tok-mba"}).json()["you"] == "token:mba"
     r = rpc(client, "tools/call", {"name": "relic_status", "arguments": {}}).json()["result"]
