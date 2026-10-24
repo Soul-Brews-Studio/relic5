@@ -26,4 +26,4 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/relic5"]
-artifacts = ["src/relic5/web/*.html"]
+artifacts = ["src/relic5/web/*.html", "src/relic5/web/assets/*"]

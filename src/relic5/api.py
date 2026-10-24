@@ -94,6 +94,19 @@ def make_app(root, tokens, doors=None):
     def ui():
         return HTMLResponse(open(WEB, encoding="utf-8").read())
 
+    ASSETS = os.path.join(os.path.dirname(WEB), "assets")
+    TYPES = {".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".woff2": "font/woff2"}
+
+    @app.get("/assets/{name}")
+    def asset(name: str):
+        """The React build (web/, `just web`): hashed file names, so they are cached for a year. A name with a
+        path in it, or of a type not listed, is refused."""
+        ext = os.path.splitext(name)[1]
+        path = os.path.join(ASSETS, name)
+        if os.path.basename(name) != name or ext not in TYPES or not os.path.isfile(path):
+            return JSONResponse({"error": "not found"}, status_code=404)
+        return Response(open(path, "rb").read(), media_type=TYPES[ext], headers={"cache-control": "public, max-age=31536000, immutable"})
+
     @app.get("/api/log")
     def log(n: int = 100):
         from .jobs import read
