@@ -4,6 +4,7 @@
                                   on the hub: tokens stored hashed (tokens.json, 0600), the secret shown once
   relic5 index [--root ~/relic5] [--force] [YYYY-MM ...]   on the hub: month manifests, BM25 tables, names (fast lane)
   relic5 index --vectors                     on the hub: vector tables and watermarks only (slow lane, after shards land)
+  relic5 seals [--verify]                    on the hub: each machine's sealed months as the hub holds them (exit 1: a seal broke)
   relic5 import relic3 [--weeks 2026W40-2026-09-28,...] [--all] [--out ~/.relic-import/relic3]
                                   old relic3 weeks -> relic-scan month files of the sessions no machine holds
   relic5 tui [--token]            the hub in a terminal: status, live, search (+ show), jobs, queries
@@ -187,6 +188,9 @@ def _main(argv=None):
             j.progress(done=len(tabs), unit="tables", message="fts: " + (",".join(tabs) or "none changed"))
             from . import names as NM
             j.progress(done=NM.build(root, con, Parts(root)), unit="sessions", message="names")
+            from . import seals
+            _, v = seals.update(os.path.abspath(root))
+            j.progress(done=v["checked"], unit="seals", message=f"seals: {v['checked']} checked, {len(v['problems'])} problems")
             from . import selfknow
             selfknow.record_size(root)
     elif cmd == "tui":
@@ -302,6 +306,17 @@ def _main(argv=None):
             if not follow:
                 break
             _t.sleep(30)
+    elif cmd == "seals":   # on the hub: the machines' month seals as the hub holds them; --verify exits 1 on a difference
+        from . import seals
+        root = os.path.abspath(os.path.expanduser(_opt(rest, "--root", ROOT)))
+        v = seals.verify(root) if "--verify" in rest else None
+        for m, x in seals.summary(root)["machines"].items():
+            print(f"{m:<20} {x['sealed']:>3} sealed months · newest seal {x['newest_sealed_at'] or 'none'} · resealed {x['resealed']}")
+        if v is not None:
+            print(f"verify: {v['checked']} sealed months checked, {len(v['problems'])} problems")
+            for p_ in v["problems"]:
+                print("  " + p_)
+            sys.exit(1 if v["problems"] else 0)
     elif cmd == "status":
         r = call("/api/status", {})
         print(json.dumps(r, ensure_ascii=False, indent=1))

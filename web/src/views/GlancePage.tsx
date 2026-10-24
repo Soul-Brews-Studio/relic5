@@ -47,6 +47,12 @@ function checks(s: Status, evs: JobEvent[]): Check[] {
   out.push({ key: "disk", title: "Disk on white", icon: Disk, level: d < 10 ? "failed" : d < 20 ? "warning" : "ok", big: `${d}%`,
     text: `${bytes(s.store.disk.free)} free of ${bytes(s.store.disk.total)}; relic5 uses ${bytes(s.store.total)} of it.`,
     command: d < 20 ? "relic5 gc" : undefined });
+  const sv = s.seals?.verify, sealedN = Object.values(s.seals?.machines ?? {}).reduce((a, x) => a + x.sealed, 0);
+  out.push({ key: "seals", title: "Sealed months", icon: Shield, level: !sv ? "unknown" : sv.problems.length ? "failed" : "ok",
+    big: sv ? `${sv.checked - sv.problems.length}/${sv.checked}` : "none",
+    text: !sv ? "No machine has sent a seal yet." : sv.problems.length ? `${sv.problems.length} sealed month(s) changed on the hub: ${sv.problems[0]}` :
+      `${sealedN} machine-months sealed; each one's parts still hold the rows they were sealed with.`,
+    command: sv?.problems.length ? "relic5 seals --verify" : undefined });
   const day = evs.filter(e => Date.now() - Date.parse(e.at) < 86400e3), failed = day.filter(e => e.state === "error");
   out.push({ key: "jobs", title: "Jobs, 24 h", icon: Pulse, level: failed.length ? "failed" : evs.length ? "ok" : "unknown",
     big: `${day.length - failed.length}/${day.length}`,
@@ -94,6 +100,7 @@ function MachineCard({ s, m }: { s: Status; m: string }) {
         <dt className="text-muted">Last push</dt><dd className="m-0 text-soft">{ago(f.pushed_at)}</dd>
         <dt className="text-muted">Newest message</dt><dd className="m-0 text-soft">{ago(f.newest_ts)} <span className="text-faint">({bkk(f.newest_ts)})</span></dd>
         <dt className="text-muted">On the hub</dt><dd className="m-0 text-soft">{bytes(sum(s.store.parts[m]))}</dd>
+        <dt className="text-muted">Sealed</dt><dd className="m-0 text-soft">{s.seals?.machines[m] ? `${s.seals.machines[m].sealed} months · ${s.seals.machines[m].resealed ? `${s.seals.machines[m].resealed} resealed · ` : ""}since ${bkk(s.seals.machines[m].newest_sealed_at)}` : imported ? "no chain" : "not yet (relic-scan before seals)"}</dd>
       </dl>
     </div>
   );
