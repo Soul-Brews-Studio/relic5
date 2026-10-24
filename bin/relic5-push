@@ -130,7 +130,7 @@ for H in "$HOME"/.claude "$HOME"/.claude-*; do
 done
 # What this machine runs, so the hub can tell when machines differ (relic_status warns on a mismatch).
 ver() { command -v "$1" >/dev/null 2>&1 && "$1" --version 2>/dev/null | head -1 | sed 's/^[^ ]* //' || echo none; }
-here=${STAMP:-$(cd "$(dirname "$0")" && git rev-parse --short HEAD 2>/dev/null || echo unknown)}
+here=${STAMP:-$(cd "$(dirname "$0")" && git log -1 --format=%h -- relic5-push 2>/dev/null)}; here=${here:-unknown}   # the commit that last changed this file
 printf '{"machine": "%s", "at": "%s", "relic-scan": "%s", "relic-extract": "%s", "relic5-push": "%s", "push-format": %s, "os": "%s"}\n' \
   "$MACHINE" "$(date '+%FT%T%z')" "$(ver relic-scan)" "$(ver relic-extract)" "$here" "$PUSH_FORMAT" "$(uname -sm)" > "${TMPDIR:-/tmp}/relic5-versions.$$"
 [ -z "$DRY" ] && rsync -a --timeout=60 "${TMPDIR:-/tmp}/relic5-versions.$$" "$R$target/_versions.json" >/dev/null 2>&1 || true

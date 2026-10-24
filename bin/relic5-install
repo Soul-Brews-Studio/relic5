@@ -15,7 +15,8 @@ DRY=""
 H=$1
 SSH="ssh -o BatchMode=yes -o ConnectTimeout=10"
 HERE=$(cd "$(dirname "$0")" && pwd)
-REV=$(git -C "$HERE" rev-parse --short HEAD 2>/dev/null || echo unknown)
+# the last commit that changed relic5-push itself, so two identical copies carry one stamp whatever HEAD was
+REV=$(git -C "$HERE" log -1 --format=%h -- relic5-push 2>/dev/null); REV=${REV:-unknown}
 ver() { "$@" --version 2>/dev/null | head -1 | sed 's/^[^ ]* //'; }
 
 me=$(uname -sm)

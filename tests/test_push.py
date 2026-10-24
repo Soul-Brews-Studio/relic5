@@ -45,6 +45,11 @@ def test_push_streams_only(env):
     assert "stream text     files=1" in r.stdout
     v = __import__("json").load(open(base / "_versions.json"))
     assert v["machine"] == "m5" and "relic-scan" in v and v["relic5-push"]
+    # the stamp is the commit that last changed the script, not HEAD: identical copies installed at different
+    # commits must not read as different versions (2026-10-24: eae351e, 039a4ee, a8e7f33 were one script)
+    own = subprocess.run(["git", "-C", os.path.join(REPO, "bin"), "log", "-1", "--format=%h", "--", "relic5-push"],
+                         capture_output=True, text=True).stdout.strip()
+    assert v["relic5-push"] == own
     evs = [__import__("json").loads(l) for l in open(hub / "relic5/logs/jobs.jsonl")]
     assert [e["state"] for e in evs] == ["start", "done"] and evs[1]["unit"] == "bytes" and evs[1]["done"] > 0
 
