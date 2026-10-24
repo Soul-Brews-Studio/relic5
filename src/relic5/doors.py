@@ -6,7 +6,7 @@ uvicorn runs with proxy_headers=False):
   loopback          server and client are 127.0.0.1 / ::1 and the Host names this box (localhost, 127.0.0.1, [::1])
   tailnet:<node>    the client is a tailscale address (100.64.0.0/10) and `tailscale whois` says its owner is the
                     hub's own owner (nat.wrw@gmail.com on follow-rankine). A node shared in from another tailnet (the
-                    clinic's yd-linux, windeachawat9938@) has another owner and still needs a token.
+                    clinic's yd-linux, another login) has another owner and still needs a token.
   token:<machine>   a Bearer token (or the UI cookie), one per machine, for anything else and for scripts
 Both tokenless doors also need a Host header that names the hub (its tailnet name, short name, tailnet IP or
 loopback), so a web page in a browser cannot reach the hub by DNS rebinding (relic4's Host check, api.py PR #5).
