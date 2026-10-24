@@ -3,7 +3,7 @@
 // opens as its own page (GET /api/oracle?name=): who it says it is, what it learned, how its sessions went, the rules
 // its human set, its newest sessions, the words its notes use most, and two prompts built only from those notes, one
 // for its character and style, one for what it has come to understand. Copy a prompt into Claude; nothing is sent.
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { get, usePoll } from "../api";
 import { ago, bkk, num, repoColor } from "../format";
 import { Markdown } from "../components/Markdown";
@@ -30,16 +30,20 @@ function Show({ a, big }: { a: Artifact; big?: boolean }) {
 }
 
 /** A prompt as text in the page's own scroll (relic4-scan's review: never a scrollbar inside a card): wrapped at 80
- *  characters, the first 12 lines, then "Show all". */
+ *  characters, folded to 12 visible lines (by height: a note is one long line that wraps), then "Show all". */
 function PromptText({ text }: { text: string }) {
   const [all, setAll] = useState(false);
-  const lines = text.split("\n");
-  const shown = all ? lines : lines.slice(0, 12);
+  const [long, setLong] = useState(false);
+  const ref = useRef<HTMLPreElement>(null);
+  useEffect(() => { const el = ref.current; if (el) setLong(el.scrollHeight > el.clientHeight + 4 || all); }, [text, all]);
   return (
     <div className="mt-4 rounded-xl border border-line bg-deep p-4">
-      <pre className="m-0 max-w-[80ch] font-mono text-xs leading-relaxed whitespace-pre-wrap break-words text-soft">{shown.join("\n")}</pre>
-      {lines.length > 12 && <button type="button" onClick={() => setAll(!all)} className="mt-2 inline-flex min-h-9 items-center text-xs font-semibold text-accent">
-        {all ? "Show less" : `Show all ${lines.length} lines`}</button>}
+      <div className="relative">
+        <pre ref={ref} className={cx("m-0 max-w-[80ch] overflow-hidden font-mono text-xs leading-[1.65] whitespace-pre-wrap break-words text-soft", !all && "max-h-[calc(12*1.65*0.75rem)]")}>{text}</pre>
+        {!all && long && <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-[var(--deep)] to-transparent" />}
+      </div>
+      {long && <button type="button" onClick={() => setAll(!all)} className="mt-2 inline-flex min-h-9 items-center text-xs font-semibold text-accent">
+        {all ? "Show less" : `Show all ${text.split("\n").length} lines`}</button>}
     </div>
   );
 }
