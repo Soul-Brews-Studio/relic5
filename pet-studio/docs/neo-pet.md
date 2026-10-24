@@ -84,6 +84,32 @@ holds `/characters/neo/` (seven GIFs), `/apps/neo-mood.wasm` and `/apps/autorun`
 app. Flash it from `index.html` in Chrome over USB, or `studio_flash_ble {"kind": "firmware", "board": "jc3248"}`
 through OraclePet.
 
+### On the board (jc3248, 2026-10-25)
+
+Flashed over USB with the bundle's own parts and offsets (`esptool write_flash 0x0 bootloader.bin 0x8000
+partition-table.bin 0xd000 ota_data_initial.bin 0x10000 jc3248_pet_idf.bin 0x290000 storage.bin`, every part
+hash-verified). The serial console after a clean boot:
+
+```
+I (1093) fs: mounted 'storage' at /littlefs — 151552/3145728 bytes used
+I (1113) gif: pack: /littlefs/characters/neo
+I (1473) petapp: first boot: starting the baked-in app 'neo-mood'
+I (1493) petapp: app 'neo-mood' loaded (6688 bytes; tick=0 tap=1 fleet=1)
+I (5133) gif: touch -> reaction 'heart.gif'
+```
+
+A tap on the screen gives the heart (`on_tap`). The fleet moods (busy, attention, sleep) come with `on_fleet`, which
+OraclePet sends over Bluetooth once the pet is paired.
+
+**A board that ran another app before:** the firmware starts the baked-in app only on a fresh install, when its
+settings store (NVS) names no app. This board still named `oracle-tour`, which the new storage no longer holds; the
+failed load does not clear that name, so `neo-mood` never ran (`run 'oracle-tour' failed: no app oracle-tour`). Erasing
+only the NVS partition makes it a fresh install (pair with OraclePet again afterwards):
+
+```bash
+python -m esptool --chip esp32s3 -p /dev/cu.usbmodem… erase_region 0x9000 0x4000
+```
+
 ### Speed (measured on m5)
 
 | what | before | now |
