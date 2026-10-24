@@ -57,6 +57,10 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
     con = duckdb.connect(":memory:", config={"threads": min(os.cpu_count() or 4, 16)})
     relic = Relic5(root, con)
     app = FastAPI(title="relic5", docs_url=None, redoc_url=None, openapi_url=None)
+    # gzip what is worth it (the page's JS and CSS went out as 142 KB raw over tailscale, measured 2026-10-25; gz
+    # they are about 42 KB), and API answers over 1 KB. Small replies stay as they are.
+    from starlette.middleware.gzip import GZipMiddleware
+    app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
     if os.environ.get("RELIC5_WARM", "1") != "0":   # the Map and the Knowledge map, made before anyone asks (universe.py)
         from . import universe
         universe.keep_warm(relic)
