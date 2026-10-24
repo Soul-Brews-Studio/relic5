@@ -1,0 +1,8 @@
+#!/bin/sh
+# headersHelper for an MCP client (Claude Code): print the Authorization header from the 0600 token file, so the
+# token never sits in ~/.claude.json.
+#   claude mcp add-json -s user relic5 '{"type":"http","url":"http://white.follow-rankine.ts.net:8795/mcp",
+#     "headersHelper":"/path/to/relic5/bin/relic5-mcp-headers"}'
+f="${RELIC5_TOKEN_FILE:-$HOME/.config/relic5/token}"
+[ -r "$f" ] || { echo "no token file $f" >&2; exit 1; }
+printf '{"Authorization": "Bearer %s"}\n' "$(tr -d ' \n' < "$f")"

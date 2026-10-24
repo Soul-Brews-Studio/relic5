@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>relic5 hub</title>
+<!-- relic5 hub UI. One file, no build, no external requests. Reads only the hub's own GET routes, the same tools MCP
+     serves; the token arrives once through /login?t=... and is kept as an HttpOnly cookie. Lessons kept from relic3's
+     app (agent-relic-v3 app/PRODUCT.md, DESIGN.md): evidence not decoration, every count says where it came from, an
+     unknown is shown as unknown (never 0), failures are shown, never hidden. -->
+<style>
+  :root { --bg:#1a1c21; --card:#26292e; --line:#34383f; --ink:#e6e8ec; --dim:#a9b0bb; --blue:#85b0ff; --warn:#f0b35a; --bad:#ff7a6b; --ok:#7bd88f; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans Thai", sans-serif; }
+  header { display:flex; align-items:baseline; gap:16px; padding:18px 22px 10px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  h1 { font-size:17px; margin:0; font-weight:600; }
+  .sub { color:var(--dim); font-size:11px; }
+  nav { display:flex; gap:4px; margin-left:auto; }
+  nav button { background:none; border:1px solid var(--line); color:var(--dim); border-radius:9px; padding:5px 12px; cursor:pointer; font:inherit; }
+  nav button.on { color:var(--ink); border-color:var(--blue); }
+  main { padding:16px 22px 40px; max-width:1180px; }
+  section { display:none; } section.on { display:block; }
+  h2 { font-size:13px; font-weight:600; margin:22px 0 8px; color:var(--dim); text-transform:uppercase; letter-spacing:.04em; }
+  table { border-collapse:collapse; width:100%; font-variant-numeric:tabular-nums; }
+  th, td { text-align:left; padding:6px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--dim); font-weight:500; font-size:11px; }
+  td.n, th.n { text-align:right; }
+  .mono { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12px; }
+  .warn { color:var(--warn); } .bad { color:var(--bad); } .ok { color:var(--ok); } .dim { color:var(--dim); }
+  .warnings div { padding:7px 10px; border-left:3px solid var(--warn); background:var(--card); margin:4px 0; border-radius:4px; }
+  .pill { display:inline-block; padding:1px 7px; border-radius:8px; border:1px solid var(--line); font-size:11px; color:var(--dim); }
+  .pill.open { border-color:var(--blue); color:var(--blue); }
+  form { display:flex; gap:8px; margin:4px 0 12px; flex-wrap:wrap; }
+  input, select { background:var(--card); color:var(--ink); border:1px solid var(--line); border-radius:9px; padding:7px 10px; font:inherit; }
+  input[type=search] { flex:1; min-width:260px; }
+  .hit { background:var(--card); border-radius:10px; padding:11px 13px; margin:8px 0; cursor:pointer; border:1px solid transparent; }
+  .hit:hover { border-color:var(--line); }
+  .meta { color:var(--dim); font-size:11px; display:flex; gap:10px; flex-wrap:wrap; }
+  .snip { margin-top:4px; white-space:pre-wrap; word-break:break-word; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+  mark { background:none; color:var(--blue); font-weight:600; }
+  .show { background:var(--card); border-radius:10px; padding:12px 14px; margin:10px 0 18px; }
+  .msg { padding:8px 0; border-bottom:1px solid var(--line); white-space:pre-wrap; word-break:break-word; }
+  .msg.target { border-left:3px solid var(--blue); padding-left:10px; }
+  .err { color:var(--bad); padding:10px; }
+  .prov { color:var(--dim); font-size:11px; margin-top:6px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>relic5 hub</h1><span class="sub" id="where">…</span>
+  <nav><button data-tab="overview" class="on">Overview</button><button data-tab="live">Live</button><button data-tab="jobs">Jobs &amp; log</button><button data-tab="search">Search</button><button data-tab="queries">Queries</button><button data-tab="compare">Compare</button></nav>
+</header>
+<main>
+  <section id="overview" class="on">
+    <div class="warnings" id="warnings"></div>
+    <h2>Machines</h2><table id="machines"></table>
+    <h2>Months</h2><table id="months"></table>
+    <h2>Watermarks</h2><table id="marks"></table>
+    <h2>Store &amp; resources</h2><table id="store"></table>
+    <div class="prov" id="prov1"></div>
+  </section>
+  <section id="live">
+    <h2>Freshness</h2><table id="fresh"></table>
+    <h2>Newest messages</h2><table id="tail"></table>
+    <div class="prov" id="prov3"></div>
+  </section>
+  <section id="jobs">
+    <h2>Running</h2><table id="running"></table>
+    <h2>Log</h2><table id="log"></table>
+    <div class="prov" id="prov2"></div>
+  </section>
+  <section id="search">
+    <form id="sf"><input type="search" id="q" placeholder="search every machine (Thai works)" autofocus>
+      <select id="hz"><option value="">widen (7d → archive)</option><option>7d</option><option>15d</option><option>1m</option><option>3m</option><option>archive</option></select>
+      <select id="with"><option value="">prose</option><option value="tools">+ tools</option><option value="thinking">+ thinking</option><option value="all">all</option></select>
+      <input id="repo" placeholder="repo (optional)" size="18"></form>
+    <div id="sinfo" class="prov"></div><div id="hits"></div>
+  </section>
+  <section id="queries">
+    <h2>Running now</h2><table id="qrun"></table>
+    <h2>Last 20</h2><table id="qlast"></table>
+    <h2>Per hour (24 h)</h2><table id="qhour"></table>
+    <h2>Asked more than once</h2><table id="qtop"></table>
+    <h2>Zero hits (what search misses)</h2><table id="qzero"></table>
+    <div class="prov">GET /api/queries · logs/queries.jsonl on the hub only (0600), never in git</div>
+  </section>
+  <section id="compare">
+    <h2>Search quality: relic3 vs relic4 vs relic5</h2><table id="cmp"></table>
+    <h2>Misses of the selected run</h2><div id="misses" class="dim">click a row</div>
+    <div class="prov" id="prov4"></div>
+  </section>
+</main>
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const num = v => v == null ? '<span class="dim">unknown</span>' : Number(v).toLocaleString();
+const ago = iso => { if (!iso) return "unknown"; const s = (Date.now() - Date.parse(iso)) / 1000;
+  return s < 90 ? Math.round(s) + " s ago" : s < 5400 ? Math.round(s / 60) + " min ago" : s < 129600 ? Math.round(s / 3600) + " h ago" : Math.round(s / 86400) + " d ago"; };
+async function get(path) {
+  const r = await fetch(path, {credentials: "same-origin"});
+  if (r.status === 401) throw new Error("no token: open /login?t=<your token> once");
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error || r.status);
+  return j;
+}
+const row = (cells, cls = []) => "<tr>" + cells.map((c, i) => `<td class="${cls[i] || ""}">${c}</td>`).join("") + "</tr>";
+const head = (cells, cls = []) => "<tr>" + cells.map((c, i) => `<th class="${cls[i] || ""}">${c}</th>`).join("") + "</tr>";
+
+async function overview() {
+  let s;
+  try { s = await get("/api/status"); } catch (e) { $("#warnings").innerHTML = `<div class="err">${esc(e.message)}</div>`; return; }
+  $("#where").textContent = `${s.home} · ${s.code.name} ${s.code.version} · unit ${s.layout ? s.layout.unit : "none"}`;
+  $("#warnings").innerHTML = s.warnings.length ? s.warnings.map(w => `<div>${esc(w)}</div>`).join("") : '<span class="ok">no warnings</span>';
+  const ms = Object.keys({...s.machines, ...s.versions}).sort();
+  const N = ["n", "n", "n"];
+  $("#machines").innerHTML = head(["machine", "text", "thinking", "tools", "newest row", "pushed", "relic-scan", "relic-extract", "push", "os"], [""].concat(N)) +
+    ms.map(m => { const v = s.versions[m] || {}, x = s.machines[m] || {};
+      return row([`<b>${esc(m)}</b>`, num(x.text?.rows), num(x.thinking?.rows), num(x.tools?.rows), esc(x.text?.newest_ts ?? "unknown"),
+                  esc(ago(v.at)), `<span class="mono">${esc(v["relic-scan"] ?? "unknown")}</span>`, `<span class="mono">${esc(v["relic-extract"] ?? "unknown")}</span>`,
+                  `<span class="mono">${esc(v["relic5-push"] ?? "unknown")}</span>`, esc(v.os ?? "")], [""].concat(N)); }).join("");
+  $("#months").innerHTML = head(["month", "state", "text", "thinking", "tools"], ["", "", "n", "n", "n"]) +
+    s.months.list.slice().reverse().map(m => row([`<span class="mono">${m.month}</span>`, m.sealed ? '<span class="pill">sealed</span>' : '<span class="pill open">open</span>',
+      num(m.rows.text), num(m.rows.thinking), num(m.rows.tools)], ["", "", "n", "n", "n"])).join("");
+  const w = s.watermarks;
+  $("#marks").innerHTML = head(["watermark", "at", "rows"]) +
+    row(["index (month manifests)", esc(w.index.at ?? "none"), num(w.index.rows)]) +
+    row(["BM25 (fts)", esc(w.fts.at ?? "none"), Object.entries(w.fts.rows || {}).map(([k, v]) => `${esc(k)} ${num(v)}`).join("<br>") || "none"]) +
+    row(["vectors", esc(w.vectors.at ?? "none — not embedded yet"), "pending " + num(w.vectors.pending)]);
+  $("#prov1").textContent = `from GET /api/status (relic_status) at ${new Date().toLocaleTimeString()} · folded rows: a message pushed by two machines counts once`;
+  jobs(s.jobs); fresh(s); store(s);
+  if ($("#queries").classList.contains("on")) queries();
+  if ($("#live").classList.contains("on")) tail();
+}
+
+const gb = b => b == null ? '<span class="dim">unknown</span>' : b > 1e9 ? (b / 1e9).toFixed(2) + " GB" : (b / 1e6).toFixed(1) + " MB";
+function store(s) {
+  const st = s.store || {}, r = s.resources || {}, parts = Object.entries(st.parts || {});
+  $("#store").innerHTML = head(["what", "size", "detail"]) +
+    parts.map(([m, v]) => row([`parts ${esc(m)}`, gb(Object.values(v).reduce((a, b) => a + b, 0)), Object.entries(v).map(([k, x]) => `${esc(k)} ${gb(x)}`).join(" · ")])).join("") +
+    row(["BM25 + vector tables", gb(st.search_total), Object.entries(st.search || {}).map(([k, x]) => `${esc(k)} ${gb(x)}`).join("<br>")]) +
+    row(["vector shards", gb(Object.values(st.vectors || {}).reduce((a, b) => a + b, 0)), Object.keys(st.vectors || {}).map(esc).join(", ")]) +
+    row(["logs", gb(st.logs), ""]) + row(["<b>total</b>", gb(st.total), st.growth?.per_day != null ? `growth ${gb(st.growth.per_day)}/day since ${esc(st.growth.since)}` : "growth: measured from tomorrow"]) +
+    row(["disk", `${gb(st.disk?.free)} free`, `${st.disk?.free_pct}% of ${gb(st.disk?.total)}`]) +
+    row(["load", (r.load || []).map(x => x.toFixed(2)).join(" / "), `${r.cpus} cpus`]) +
+    row(["memory", r.memory ? `${gb(r.memory.available)} available` : "unknown", r.memory ? `of ${gb(r.memory.total)}` : ""]) +
+    row(["hub process", gb(r.process?.rss), `${r.process?.open_files ?? "?"} open files · ${r.process?.threads ?? "?"} threads` + (r.container ? ` · container ${gb(r.container.memory)}` : "")]);
+}
+async function queries() {
+  try {
+    const q = await get("/api/queries"), Q = ["at (UTC)", "door", "tool", "query", "mode", "horizon", "hits", "ms", "vector"];
+    const cells = r => [esc((r.at || "").slice(5, 19).replace("T", " ")), esc(r.door), esc(r.tool), esc(r.query), esc(r.mode ?? ""), esc(r.horizon ?? ""), r.hits ?? "", r.ms ?? "", r.vector ? "yes" : ""];
+    $("#qrun").innerHTML = q.running.length ? head(["at", "door", "tool", "query", "for"]) + q.running.map(r => row([esc(r.at), esc(r.door), esc(r.tool), esc(r.query), r.for_s + " s"])).join("") : '<tr><td class="dim">nothing running</td></tr>';
+    $("#qlast").innerHTML = head(Q) + q.last.map(r => row(cells(r))).join("");
+    $("#qhour").innerHTML = head(["hour (UTC)", "queries", "p50 ms", "p95 ms"]) + Object.entries(q.per_hour).reverse().map(([h, v]) => row([esc(h.replace("T", " ")), v.n, v.p50_ms, v.p95_ms])).join("");
+    $("#qtop").innerHTML = head(["query", "times"]) + q.top.map(r => row([esc(r.query), r.n])).join("");
+    $("#qzero").innerHTML = head(["at", "tool", "query"]) + q.zero_hits.map(r => row([esc(r.at), esc(r.tool), esc(r.query)])).join("");
+  } catch (e) { $("#qlast").innerHTML = `<tr><td class="err">${esc(e.message)}</td></tr>`; }
+}
+function fresh(s) {
+  const f = s.freshness || {machines: {}}, secs = v => v == null ? '<span class="dim">unknown</span>' : v < 120 ? v + " s" : v < 7200 ? Math.round(v / 60) + " min" : Math.round(v / 3600) + " h";
+  $("#fresh").innerHTML = head(["machine", "newest row", "behind now", "last push", "push age", "last SYNC (the machine's relic-chain)"]) +
+    Object.entries(f.machines).map(([m, x]) => row([`<b>${esc(m)}</b>`, esc(x.newest_ts ?? "unknown"), secs(x.lag_s), esc(x.pushed_at ?? "unknown"),
+      `<span class="${x.push_age_s > 1800 ? "warn" : ""}">${secs(x.push_age_s)}</span>`,
+      x.sync ? `<span class="${x.sync.includes("MISMATCH") ? "bad" : "ok"}">${esc(x.sync)}</span>` : '<span class="dim">no chain log</span>'])).join("") +
+    row(["<b>BM25 index</b>", esc(f.fts?.at ?? "none"), "", "", secs(f.fts?.age_s)]) + row(["<b>vectors</b>", esc(f.vectors?.at ?? "none"), "", "", ""]);
+}
+async function tail() {
+  try {
+    const r = await get("/api/tail?n=60");
+    $("#tail").innerHTML = head(["time (+07)", "machine", "role", "session", "text"]) + r.rows.map(x => row([`<span class="mono">${esc((x.ts_th || "").slice(5, 16).replace("T", " "))}</span>`,
+      esc((x.machines || []).join(",")), esc(x.role), esc((x.session_name || x.sid || "").slice(0, 40)), esc((x.text || "").replace(/\s+/g, " ").slice(0, 160))])).join("");
+    $("#prov3").textContent = `GET /api/tail · newest ${r.newest || "none"} · refreshed ${new Date().toLocaleTimeString()} · rows arrive with each machine's push (relic-chain, every 10 min)`;
+  } catch (e) { $("#tail").innerHTML = `<tr><td class="err">${esc(e.message)}</td></tr>`; }
+}
+
+function jobs(j) {
+  const cells = e => [`<span class="mono">${esc(e.at)}</span>`, esc(e.verb), `<span class="${e.state === "error" ? "bad" : e.state === "done" ? "ok" : "warn"}">${esc(e.state)}</span>`,
+    esc(e.rc ?? ""), esc(e.host ?? ""), e.done != null ? `${num(e.done)} ${esc(e.unit || "")}` : "", esc(e.message ?? "")];
+  const H = head(["at (UTC)", "verb", "state", "rc", "host", "done", "message"]);
+  $("#running").innerHTML = j.running.length ? H + j.running.map(e => row(cells(e))).join("") : '<tr><td class="dim">nothing running</td></tr>';
+  get("/api/log?n=200").then(evs => {
+    $("#log").innerHTML = H + evs.map(e => row(cells(e))).join("");
+    $("#prov2").textContent = `last event of each job, from logs/jobs.jsonl (relic3 JobEvent) · ${evs.length} jobs`;
+  }).catch(e => $("#log").innerHTML = `<tr><td class="err">${esc(e.message)}</td></tr>`);
+}
+
+function mark(text, q) {
+  let h = esc(text);
+  for (const w of q.split(/\s+/).filter(Boolean)) h = h.split(esc(w)).join(`<mark>${esc(w)}</mark>`);
+  return h;
+}
+let lastQ = "";
+async function search(ev) {
+  ev && ev.preventDefault();
+  const q = $("#q").value.trim(); if (!q) return;
+  lastQ = q;
+  const p = new URLSearchParams({q, limit: 30});
+  for (const k of ["hz", "with", "repo"]) { const v = $("#" + k).value.trim(); if (v) p.set(k === "hz" ? "horizon" : k, v); }
+  $("#hits").innerHTML = '<div class="dim">searching…</div>';
+  try {
+    const t = performance.now(), r = await get("/api/search?" + p);
+    $("#sinfo").textContent = `${r.hits.length} hits · horizon ${r.horizon} (tried ${r.horizons_tried.join(" → ")}) · months ${r.searched_months.join(", ") || "none"} · ${Math.round(performance.now() - t)} ms` + (r.fallback ? ` · ${r.fallback}` : "");
+    $("#hits").innerHTML = r.hits.map((h, i) => `<div class="hit" data-id="${esc(h.uid)}" data-month="${esc(h.partition)}">
+      <div class="meta"><span>${esc((h.ts || "").slice(0, 16).replace("T", " "))}</span><span>${esc(h.role)}</span><span>${esc(h.layer)}</span>
+      <span class="mono">${esc((h.session_uuid || "").slice(0, 8))}</span><span>${esc(h.repo_key || h.title || "")}</span><span>${esc((h.machines || []).join(", "))}</span><span>score ${h.score}</span></div>
+      <div class="snip">${mark(h.text_snippet, q)}</div></div><div id="show-${i}"></div>`).join("") || '<div class="dim">no match</div>';
+    document.querySelectorAll(".hit").forEach((el, i) => el.onclick = () => show(el.dataset.id, el.dataset.month, $("#show-" + i)));
+  } catch (e) { $("#hits").innerHTML = `<div class="err">${esc(e.message)}</div>`; }
+}
+async function show(uid, month, box) {
+  if (box.innerHTML) { box.innerHTML = ""; return; }
+  box.innerHTML = '<div class="show dim">loading…</div>';
+  try {
+    const r = await get(`/api/show?id=${encodeURIComponent(`relic5://${month}/${uid}`)}&before=3&after=3`);
+    const m = (x, t) => `<div class="msg ${t ? "target" : ""}"><div class="meta"><span>${esc((x.ts || "").slice(0, 19).replace("T", " "))}</span><span>${esc(x.role)}</span><span>${esc((x.machines || []).join(", "))}</span></div>${mark(x.text || "", lastQ)}</div>`;
+    box.innerHTML = `<div class="show">${r.before.map(x => m(x)).join("")}${m(r.target, true)}${r.after.map(x => m(x)).join("")}
+      <div class="prov">relic_show ${esc(r.link)} · session ${esc(r.target.sid || "")}</div></div>`;
+  } catch (e) { box.innerHTML = `<div class="show err">${esc(e.message)}</div>`; }
+}
+async function compare() {
+  try {
+    const all = await get("/api/eval?n=500"), last = {};
+    for (const r of all) last[r.file + "|" + r.method] = r;     // the newest run of each method on each file
+    const rows = Object.values(last).sort((a, b) => a.file.localeCompare(b.file) || b["recall@10"] - a["recall@10"]);
+    $("#cmp").innerHTML = head(["file", "method", "n", "recall@10", "precision@10", "MRR", "p50 ms", "p95 ms", "misses", "at"], ["", "", "n", "n", "n", "n", "n", "n", "n", ""]) +
+      rows.map((r, i) => `<tr data-i="${i}" style="cursor:pointer">` + [esc(r.file), `<b>${esc(r.method)}</b>`, r.n, r["recall@10"], r["precision@10"], r.mrr, r.p50_ms, r.p95_ms,
+        (r.misses || []).length, esc((r.at || "").slice(5, 16))].map((c, j) => `<td class="${j > 1 && j < 9 ? "n" : ""}">${c}</td>`).join("") + "</tr>").join("");
+    document.querySelectorAll("#cmp tr[data-i]").forEach(tr => tr.onclick = () => {
+      const r = rows[tr.dataset.i];
+      $("#misses").innerHTML = `<b>${esc(r.method)}</b> on ${esc(r.file)}: ${(r.misses || []).length} misses<br>` + (r.misses || []).map(m => `<div class="msg">${esc(m)}</div>`).join("");
+    });
+    $("#prov4").textContent = `GET /api/eval (logs/eval.jsonl, appended by tests/eval/compare.py) · newest run per method · a hit = a top-10 result from the wanted session`;
+  } catch (e) { $("#cmp").innerHTML = `<tr><td class="err">${esc(e.message)}</td></tr>`; }
+}
+document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
+  document.querySelectorAll("nav button, section").forEach(x => x.classList.remove("on"));
+  b.classList.add("on"); $("#" + b.dataset.tab).classList.add("on");
+  if (b.dataset.tab === "search") $("#q").focus();
+  if (b.dataset.tab === "live") tail();
+  if (b.dataset.tab === "compare") compare();
+  if (b.dataset.tab === "queries") queries();
+});
+$("#sf").onsubmit = search;
+overview(); setInterval(overview, 15000);
+</script>
+</body>
+</html>

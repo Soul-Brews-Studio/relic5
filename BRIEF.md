@@ -74,6 +74,20 @@ Language: Python with uv, so relic4's LanceDB code comes over as is; the push cl
 - Transcripts are private work: nothing leaves the tailnet.
 - Code goes through a branch + PR; files under 500 lines; every change has a test.
 
+## Target, as Nat clarified it (2026-10-23, via relic4-scan)
+
+1. relic5 is first of all an MCP server, installed on white. Every machine connects to it over tailscale, as it
+   connects to relic3 today.
+2. The flow: relic-scan scans everything, relic-extract cuts it, and the parts go to relic5 on white.
+3. Port relic3, with the MONTH as the unit instead of the week. relic3 keeps `index/<ISO year>/<week>/`: sealed weeks,
+   one open week, a manifest per week. relic5 keeps one partition per Bangkok month (YYYY-MM, the month relic-scan and
+   relic-extract write): sealed months, the open current month, a manifest per month.
+4. Same MCP surface as relic3, so clients switch without changing their prompts: the tool names and input schemas of
+   agent-relic-v3 `src/mcp/tools.ts` @9f0bdb5 (`relic_search`, `relic_show`, `relic_sessions`, `relic_session`,
+   `relic_status`).
+5. Ids are the msgkey with no machine in them (a message pushed by two machines is one hit, `machines` lists them).
+   Links are `relic5://<YYYY-MM>/<msgkey>`.
+
 ## First milestone
 
 From m5: `relic5 push` sends `~/.relic-extract` to white; on white the hub holds it under `parts/m5/`; `relic5 serve`

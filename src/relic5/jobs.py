@@ -1,0 +1,107 @@
+"""jobs.py: what long verbs are doing, as relic3 does it (agent-relic-v3 src/contracts/status.ts JobEvent,
+src/status/jobs.ts @9f0bdb5).
+
+  <root>/logs/jobs.jsonl    one JobEvent per line, appended: {job, verb, state, at, done?, total?, unit?, message?, rc?,
+                            pid, host, run?, who?}   state = start | progress | done | error
+
+relic_status reads the last 512 KB and keeps the last event per job. A job is running when its last state is start or
+progress and its pid is alive on this host, or (another host, no pid) when that event is under 10 minutes old.
+`relic5 log` prints the same file as a table.
+"""
+import json, os, socket, sys, time
+from contextlib import contextmanager
+
+TAIL = 512 * 1024
+FRESH = 600
+
+
+def log_path(root):
+    return os.path.join(os.path.abspath(os.path.expanduser(root)), "logs", "jobs.jsonl")
+
+
+def _now():
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def emit(root, ev):
+    p = log_path(root)
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    line = json.dumps(ev, ensure_ascii=False) + "\n"
+    fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)   # one write per line: appends never interleave
+    try:
+        os.write(fd, line.encode())
+    finally:
+        os.close(fd)
+
+
+class Job:
+    def __init__(self, root, verb, run=None):
+        self.root, self.verb = root, verb
+        self.id = f"{verb}-{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}"
+        self.base = {"job": self.id, "verb": verb, "pid": os.getpid(), "host": socket.gethostname()}
+        if run:
+            self.base["run"] = run
+
+    def event(self, state, **kw):
+        emit(self.root, {**self.base, "state": state, "at": _now(), **{k: v for k, v in kw.items() if v is not None}})
+
+    def progress(self, done=None, total=None, unit=None, message=None):
+        self.event("progress", done=done, total=total, unit=unit, message=message)
+
+
+@contextmanager
+def job(root, verb, run=None):
+    """with job(root, "index") as j: ... -> start, then done (rc 0) or error (rc 1 and the message)."""
+    j = Job(root, verb, run)
+    who = {"cwd": os.getcwd(), "argv": " ".join(sys.argv[1:])[:400]}
+    for k, env in (("session", "CLAUDE_CODE_SESSION_ID"), ("pane", "HERDR_PANE_ID"), ("agent", "AI_AGENT")):
+        if os.environ.get(env):
+            who[k] = os.environ[env]
+    j.event("start", who=who)
+    try:
+        yield j
+    except BaseException as ex:
+        j.event("error", rc=1, message=f"{type(ex).__name__}: {ex}"[:400])
+        raise
+    j.event("done", rc=0)
+
+
+def _alive(pid):
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+def read(root, now=None):
+    """-> (last event per job, newest first; running ones)."""
+    p = log_path(root)
+    if not os.path.exists(p):
+        return [], []
+    with open(p, "rb") as f:
+        f.seek(max(0, os.path.getsize(p) - TAIL))
+        data = f.read().decode("utf-8", "replace").splitlines()
+    last = {}
+    for line in data:
+        try:
+            ev = json.loads(line)
+            last[ev["job"]] = ev
+        except (ValueError, KeyError, TypeError):
+            continue   # the first line of a tail may be cut
+    evs = sorted(last.values(), key=lambda e: e.get("at", ""), reverse=True)
+    now = now or time.time()
+    here = socket.gethostname()
+    running = []
+    for e in evs:
+        if e.get("state") not in ("start", "progress"):
+            continue
+        if e.get("host") == here and e.get("pid"):
+            ok = _alive(e["pid"])
+        else:
+            ok = now - time.mktime(time.strptime(e["at"], "%Y-%m-%dT%H:%M:%SZ")) + time.timezone < FRESH
+        if ok:
+            running.append(e)
+    return evs, running

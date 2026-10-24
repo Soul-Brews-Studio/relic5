@@ -1,0 +1,100 @@
+#!/bin/sh
+# relic5 push: copy this machine's relic-extract parts to the hub, under parts/<machine>/.
+#
+#   bin/relic5-push                         # RELIC5_HUB=nat@white.follow-rankine.ts.net, machine = short hostname
+#   RELIC5_MACHINE=mba bin/relic5-push      # name the machine yourself
+#   bin/relic5-push -n                      # dry run: list what would move, send nothing
+#
+# Ported from agent-relic-v3 hub/push.sh (commit 6a6d9d8). Kept from it: rsync over ssh, -a so mtimes travel
+# (an unchanged month is skipped; only grown months move), never --delete on the hub (a part pruned here stays on
+# the hub), and the realpath guard (white's /Users/nat is a symlink to /home/nat: a target that resolves
+# somewhere else is refused, not merged into). Changed: it sends ~/.relic-extract streams, not raw transcripts,
+# and each machine lands in its own folder, so nothing from two machines ever shares a path.
+set -u
+STAMP=                                          # set by bin/relic5-install on a copy outside this checkout
+# What this push sends, as a number: bumped only when the behaviour changes (streams, meta files, _sync.json, local
+# hub...). relic_status compares this, not the git hash, which differs after every commit (relic4-scan, 2026-10-23).
+PUSH_FORMAT=4
+# The ssh target. RELIC5_HUB_SSH wins; RELIC5_HUB may be the hub's HTTP url (relic-chain sets it for its SYNC check):
+# then the ssh target is nat@<its host>, not the url.
+HUB="${RELIC5_HUB_SSH:-${RELIC5_HUB:-nat@white.follow-rankine.ts.net}}"
+case "$HUB" in http://*|https://*) h=${HUB#*://}; h=${h%%/*}; HUB="nat@${h%%:*}";; esac
+SRC="${RELIC5_SRC:-$HOME/.relic-extract}"
+DEST="${RELIC5_DEST:-relic5/parts}"            # relative to the hub user's home
+MACHINE="${RELIC5_MACHINE:-$(hostname -s | tr 'A-Z' 'a-z')}"
+STREAMS="${RELIC5_STREAMS:-text thinking tools vault}"
+DRY=""
+[ "${1:-}" = "-n" ] && DRY="-n"
+
+case "$MACHINE" in *[!a-z0-9-]*|"") echo "bad machine name: '$MACHINE'" >&2; exit 2;; esac
+[ -d "$SRC" ] || { echo "no $SRC" >&2; exit 2; }
+# relic-extract holds an flock on $SRC/.lock for its whole run (relic-extract src/run.rs). Hold a shared one for
+# the push: no push while it cuts, and it waits for a push in flight. Busy now = exit 75, try after the run.
+if [ -z "${RELIC5_LOCKED:-}" ] && [ -e "$SRC/.lock" ]; then
+  RELIC5_LOCKED=1 exec perl -MFcntl=:flock -e '$^F = 255; open(my $f, "<", shift) or die "lock: $!\n";
+    flock($f, LOCK_SH | LOCK_NB) or do { print STDERR "relic-extract is running; push later\n"; exit 75 };
+    exec @ARGV or die "exec: $!\n"' "$SRC/.lock" "$0" "$@"
+fi
+SSH="ssh -o BatchMode=yes -o ConnectTimeout=10"
+# RELIC5_HUB=local: this machine is the hub (white pushing its own parts): same rsync, no ssh to itself.
+if [ "$HUB" = local ]; then R=""; on_hub() { sh -c "$1"; }; else R="$HUB:"; on_hub() { $SSH "$HUB" "$1"; }; fi
+
+home=$(on_hub 'printf %s "$HOME"') || { echo "cannot reach $HUB" >&2; exit 1; }
+target="$home/$DEST/$MACHINE"
+real=$(on_hub "mkdir -p '$target' && realpath '$target'") || exit 1
+[ "$real" = "$target" ] || { echo "refuse: on $HUB $target resolves to $real" >&2; exit 1; }
+
+# One line per stream from rsync --stats: GNU rsync says "Number of regular files transferred" / "Total bytes sent",
+# macOS openrsync "Number of files transferred" / "Total sent: 159 B".
+report() {
+  files=$(printf '%s\n' "$2" | sed -n -E 's/^Number of (regular )?files transferred: ([0-9,]+).*/\2/p' | tr -d ',')
+  sent=$(printf '%s\n' "$2" | sed -n -E 's/^Total (bytes )?sent: ([0-9,]+).*/\2/p' | tr -d ',')
+  printf 'stream %-8s files=%s sent=%s\n' "$1" "${files:-0}" "${sent:-0}"
+  sent_total=$((sent_total + ${sent:-0}))
+}
+# The push as a job in the hub's logs/jobs.jsonl (relic3 JobEvent): start now, done or error at the end.
+JOB="push-$MACHINE-$(date -u +%Y%m%d-%H%M%S)-$$"
+jobev() {   # state, extra JSON fields (no leading comma)
+  [ -n "$DRY" ] && return 0
+  line=$(printf '{"job": "%s", "verb": "push", "state": "%s", "at": "%s", "pid": %s, "host": "%s", "message": "machine %s"%s}' \
+    "$JOB" "$1" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$$" "$(hostname -s)" "$MACHINE" "${2:+, $2}")
+  on_hub "mkdir -p \"\$HOME/relic5/logs\" && printf '%s\\n' '$line' >> \"\$HOME/relic5/logs/jobs.jsonl\"" || true
+}
+jobev start
+rc=0
+t0=$(date +%s)
+sent_total=0
+for s in $STREAMS; do
+  [ -d "$SRC/$s" ] || continue
+  # --stats is parsed into one line per stream: files sent, bytes sent.
+  out=$(rsync -a $DRY --timeout=120 --stats --exclude='.*' "$SRC/$s/" "$R$target/$s/" 2>&1) || { echo "$out" >&2; rc=1; continue; }
+  report "$s" "$out"
+done
+# relic-scan's session table: repo, tier and the subagent tree for relic_sessions / relic_session.
+# Plus months.json, relic-scan's per-month manifest (rows, first/max ts, keys, late rows; relic4-scan PR #35).
+SCAN="${RELIC5_SCAN:-$HOME/.relic-scan}/meta"
+META=$(for f in sessions.parquet months.json; do [ -f "$SCAN/$f" ] && printf '%s ' "$SCAN/$f"; done)
+if [ -n "$META" ] && on_hub "mkdir -p '$target/meta'"; then   # openrsync (macOS) has no --mkpath
+  out=$(rsync -a $DRY --timeout=120 --stats $META "$R$target/meta/" 2>&1) || { echo "$out" >&2; rc=1; }
+  report meta "$out"
+fi
+# What this machine runs, so the hub can tell when machines differ (relic_status warns on a mismatch).
+ver() { command -v "$1" >/dev/null 2>&1 && "$1" --version 2>/dev/null | head -1 | sed 's/^[^ ]* //' || echo none; }
+here=${STAMP:-$(cd "$(dirname "$0")" && git rev-parse --short HEAD 2>/dev/null || echo unknown)}
+printf '{"machine": "%s", "at": "%s", "relic-scan": "%s", "relic-extract": "%s", "relic5-push": "%s", "push-format": %s, "os": "%s"}\n' \
+  "$MACHINE" "$(date '+%FT%T%z')" "$(ver relic-scan)" "$(ver relic-extract)" "$here" "$PUSH_FORMAT" "$(uname -sm)" > "${TMPDIR:-/tmp}/relic5-versions.$$"
+[ -z "$DRY" ] && rsync -a --timeout=60 "${TMPDIR:-/tmp}/relic5-versions.$$" "$R$target/_versions.json" >/dev/null 2>&1 || true
+rm -f "${TMPDIR:-/tmp}/relic5-versions.$$"
+# The newest SYNC line of this machine's relic-chain log (relic4-scan's loop), for the hub's Sync card.
+for L in "${RELIC5_CHAIN_LOG:-}" "$HOME/Library/Logs/relic-chain.log" "$HOME/.local/state/relic-chain.log"; do
+  [ -n "$L" ] && [ -f "$L" ] || continue
+  line=$(grep -E "SYNC (OK|MISMATCH)" "$L" | tail -1 | tr -d '"\\')
+  [ -n "$line" ] && [ -z "$DRY" ] && printf '{"line": "%s", "log": "%s"}\n' "$line" "$L" > "${TMPDIR:-/tmp}/relic5-sync.$$" \
+    && rsync -a --timeout=60 "${TMPDIR:-/tmp}/relic5-sync.$$" "$R$target/_sync.json" >/dev/null 2>&1
+  rm -f "${TMPDIR:-/tmp}/relic5-sync.$$"
+  break
+done
+if [ $rc -eq 0 ]; then jobev done "\"rc\": 0, \"done\": $sent_total, \"unit\": \"bytes\""; else jobev error "\"rc\": $rc"; fi
+printf '%s relic5 push %s -> %s:%s rc=%s %ss%s\n' "$(date '+%F %T')" "$MACHINE" "$HUB" "$target" "$rc" \
+  "$(( $(date +%s) - t0 ))" "${DRY:+ (dry run)}"
+exit $rc
