@@ -4,9 +4,9 @@ import { get } from "./api";
 import { usePoll } from "./api";
 import { ago, bkk, clock } from "./format";
 import type { Queries, ShowResult, Status } from "./types";
-import { Palette, Sidebar, TabBar, TopNav, type Layout, type HubState, type PaletteSession, type Theme, type View, VIEWS } from "./components/Shell";
+import { NavDrawer, Palette, Sidebar, TabBar, TopNav, type Layout, type HubState, type PaletteSession, type Theme, type View, VIEWS } from "./components/Shell";
 import { Drawer } from "./components/Drawer";
-import { Mark, Search as SearchIcon } from "./components/Icons";
+import { Mark, Menu as MenuIcon, Search as SearchIcon } from "./components/Icons";
 import { cx, Loading, State } from "./components/ui";
 import { Context, SearchView, shortRepo, type SearchState } from "./views/SearchView";
 import { MemoryView } from "./views/MemoryView";
@@ -47,10 +47,11 @@ export function App() {
   const [layout, setLayoutState] = useState<Layout>(() => (localStorage.getItem("relic5-layout") as Layout) || "top");
   const setLayout = (l: Layout) => { localStorage.setItem("relic5-layout", l); setLayoutState(l); };
   const [palette, setPalette] = useState(false);
+  const [drawer, setDrawer] = useState(false);
   const status = usePoll<Status>("/api/status", 15000);
   const queries = usePoll<Queries>("/api/queries", 60000);
   const s = status.data;
-  const sess = usePoll<{ sessions: { uuid: string; name?: string | null; repo?: string | null; endedAt?: string }[] }>("/api/sessions?limit=400", 120000);
+  const sess = usePoll<{ sessions: { uuid: string; name?: string | null; repo?: string | null; endedAt?: string }[] }>("/api/sessions?limit=500", 120000);
   const [reading, setReading] = useState<{ x: PaletteSession; r: ShowResult | null; err?: string } | null>(null);
   const openSession = (x: PaletteSession) => {
     setReading({ x, r: null });
@@ -91,9 +92,10 @@ export function App() {
         onPalette={() => setPalette(true)} onLayout={() => setLayout("top")} />}
       <div id="main" tabIndex={-1} className={cx("h-dvh overflow-y-auto focus:outline-none", layout === "side" && "sm:pl-[232px] max-[1100px]:sm:pl-[68px]")}>
         {layout === "top" && <TopNav view={st.view} go={go} state={hub} foot={foot} theme={theme} setTheme={setTheme} badges={{ jobs: s?.jobs.running.length }}
-          onPalette={() => setPalette(true)} onLayout={() => setLayout("side")} version={s?.code.version} />}
+          onPalette={() => setPalette(true)} onLayout={() => setLayout("side")} onDrawer={() => setDrawer(true)} version={s?.code.version} />}
         {/* phone: a slim top bar (mark, state, the palette); the views sit in the bottom bar */}
         <header className="sticky top-0 z-10 flex items-center gap-3 border-b border-line bg-[color-mix(in_srgb,var(--bg)_90%,transparent)] px-4 py-2.5 backdrop-blur sm:hidden">
+          <button type="button" onClick={() => setDrawer(true)} aria-label="Open the menu" aria-haspopup="dialog" className="-ml-2 grid size-11 place-items-center rounded-lg text-muted"><MenuIcon size={20} /></button>
           <Mark size={30} /><b className="text-base font-bold text-accent">relic5</b>
           <span className={cx("flex items-center gap-1.5 truncate text-xs font-semibold", hub === "ok" ? "text-ok" : hub === "failed" ? "text-danger" : hub === "warning" ? "text-warning" : "text-muted")}><span className="size-2 rounded-full bg-current" />{hub === "ok" ? "All in" : hub === "failed" ? "Hub unreachable" : hub === "warning" ? `${s?.warnings.length} warning${s?.warnings.length === 1 ? "" : "s"}` : "Reading"} · {clock(status.at)}</span>
           <button type="button" onClick={() => setPalette(true)} aria-label="Search or jump" className="ml-auto grid size-11 place-items-center rounded-lg border border-line text-muted"><SearchIcon size={18} /></button>
@@ -126,6 +128,7 @@ export function App() {
         </main>
       </div>
       <TabBar view={st.view} go={go} onMore={() => setPalette(true)} />
+      <NavDrawer open={drawer} onClose={() => setDrawer(false)} view={st.view} go={go} state={hub} foot={foot} badges={{ jobs: s?.jobs.running.length }} onPalette={() => setPalette(true)} />
       <Palette open={palette} onClose={() => setPalette(false)} go={go} search={search} recent={recent} sessions={palSessions} openSession={openSession} />
       <Drawer open={!!reading} onClose={() => setReading(null)} title={reading ? <>{reading.x.repo} · {reading.x.name}</> : ""}
         note={reading ? `relic5://session/${reading.x.sid} · the first messages` : ""} onCopy={() => reading && navigator.clipboard.writeText(`relic5://session/${reading.x.sid}`)}>
