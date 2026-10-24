@@ -1,4 +1,5 @@
-import type { ComponentType, ReactNode } from "react";
+import { useState, type ComponentType, type ReactNode } from "react";
+import { Drawer } from "../components/Drawer";
 import { usePoll } from "../api";
 import { ago, bkk, bytes, compact, num, secs, sum } from "../format";
 import { Badge, HealthCard, levelText, levelWord, type Level } from "../components/HealthCard";
@@ -109,6 +110,11 @@ function MachineCard({ s, m }: { s: Status; m: string }) {
 export function GlancePage({ s, error, at, theme, setTheme }:
   { s: Status | null; error: string | null; at: Date | null; theme: "dark" | "paper"; setTheme: (t: "dark" | "paper") => void }) {
   const log = usePoll<JobEvent[]>("/api/log?n=300", 30000);
+  const [recap, setRecap] = useState<{ month: string; text: string } | null>(null);
+  const openRecap = async (month: string) => {
+    const r = await fetch(`/api/month-recap?month=${month}`, { credentials: "same-origin" });
+    setRecap({ month, text: r.ok ? await r.text() : `no recap for ${month} yet` });
+  };
   const sessions = usePoll<{ total: number; events: number }>("/api/sessions?limit=0", 0);
   const top = <TopBar theme={theme} setTheme={setTheme} note={error ? "hub unreachable" : at ? `read ${at.toLocaleTimeString()} · every 15 s` : "reading…"}
     link={<a href="#tab=live" className={pill}>Open the hub <Arrow size={16} /></a>} />;
@@ -187,6 +193,7 @@ export function GlancePage({ s, error, at, theme, setTheme }:
                       {word}{d.amendments ? ` +${d.amendments}` : ""}
                     </div>
                     <div className="mt-1 truncate font-mono text-[10px] text-faint">{d.fingerprint ?? (d.state === "open" ? "live" : (d.problems[0] ?? d.waiting[0] ?? "").split(":")[0])}</div>
+                    {d.recap && <button type="button" onClick={() => openRecap(d.month)} className="mt-2 text-[12px] font-semibold text-accent hover:underline">Read the recap</button>}
                   </div>
                 );
               })}
@@ -198,6 +205,10 @@ export function GlancePage({ s, error, at, theme, setTheme }:
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{machines.map(m => <MachineCard key={m} s={s} m={m} />)}</div>
         </Section>
 
+        <Drawer open={!!recap} onClose={() => setRecap(null)} title={recap ? `${recap.month}: the month recap` : ""}
+          note="written by a forked agent from the sealed month only (bin/relic5-month-recap)">
+          <div className="max-w-[80ch] px-6 pt-4 font-sans text-[14px] leading-relaxed whitespace-pre-wrap text-soft">{recap?.text}</div>
+        </Drawer>
         <p className="mt-16 text-[12px] text-faint">Every number on this page comes from GET /api/status (relic_status), /api/log and /api/sessions on white; unknown means the hub did not say.</p>
       </main>
     </div>

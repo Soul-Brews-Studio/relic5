@@ -1,0 +1,140 @@
+#!/usr/bin/env python3
+"""relic5 month recap: when a month is sealed and reconciled on the hub (sealday.py), fork a Claude agent in its own
+herdr space to write what happened that month, from the sealed data only, and keep the recap on the hub.
+
+  bin/relic5-month-recap 2026-09        one month (it must be reconciled on the hub)
+  bin/relic5-month-recap --pending      every reconciled month without a recap yet (the nightly 03:30 job runs this)
+  bin/relic5-month-recap -n 2026-09     print the brief, start nothing
+
+Runs on m5 (herdr and the relic5 MCP live here). The agent may only call the relic5 MCP tools and write its one file
+(~/relic5-recaps/<M>.md); the file must name the month's seal fingerprint. Then it is copied to white
+(~/relic5/recaps/<M>.md, served by the hub) and a "recap" job event is logged there. Transcripts never leave the
+tailnet: the recap is not committed to git. Seal data never changes, so a recap written from it stays true.
+"""
+import json, os, subprocess, sys, time, urllib.request
+from typing import Any
+
+HUB = os.environ.get("RELIC5_HUB_URL", "http://white.follow-rankine.ts.net:8795")
+HUB_SSH = os.environ.get("RELIC5_HUB_SSH", "nat@white.follow-rankine.ts.net")
+OUT = os.path.expanduser(os.environ.get("RELIC5_RECAPS", "~/relic5-recaps"))
+TIMEOUT_MS = 45 * 60 * 1000
+TOOLS = "mcp__relic5__relic_search mcp__relic5__relic_sessions mcp__relic5__relic_session mcp__relic5__relic_show mcp__relic5__relic_status Write Read"
+# The shell's `claude` may add --dangerously-skip-permissions (Nat's zsh function), which overrides an allow list; a deny
+# list still holds under it, so the fork is also denied everything that could act outside its one file.
+DENY = "Bash Edit NotebookEdit WebFetch WebSearch Agent Task Skill mcp__fleet mcp__arra-oracle mcp__session-viewer mcp__relic3"
+
+BRIEF = """You are writing the relic5 month recap for {month}. That month is SEALED on the hub: every machine's copy was \
+checked byte for byte and written down with fingerprint {fp} (reconciled {at}). Its data will never change, so what you \
+write from it stays true.
+
+Use ONLY the relic5 MCP tools: relic_sessions (since/until/repo/limit), relic_search (query with since={month}-01 and \
+until={last}), relic_session, relic_show. Do not read files, do not use other tools, do not guess.
+
+Write exactly one file: {path}
+
+Structure:
+# {month} in relic5
+> Sealed month, fingerprint `{fp}`, reconciled {at}. {sessions_line}
+## The month in five lines
+(the five most important things that happened, each with one relic5:// link)
+## By project
+(the ~12 projects with the most sessions that month, most first; each a heading and 2-4 bullets: what was built or \
+decided, what broke and how it was fixed; every bullet ends with a relic5:// link to the message that shows it)
+## Rules and decisions Nat made
+(each one a bullet quoting or closely paraphrasing Nat, with its link)
+## Numbers
+(sessions and messages that month, from relic_status / relic_sessions; say where each number came from)
+
+Rules: plain English, short sentences, no invented facts; every claim has a relic5:// link you actually opened or \
+got from a search hit; under 300 lines. When the file is written, reply with the single word DONE."""
+
+
+def get(path: str) -> Any:
+    with urllib.request.urlopen(HUB + path, timeout=60) as r:
+        return json.load(r)
+
+
+def herdr(*args: str) -> Any:
+    r = subprocess.run(["herdr", *args], capture_output=True, text=True, timeout=600)
+    if r.returncode != 0:
+        raise SystemExit(f"herdr {' '.join(args[:2])}: {r.stderr.strip() or r.stdout.strip()}")
+    try:
+        return json.loads(r.stdout)
+    except ValueError:
+        return r.stdout
+
+
+def has_recap(month: str) -> bool:
+    return subprocess.run(["ssh", "-o", "BatchMode=yes", HUB_SSH, f"test -s ~/relic5/recaps/{month}.md"]).returncode == 0
+
+
+def brief(month: str, day: dict[str, Any]) -> str:
+    y, m = int(month[:4]), int(month[5:7])
+    last = f"{month}-{[31, 29 if y % 4 == 0 else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][m - 1]:02d}"
+    try:
+        n = get(f"/api/sessions?limit=0&since={month}-01&until={last}")["total"]
+        sessions_line = f"{n:,} top-level sessions (relic_sessions)."
+    except Exception:
+        sessions_line = ""
+    return BRIEF.format(month=month, fp=day["fingerprint"], at=day["reconciled_at"], last=last,
+                        path=os.path.join(OUT, f"{month}.md"), sessions_line=sessions_line)
+
+
+def recap(month: str, dry: bool) -> bool:
+    days = {d["month"]: d for d in get("/api/status").get("seal_days", [])}
+    day = days.get(month)
+    if not day or day["state"] != "reconciled":
+        print(f"{month}: not reconciled on the hub ({day['state'] if day else 'unknown'}); no recap", file=sys.stderr)
+        return False
+    text = brief(month, day)
+    if dry:
+        print(text)
+        return True
+    os.makedirs(OUT, exist_ok=True)
+    path = os.path.join(OUT, f"{month}.md")
+    if os.path.exists(path):
+        os.replace(path, path + f".bak-{int(time.time())}")
+    t0 = time.time()
+    ws = herdr("workspace", "create", "--cwd", OUT, "--label", f"recap {month}", "--no-focus",
+               "--env", "MAW_CLAUDE_CHANNELS=")                          # no Discord channel in the fork
+    wid = ws["result"]["workspace"]["workspace_id"] if isinstance(ws, dict) and "workspace" in ws.get("result", {}) else None
+    panes = herdr("pane", "list", *(["--workspace", wid] if wid else []))["result"]["panes"]
+    pane = panes[0]["pane_id"] if wid else None
+    if not pane:
+        raise SystemExit("herdr: no pane in the new workspace")
+    name = f"recap-{month}"
+    herdr("agent", "start", name, "--kind", "claude", "--pane", pane, "--timeout", "120000", "--",
+          "--permission-mode", "acceptEdits", "--allowedTools", TOOLS, "--disallowedTools", DENY)
+    herdr("agent", "prompt", name, text, "--wait", "--until", "done", "--until", "idle", "--timeout", str(TIMEOUT_MS))
+    ok = os.path.exists(path) and day["fingerprint"] in open(path).read()
+    if ok:
+        subprocess.run(["ssh", "-o", "BatchMode=yes", HUB_SSH, "mkdir -p ~/relic5/recaps"], check=True)
+        subprocess.run(["rsync", "-a", path, f"{HUB_SSH}:relic5/recaps/{month}.md"], check=True)
+    secs = int(time.time() - t0)
+    ev = {"job": f"recap-{month}-{int(t0)}", "verb": "recap", "state": "done" if ok else "error", "rc": 0 if ok else 1,
+          "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "host": os.uname().nodename.split(".")[0],
+          "message": (f"recap {month} written ({os.path.getsize(path):,} bytes, {secs}s), fingerprint {day['fingerprint']}" if ok
+                      else f"recap {month}: no file naming fingerprint {day['fingerprint']} after {secs}s (see the herdr space)")}
+    line = json.dumps(ev).replace("'", "'\\''")
+    subprocess.run(["ssh", "-o", "BatchMode=yes", HUB_SSH, f"printf '%s\\n' '{line}' >> ~/relic5/logs/jobs.jsonl"])
+    if ok and wid:
+        herdr("workspace", "close", wid)            # done: the space goes; on failure it stays open to look at
+    print(ev["message"])
+    return ok
+
+
+def main() -> None:
+    args = sys.argv[1:]
+    dry = "-n" in args
+    months = [a for a in args if len(a) == 7 and a[4] == "-"]
+    if "--pending" in args:
+        months = [d["month"] for d in get("/api/status").get("seal_days", []) if d["state"] == "reconciled" and not has_recap(d["month"])]
+        months = months[-1:]                        # at most one a night, the newest
+    if not months:
+        print("nothing to recap")
+        return
+    sys.exit(0 if all(recap(m, dry) for m in months) else 1)
+
+
+if __name__ == "__main__":
+    main()
