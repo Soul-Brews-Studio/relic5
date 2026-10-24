@@ -72,8 +72,9 @@ for s in $STREAMS; do
 done
 # relic-scan's session table: repo, tier and the subagent tree for relic_sessions / relic_session.
 # Plus months.json, relic-scan's per-month manifest (rows, first/max ts, keys, late rows; relic4-scan PR #35).
+# Plus vaults.json, what each ψ note's "vault:<id>" means (oracle name, path: relic5 vaults.py).
 SCAN="${RELIC5_SCAN:-$HOME/.relic-scan}/meta"
-META=$(for f in sessions.parquet months.json; do [ -f "$SCAN/$f" ] && printf '%s ' "$SCAN/$f"; done)
+META=$(for f in sessions.parquet months.json vaults.json; do [ -f "$SCAN/$f" ] && printf '%s ' "$SCAN/$f"; done)
 if [ -n "$META" ] && on_hub "mkdir -p '$target/meta'"; then   # openrsync (macOS) has no --mkpath
   out=$(rsync -a $DRY --timeout=120 --stats $META "$R$target/meta/" 2>&1) || { echo "$out" >&2; rc=1; }
   report meta "$out"
