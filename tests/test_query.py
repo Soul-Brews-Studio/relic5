@@ -107,6 +107,7 @@ def test_sessions_by_repo(relic):
     assert sum(x["sessions"] for x in r["repos"]) == r["total"]
     assert [x["repo"] for x in relic.sessions(by_repo=True, since="2026-10-23")["repos"]] == ["-opt-Code-github-com-laris-co-neo-oracle"]
     assert "repos" not in relic.sessions()
+    assert len(relic.sessions(by_repo=True)["repos"]) <= 201                # top 200 plus one "(other N repos)" row
 
 
 def test_session(relic):
