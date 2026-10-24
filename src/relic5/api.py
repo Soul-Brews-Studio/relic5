@@ -60,6 +60,20 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
 
     from . import selfknow
 
+    def client_of(request: Request, via: str) -> str:
+        """Who is calling, for the Connected devices list: the X-Relic5-Client header (eval, relic-feeder, ...) when
+        sent, else the User-Agent's first product ("claude-code", "python-urllib", "Mozilla"), with how (mcp | http)."""
+        c = request.headers.get("x-relic5-client")
+        if not c:
+            ua = request.headers.get("user-agent", "").split(" ")[0].split("/")[0]
+            c = ua.lower() or "unknown"
+        return f"{c} ({via})"
+
+    @app.get("/api/clients", response_model=None)
+    def clients_route() -> Json:
+        from . import selfknow
+        return selfknow.clients(relic.parts.root)
+
     def logged(relic_: Relic5, tool: str, args: Json, door: str | None, client: str | None = None) -> mcp.ToolReply:
         """Every tool call, MCP or GET, goes through here: one line in logs/queries.jsonl (selfknow.py)."""
         qid, t0 = selfknow.start(tool, door, args.get("query") or args.get("id") or "", client)
@@ -201,7 +215,7 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
             msg = json.loads(await request.body())
         except ValueError:
             return Response(dumps(mcp._err(None, -32700, "parse error")), media_type="application/json")
-        door, client = request.state.door, request.headers.get("x-relic5-client")
+        door, client = request.state.door, client_of(request, "mcp")
         call: mcp.ToolCall = lambda r_, n, a, d: logged(r_, n, a, d, client)
         out: list[Json] | Json | None
         if isinstance(msg, list):
@@ -220,7 +234,7 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
         """The tool is bound by the closure, never a parameter: FastAPI would read a defaulted `tool` argument as a
         query parameter, and ?tool=... could pick which tool runs (found by the mypy pass, 2026-10-24)."""
         def route(request: Request) -> Response:
-            ok, r = logged(relic, tool, args_of(request.query_params), request.state.door, request.headers.get("x-relic5-client"))
+            ok, r = logged(relic, tool, args_of(request.query_params), request.state.door, client_of(request, "http"))
             if ok:
                 return Response(dumps(r), media_type="application/json")
             return JSONResponse({"error": r[1]}, status_code=STATUS_OF[r[0]])

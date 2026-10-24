@@ -80,7 +80,7 @@ def queries(root: str) -> Json:
             hours.setdefault(r["at"][:13], []).append(r["ms"])
     per_hour = {h: {"n": len(v), "p50_ms": round(statistics.median(v)), "p95_ms": round(sorted(v)[max(0, int(len(v) * 0.95) - 1)])}
                 for h, v in sorted(hours.items())}
-    real = [r for r in rows if r.get("client") != "eval"]   # eval runs say so (X-Relic5-Client: eval); keep them out of Nat's view
+    real = [r for r in rows if not str(r.get("client") or "").startswith("eval")]   # eval runs say so (X-Relic5-Client: eval); keep them out of Nat's view
     counts: dict[str, int] = {}
     for r in real:
         if r.get("query"):
@@ -195,3 +195,35 @@ def warnings(st: Json, res: Json) -> list[str]:
     if res["load"][2] > (res["cpus"] or 1) * 0.8:
         w.append(f"load: {res['load'][2]:.1f} over 15 min on {res['cpus']} cpus")
     return w
+
+
+def clients(root: str, days: int = 7) -> Json:
+    """Connected devices: every door + client seen in the query log in the last `days` days, newest first: last seen,
+    calls in 24 h and in all, the tools it used, and its median time. A door is the machine (tailnet:<node>, loopback,
+    token:<name>); a client is the program (relic-feeder (http), claude-code (mcp), python-urllib (mcp): the Mac shim)."""
+    now = time.time()
+    seen: dict[tuple[str, str], Json] = {}
+    for r in _tail(_log(root), 20000):
+        try:
+            t = time.mktime(time.strptime(r["at"], "%Y-%m-%dT%H:%M:%SZ")) - time.timezone
+        except (KeyError, ValueError):
+            continue
+        if now - t > days * 86400:
+            continue
+        k = (r.get("door") or "unknown", r.get("client") or "unknown")
+        d = seen.setdefault(k, {"door": k[0], "client": k[1], "first": r["at"], "last": r["at"], "calls": 0, "calls_24h": 0,
+                                "tools": {}, "ms": []})
+        d["calls"] += 1
+        d["calls_24h"] += now - t < 86400
+        d["last"] = max(d["last"], r["at"])
+        d["first"] = min(d["first"], r["at"])
+        d["tools"][r.get("tool", "?")] = d["tools"].get(r.get("tool", "?"), 0) + 1
+        if isinstance(r.get("ms"), int):
+            d["ms"].append(r["ms"])
+    out = []
+    for d in seen.values():
+        ms = d.pop("ms")
+        d["p50_ms"] = round(statistics.median(ms)) if ms else None
+        out.append(d)
+    out.sort(key=lambda d: d["last"], reverse=True)
+    return {"days": days, "devices": out}

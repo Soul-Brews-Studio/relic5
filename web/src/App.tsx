@@ -6,6 +6,7 @@ import { pill, TopBar, type Theme } from "./components/TopBar";
 import { cx, Kbd, Seg, State } from "./components/ui";
 import { SearchView, WhoPick, type SearchState } from "./views/SearchView";
 import { MemoryView } from "./views/MemoryView";
+import { ConnectView } from "./views/ConnectView";
 import { LiveView } from "./views/LiveView";
 import { JobsView } from "./views/JobsView";
 import { QueriesView } from "./views/QueriesView";
@@ -13,7 +14,7 @@ import { CompareView } from "./views/CompareView";
 import { StoreView } from "./views/StoreView";
 import { GlancePage } from "./views/GlancePage";
 
-const TABS = ["search", "live", "memory", "jobs", "queries", "compare", "store"] as const;
+const TABS = ["search", "live", "memory", "connect", "jobs", "queries", "compare", "store"] as const;
 type Tab = (typeof TABS)[number];
 
 /** The URL hash holds the view: #tab=search&q=...&horizon=...&with=...&repo=...&machine=..., so a view is a link and
@@ -99,6 +100,7 @@ export function App() {
           <div hidden={view.tab !== "search"}><SearchView st={view.search} setSt={st => setView(v => ({ ...v, search: st }))} machine={view.machine} focusKey={focusKey} /></div>
           {view.tab === "live" && <LiveView machine={view.machine} role={view.search.role} on />}
           {view.tab === "memory" && <MemoryView />}
+          {view.tab === "connect" && <ConnectView />}
           {view.tab === "jobs" && <JobsView s={s} on />}
           {view.tab === "queries" && <QueriesView on />}
           {view.tab === "compare" && <CompareView on />}

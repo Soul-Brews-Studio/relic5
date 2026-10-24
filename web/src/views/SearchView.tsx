@@ -65,7 +65,7 @@ export function WhoPick({ role, onChange }: { role: string; onChange: (role: str
 function Empty({ pick, memory }: { pick: (q: string) => void; memory: () => void }) {
   const q = usePoll<Queries>("/api/queries", 0);
   // real searches only: the eval runs (client "eval") ask hundreds of known-item fragments
-  const asked = [...new Set((q.data?.last ?? []).filter(r => r.tool === "relic_search" && r.client !== "eval" && r.query && r.query.length < 60)
+  const asked = [...new Set((q.data?.last ?? []).filter(r => r.tool === "relic_search" && !(r.client ?? "").startsWith("eval") && r.query && r.query.length < 60)
     .map(r => r.query.trim()))].slice(0, 8);
   const chip = "rounded-full border border-line bg-panel px-3.5 py-1.5 text-[13px] text-soft hover:border-accent hover:text-text";
   return (
