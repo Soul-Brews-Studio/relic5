@@ -116,7 +116,8 @@ export function GlancePage({ s, error, at, theme, setTheme }:
     const r = await fetch(`/api/month-recap?month=${month}`, { credentials: "same-origin" });
     setRecap({ month, text: r.ok ? await r.text() : `no recap for ${month} yet` });
   };
-  const sessions = usePoll<{ total: number; events: number }>("/api/sessions?limit=0", 0);
+  const sessions = usePoll<{ total: number; events: number; all?: { sessions: number; events: number; subagents: number; subagent_events: number } }>("/api/sessions?limit=0", 0);
+  const every = sessions.data?.all;   // every session once, subagents included (top-level alone undercounts by ~30%)
   const top = <TopBar theme={theme} setTheme={setTheme} note={error ? "hub unreachable" : at ? `read ${at.toLocaleTimeString()} · every 15 s` : "reading…"}
     link={<a href="#tab=live" className={pill}>Open the hub <Arrow size={16} /></a>} />;
   if (!s) return <div className="h-dvh overflow-y-auto">{top}<p className="mx-auto max-w-[1200px] px-5 py-16 font-sans text-lg text-muted">{error ?? "Reading the hub…"}</p></div>;
@@ -141,7 +142,7 @@ export function GlancePage({ s, error, at, theme, setTheme }:
           <Badge level={level} size="lg" />
           <div className="min-w-0">
             <h1 className={cx("m-0 max-w-[24ch] text-[clamp(28px,4.4vw,52px)] leading-[1.08] font-bold tracking-[-0.025em] text-balance", level === "ok" || s.copy ? "text-text" : levelText(level))}>{verdict}</h1>
-            <p className="m-0 mt-3 text-[15px] text-muted">{levelWord(level)} · {sessions.data ? `${num(sessions.data.events)} transcript events in ${num(sessions.data.total)} sessions` : `${num(text)} messages`} from {machines.length} sources · {s.months.list.filter(m => m.sealed && m.rows.text > 0).length} sealed months, {s.months.open ?? "no"} open</p>
+            <p className="m-0 mt-3 text-[15px] text-muted">{levelWord(level)} · {every ? `${num(every.events)} transcript events in ${num(every.sessions)} sessions` : sessions.data ? `${num(sessions.data.events)} transcript events in ${num(sessions.data.total)} sessions` : `${num(text)} messages`} from {machines.length} sources · {s.months.list.filter(m => m.sealed && m.rows.text > 0).length} sealed months, {s.months.open ?? "no"} open</p>
           </div>
         </section>
 
@@ -158,8 +159,8 @@ export function GlancePage({ s, error, at, theme, setTheme }:
           <div className="col-span-2 w-full rounded-2xl border border-line bg-panel p-5 lg:col-span-1">
             <h2 className="m-0 mb-2 text-[15px] font-semibold text-text">In the hub</h2>
             {([
-              ["Sessions", sessions.data ? num(sessions.data.total) : "unknown"],
-              ["Transcript events (every .jsonl record)", sessions.data ? num(sessions.data.events) : "unknown"],
+              ["Sessions", every ? `${num(every.sessions)} · ${num(sessions.data!.total)} top-level · ${num(every.subagents)} subagents` : sessions.data ? num(sessions.data.total) : "unknown"],
+              ["Transcript events (every .jsonl record)", every ? `${num(every.events)} · subagents ${num(every.subagent_events)}` : sessions.data ? num(sessions.data.events) : "unknown"],
               ["Records, each counted once", num((s.rows.text ?? 0) + (s.rows.tools ?? 0) + (s.rows.thinking ?? 0))],
               ["Messages, each counted once", num(s.rows.text)],
               ["Tool calls", num(s.rows.tools)],

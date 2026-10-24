@@ -405,12 +405,18 @@ class Relic5:
                 params.append(v)
         w = " AND ".join(where)
         total, events = self._rows(f"SELECT count(*) AS n, coalesce(sum(n_rows), 0) AS e FROM {meta} WHERE {w}", params)[0].values()
+        # the same window and filters with subagents too: every session once, so "transcript events" is every .jsonl
+        # record (2026-10-24: 7.37M, where top-level alone said 5.23M)
+        w_all = " AND ".join(where[1:]) or "true"
+        a = self._rows(f"""SELECT count(*) AS n, coalesce(sum(n_rows), 0)::BIGINT AS e, count(*) FILTER (parent_sid IS NOT NULL) AS sn,
+                           coalesce(sum(n_rows) FILTER (parent_sid IS NOT NULL), 0)::BIGINT AS se FROM {meta} WHERE {w_all}""", params)[0]
         rows = self._rows(f"""SELECT s.*, (SELECT count(*) FROM {meta} c WHERE c.parent_sid = s.sid) AS children
                               FROM {meta} s WHERE {w} ORDER BY last_ts DESC NULLS LAST LIMIT ?""", params + [limit or DEFAULT_LIMIT])
         names = self._names({r["sid"] for r in rows})
         rows = [r | {"name": names.get(r["sid"])} for r in rows]
         out: Json = {"total": total, "counted": "top-level sessions only (no parent_sid); subagents fold into children",
-                     "events": int(events), "sessions": [self._session_row(r) for r in rows]}
+                     "events": int(events), "sessions": [self._session_row(r) for r in rows],
+                     "all": {"sessions": a["n"], "events": int(a["e"]), "subagents": a["sn"], "subagent_events": int(a["se"])}}
         if by_repo:   # the same window and filters, counted per repo; a session with no repo (Codex) counts by its tenant
             repos = self._rows(f"""SELECT coalesce(proj, '(no repo) ' || coalesce(cat, '?')) AS repo, count(*) AS sessions,
                                       coalesce(sum(n_rows), 0)::BIGINT AS events FROM {meta} WHERE {w}
