@@ -30,7 +30,35 @@ def _turns(relic: "Relic5", sid: str) -> list[Json]:
     from .query import folded
     rows: list[Json] = relic._rows(f"""SELECT role, ts, ts_th, string_agg(text, '' ORDER BY chunk) AS text FROM {folded(src, "sid = ?")}
                            GROUP BY msgkey, role, ts, ts_th ORDER BY ts, min(msgkey)""", [sid])
-    return rows
+    return _fold_repeats(rows)
+
+
+IMAGE_SRC = re.compile(r"^\[Image: source: [^\]]*\]$", re.M)
+SAME_WINDOW_S = 1800
+
+
+def _said(text: str | None) -> str:
+    """A user turn as the human typed it: no mid-turn wrapper, no [Image: source: ...] line, whitespace collapsed."""
+    from .search import _WRAPPER
+    t = IMAGE_SRC.sub(" ", text or "")
+    return " ".join(_WRAPPER.sub(" ", " ".join(t.lower().split())).split())
+
+
+def _fold_repeats(turns: list[Json]) -> list[Json]:
+    """Claude Code stores a prompt twice: when it is typed (or queued mid-turn, in the wrapper) and when it is
+    submitted, seconds to minutes later (session 1dbe53ae, 2026-10-24: every one of 66 prompts, up to 11 min apart).
+    A user turn that says what the previous user turn said, within 30 minutes, is that second copy: dropped, the
+    first (when it was said) kept. Assistant turns are never touched."""
+    out: list[Json] = []
+    last: tuple[str, float | None] | None = None
+    for t in turns:
+        if t["role"] == "user":
+            said, at = _said(t["text"]), _t(t["ts"])
+            if last and said and said == last[0] and at is not None and last[1] is not None and at - last[1] <= SAME_WINDOW_S:
+                continue
+            last = (said, at)
+        out.append(t)
+    return out
 
 
 def _resolve(relic: "Relic5", ident: str) -> tuple[str, Json]:
