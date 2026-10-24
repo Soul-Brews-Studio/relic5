@@ -14,26 +14,45 @@ current.json is never removed. Tokenizer settings are relic3's, as relic4 carrie
 src/relic4/embed.py FTS_SETTINGS, PR #6 @b399119): icu, no stemming, no stop words, max token 128.
 """
 import json, os, shutil, time
+from collections.abc import Callable, Collection, Sequence
+from datetime import datetime
+from typing import TYPE_CHECKING, TypedDict
 
 from .parts import Parts, sql_list, this_month
+from .types_ import Json
 
-FTS_SETTINGS = dict(base_tokenizer="icu", stem=False, remove_stop_words=False, max_token_length=128,
+if TYPE_CHECKING:   # for annotations only: duckdb and lancedb are loaded where they are used
+    import duckdb
+    import lancedb.table
+    from .vec import Matrix, VecFilter
+
+
+class FtsSettings(TypedDict):
+    """lancedb.index.FTS's keyword arguments, as FTS_SETTINGS gives them."""
+    base_tokenizer: str
+    stem: bool
+    remove_stop_words: bool
+    max_token_length: int
+    with_position: bool
+
+
+FTS_SETTINGS = FtsSettings(base_tokenizer="icu", stem=False, remove_stop_words=False, max_token_length=128,
                     with_position=True)   # positions: exact-phrase hits rank first (eval 2026-10-23: common-word misses)
 LAYERS = {"prose": ("text", "vault"), "tools": ("tools",), "thinking": ("thinking",), "memory": ("memory",)}
 COLS = ["uid", "msgkey", "chunk", "key", "month", "sid", "ts", "ts_th", "role", "engine", "cat", "layer", "machines", "text", "title"]
 KEEP = 3
 
 
-def search_dir(root):
+def search_dir(root: str) -> str:
     return os.path.join(root, "index", "_search")
 
 
-def current(root):
+def current(root: str) -> dict[str, str]:
     p = os.path.join(search_dir(root), "current.json")
     return json.load(open(p)) if os.path.exists(p) else {}
 
 
-def _select(parts, layer, months):
+def _select(parts: Parts, layer: str, months: Collection[str]) -> str | None:
     """SQL for the folded rows of one layer over some months (vault, a single file, goes to history; so does memory,
     already folded by memory.py)."""
     if layer == "memory":
@@ -42,7 +61,7 @@ def _select(parts, layer, months):
             return None
         return f"""SELECT msgkey AS uid, msgkey, chunk, key, month, sid, ts, ts_th, role, engine, cat, 'memory' AS layer,
                    machines, text, title FROM read_parquet({sql_list([p])}) ORDER BY ts, msgkey"""
-    srcs = []
+    srcs: list[str] = []
     for s in LAYERS[layer]:
         fs = [p for _, mon, p in parts.files(s) if (s == "vault" and "history" in months) or mon in months]
         if fs:
@@ -60,10 +79,10 @@ def _select(parts, layer, months):
                ORDER BY ts, msgkey, chunk"""
 
 
-def _sig(parts, layer, months):
+def _sig(parts: Parts, layer: str, months: Collection[str]) -> Json:
     """What a table was built from: per month, the manifest entry of the layer's own streams (files, sizes, mtimes,
     rows per machine), so a new tools part does not rebuild prose."""
-    sig = {}
+    sig: Json = {}
     for m in months:
         p = parts.manifest_path(m)
         if os.path.exists(p):
@@ -72,7 +91,8 @@ def _sig(parts, layer, months):
     return sig
 
 
-def build(root, con, log=print, now=None, force=False, lane="fts"):
+def build(root: str, con: "duckdb.DuckDBPyConnection", log: Callable[[str], object] = print, now: datetime | None = None,
+          force: bool = False, lane: str = "fts") -> list[str]:
     """Rebuild every table of one lane whose inputs changed; publish one new generation. Returns the tables rebuilt.
     lane = "fts" (BM25, fast: every push) or "vectors" (vector tables: after an embed worker ships shards). The two never
     run together (Nat, 2026-10-23: "collect icu / fts search first / vector index embed later not same time")."""
@@ -91,7 +111,7 @@ def build(root, con, log=print, now=None, force=False, lane="fts"):
     from . import memory
     memory.build(root) if lane == "fts" else None
     mem_sig = memory.sig(root)
-    plan = {}
+    plan: dict[str, tuple[str, list[str], Json]] = {}
     for layer in (LAYERS if lane == "fts" else ()):
         for part, ms in groups.items():
             name = f"{layer}_{part}"
@@ -125,7 +145,7 @@ def build(root, con, log=print, now=None, force=False, lane="fts"):
         is_vec = layer.startswith("vec:")
         sql = V.table_sql(parts, root, layer[4:], ms) if is_vec else _select(parts, layer, ms)
         tab = con.execute(sql).arrow() if sql else None
-        if hasattr(tab, "read_all"):
+        if tab is not None and hasattr(tab, "read_all"):
             tab = tab.read_all()
         if tab is None or tab.num_rows == 0:
             cur.pop(name, None)
@@ -156,7 +176,7 @@ def build(root, con, log=print, now=None, force=False, lane="fts"):
     return done
 
 
-def _prune(sd, cur):
+def _prune(sd: str, cur: dict[str, str]) -> None:
     live = {v.split("/")[0] for v in cur.values()}
     gens = sorted((d for d in os.listdir(sd) if os.path.isdir(os.path.join(sd, d)) and d[:8].isdigit()),
                   key=lambda d: os.path.getmtime(os.path.join(sd, d)))   # by age on disk, not by name
@@ -167,34 +187,38 @@ def _prune(sd, cur):
 
 class Index:
     """The published tables, reopened when current.json changes (a new generation)."""
+    seen: float | None                       # current.json's mtime when the tables were opened
+    tables: "dict[str, lancedb.table.Table]"
+    _mx: "dict[str, Matrix]"                # vector matrices of generation _mx_seen, made on first use
+    _mx_seen: float | None
 
-    def __init__(self, root):
+    def __init__(self, root: str) -> None:
         self.root = os.path.abspath(os.path.expanduser(root))
         self.seen, self.tables = None, {}
 
-    def _load(self):
+    def _load(self) -> "dict[str, lancedb.table.Table]":
         p = os.path.join(search_dir(self.root), "current.json")
         m = os.path.getmtime(p) if os.path.exists(p) else None
         if m != self.seen:
             import lancedb
             cur = current(self.root)
-            tabs = {}
+            tabs: dict[str, lancedb.table.Table] = {}
             for name, rel in cur.items():
                 gen, fname = rel.split("/")
                 tabs[name] = lancedb.connect(os.path.join(search_dir(self.root), gen)).open_table(fname[:-6])
             self.tables, self.seen = tabs, m
         return self.tables
 
-    def built(self):
+    def built(self) -> bool:
         return bool(self._load())
 
-    def vector(self, model, vector, filt, limit):
+    def vector(self, model: str, vector: Sequence[float], filt: "VecFilter", limit: int) -> list[Json]:
         """Nearest prose rows to a unit query vector: exact, in memory (vec.Matrix), best first; _score = cosine."""
         from . import vec as V
         tabs = self._load()
         if getattr(self, "_mx_seen", None) != self.seen:
             self._mx, self._mx_seen = {}, self.seen
-        out = []
+        out: list[Json] = []
         for part in ("open", "history"):
             name = f"vec_{V.slug(model)}_{part}"
             if name not in tabs:
@@ -205,11 +229,11 @@ class Index:
         out.sort(key=lambda r: -r["_score"])
         return out[:limit]
 
-    def vector_models(self):
+    def vector_models(self) -> list[str]:
         return sorted({n[4:].rsplit("_", 1)[0] for n in self._load() if n.startswith("vec_")})
 
-    def _fts(self, layer, q, where, limit):
-        out = []
+    def _fts(self, layer: str, q: str, where: str | None, limit: int) -> list[Json]:
+        out: list[Json] = []
         for part in ("open", "history"):
             tb = self._load().get(f"{layer}_{part}")
             if tb is None:
@@ -221,7 +245,7 @@ class Index:
         out.sort(key=lambda r: (-r["_score"], r["ts"] or ""))
         return out[:limit]
 
-    def query(self, layer, q, where, limit):
+    def query(self, layer: str, q: str, where: str | None, limit: int) -> list[Json]:
         """BM25 hits of one layer (history + open), best first. A query of two or more words also runs as an exact
         phrase, and those hits come first: with any-term ranking, common words ("to use ego browser to") let longer
         texts outrank the one that says it (12 of 22 known-item misses, eval 2026-10-23). A quoted query is a phrase

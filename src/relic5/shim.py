@@ -9,11 +9,17 @@ is ever written to stdout.
   claude mcp add -s user relic5 -- <repo>/.venv/bin/relic5 mcp      (needs the `embed` extra: uv sync --extra embed)
 """
 import json, os, sys, urllib.request
+from typing import Callable, TextIO
+
+from .types_ import Json
+
+Encoder = Callable[[list[str], str], list[list[float]]]
+"""encode.encode's shape as add_vector calls it: (texts, model) -> unit vectors."""
 
 MODEL = os.environ.get("RELIC5_MODEL", "unsloth--embeddinggemma-300m@806f5f90")
 
 
-def forward(url, msg):
+def forward(url: str, msg: object) -> object:
     req = urllib.request.Request(f"{url}/mcp", data=json.dumps(msg).encode(), headers={"Content-Type": "application/json"})
     tok = os.path.expanduser(os.environ.get("RELIC5_TOKEN_FILE", "~/.config/relic5/token"))
     if os.environ.get("RELIC5_USE_TOKEN") and os.path.exists(tok):
@@ -23,7 +29,7 @@ def forward(url, msg):
     return json.loads(body) if body else None
 
 
-def add_vector(msg, encode=None):
+def add_vector(msg: Json, encode: Encoder | None = None) -> Json:
     """A semantic relic_search with no vector gets one; anything else is returned as is."""
     p = msg.get("params") or {}
     a = p.get("arguments") or {}
@@ -47,7 +53,7 @@ def add_vector(msg, encode=None):
     return msg | {"params": p | {"arguments": a}}
 
 
-def serve(url, stdin=sys.stdin, stdout=sys.stdout, encode=None):
+def serve(url: str, stdin: TextIO = sys.stdin, stdout: TextIO = sys.stdout, encode: Encoder | None = None) -> None:
     for line in stdin:
         if not line.strip():
             continue

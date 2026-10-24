@@ -13,25 +13,42 @@ Engines (Nat, 2026-10-23: "sometimes m5, sometimes gb300, sometimes ANE"): mps (
 remote_embed, bf16), ane (ANEEmbedBar 11435: other prompts, so its own model@hash unless the probe says otherwise).
 """
 import json, os, socket, subprocess, sys, time, urllib.parse, urllib.request
+from typing import Callable, TypedDict
 
 from .encode import encode
+from .types_ import Json
 
 HUB = os.environ.get("RELIC5_HUB_SSH", "nat@white.follow-rankine.ts.net")
 RELIC4 = os.environ.get("RELIC5_RELIC4", "/opt/Code/github.com/Soul-Brews-Studio/agent-relic-v4")
 CONFIG = os.path.expanduser(os.environ.get("RELIC5_CONFIG", "~/.config/relic5/config.toml"))
 # Nat, 2026-10-23: "all data huge go gb300, this month (smaller) ANE from m5". Overridden by [embed] in CONFIG.
-POLICY = {"backlog_gb300": 50000, "small": "ane", "big": "gb300", "query": ["ane", "mps"]}
+class Policy(TypedDict):
+    backlog_gb300: int
+    small: str
+    big: str
+    query: list[str]
 
 
-def policy():
-    p = dict(POLICY)
+class Probe(TypedDict):
+    n: int
+    min: float
+    p05: float
+    mean: float
+    texts_per_s: float | None
+
+
+POLICY: Policy = {"backlog_gb300": 50000, "small": "ane", "big": "gb300", "query": ["ane", "mps"]}
+
+
+def policy() -> Policy:
+    p = POLICY.copy()
     if os.path.exists(CONFIG):
         import tomllib
         p |= tomllib.load(open(CONFIG, "rb")).get("embed", {})
     return p
 
 
-def choose(pending, p=None):
+def choose(pending: int, p: Policy | None = None) -> tuple[str, str]:
     """-> (engine, why): a big backlog goes to gb300, an increment to the small engine (ANE on m5)."""
     p = p or policy()
     if pending > p["backlog_gb300"]:
@@ -39,7 +56,7 @@ def choose(pending, p=None):
     return p["small"], f"increment {pending:,}: {p['small']}"
 
 
-def gb300(rows, model):
+def gb300(rows: list[Json], model: str) -> list[list[float]]:
     """relic4's remote_embed (agent-relic-v4 src/relic4/embed.py, PR #6 @b399119): gb300 GPU, bf16, 100k texts a round
     trip, resumable. Run in relic4's own venv with a scratch RELIC4_ROOT, so its shards land here, not in relic4's cache."""
     import tempfile, pyarrow as pa, pyarrow.parquet as pq
@@ -50,19 +67,20 @@ def gb300(rows, model):
                           "import json,sys; from relic4.embed import remote_embed; print(json.dumps(remote_embed(sys.argv[1], 'unsloth/embeddinggemma-300m')))", src],
                          env=dict(os.environ, RELIC4_ROOT=d), capture_output=True, text=True, check=True)
     shards = json.loads(out.stdout.strip().splitlines()[-1])
-    vec = {}
+    vec: dict[str, list[float]] = {}
     for sh in shards:
         t = pq.read_table(sh)
         vec.update(zip(t.column("key").to_pylist(), t.column("vector").to_pylist()))
     return [vec[r["key"]] for r in rows]
 
 
-def _get(url, path, **q):
+def _get(url: str, path: str, **q: str | int) -> Json:
     with urllib.request.urlopen(f"{url}{path}?{urllib.parse.urlencode(q)}", timeout=300) as r:
-        return json.load(r)
+        res: Json = json.load(r)
+        return res
 
 
-def probe(url, model, n=200, engine="mps"):
+def probe(url: str, model: str, n: int = 200, engine: str = "mps") -> Probe:
     """Re-embed n texts whose vectors the hub holds (from the seed); compare. -> {min, p05, mean}."""
     rows = _get(url, "/api/probe", model=model, n=n)["rows"]
     t = time.time()
@@ -73,7 +91,7 @@ def probe(url, model, n=200, engine="mps"):
             "texts_per_s": round(len(cos) / secs, 1) if secs else None}
 
 
-def note(state, message, **kw):
+def note(state: str, message: str, **kw: object) -> None:
     """One JobEvent in the hub's logs/jobs.jsonl: the policy decision and the outcome."""
     ev = {"job": f"embed-{socket.gethostname().split('.')[0].lower()}-{os.getpid()}", "verb": "embed", "state": state,
           "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "pid": os.getpid(), "host": socket.gethostname(), "message": message, **kw}
@@ -81,10 +99,11 @@ def note(state, message, **kw):
                    input=json.dumps(ev) + "\n", text=True, timeout=30)
 
 
-def run(url, model, limit=5000, prefixes="", engine="mps", log=print):
+def run(url: str, model: str, limit: int = 5000, prefixes: str = "", engine: str = "mps",
+        log: Callable[[str], object] = print) -> int:
     import pyarrow as pa, pyarrow.parquet as pq
     t0 = time.time()
-    rows = []
+    rows: list[Json] = []
     for p in (prefixes.split(",") if prefixes else [""]):
         rows += _get(url, "/api/missing", model=model, limit=limit, prefix=p)["rows"]
     rows = rows[:limit]
@@ -110,7 +129,7 @@ def run(url, model, limit=5000, prefixes="", engine="mps", log=print):
     return len(rows)
 
 
-def main(args):
+def main(args: list[str]) -> None:
     from .cli import URL, _opt
     model = _opt(args, "--model", "unsloth--embeddinggemma-300m@806f5f90")
     engine = _opt(args, "--engine", "auto")

@@ -9,8 +9,16 @@ fold.ts @9f0bdb5.
   fetch      over-fetch want * 1.5 + 8 rows, growing x4 while the fold eats them (query.ts:158-168)
 """
 import base64, hashlib, json, re
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any
 
+from .types_ import Json
 from .window import HORIZONS, window
+
+if TYPE_CHECKING:   # for annotations only: query.py imports this module
+    from .fts import Index
+    from .query import Relic5
+    from .vec import VecFilter
 
 WIDEN = ["7d", "15d", "1m", "3m", "archive"]
 # Paths a temp janitor deletes (agent-relic-v3 src/search/ephemeral.ts): a hit that names one may point at nothing now.
@@ -18,19 +26,19 @@ EPHEMERAL = re.compile(r"(?:/private)?/tmp/\S+|/var/folders/\S+|\bscratchpad/\S*
 CAP = 8192
 
 
-def q_(v):
+def q_(v: object) -> str:
     return "'" + str(v).replace("'", "''") + "'"
 
 
-def snippet(text, words, width=240):
+def snippet(text: str, words: list[str], width: int = 240) -> str:
     low = text.lower()
     at = min((i for i in (low.find(w.lower()) for w in words) if i >= 0), default=0)
     s = max(0, at - width // 3)
     return ("…" if s else "") + " ".join(text[s:s + width].split()) + ("…" if s + width < len(text) else "")
 
 
-def fold(rows, seen):
-    out = []
+def fold(rows: list[Json], seen: set[tuple[object, ...]]) -> list[Json]:
+    out: list[Json] = []
     for r in rows:
         k = (r["ts"], r["role"], " ".join((r["text"] or "").split()))
         if k in seen or ("key", r["key"]) in seen:
@@ -41,9 +49,10 @@ def fold(rows, seen):
     return out
 
 
-def run(index, query, layers, where, want):
+def run(index: "Index", query: str, layers: list[str], where: str | None, want: int) -> list[Json]:
     """Folded hits of every layer, prose first; fetches more while the fold drops rows."""
-    seen, out = set(), []
+    seen: set[tuple[object, ...]] = set()
+    out: list[Json] = []
     for layer in layers:
         k = int(want * 1.5) + 8
         while True:
@@ -59,7 +68,7 @@ def run(index, query, layers, where, want):
     return out
 
 
-def pick_model(index, model):
+def pick_model(index: "Index", model: str | None) -> str:
     """A vector table by its model, model@hash or slug; the only one when there is one."""
     from .query import UsageError
     from .vec import slug as slug_of
@@ -77,9 +86,12 @@ def pick_model(index, model):
     return hit[0]
 
 
-def search(relic, index, query, since=None, until=None, horizon=None, repo=None, session=None, role=None, tier=None,
-           with_=None, limit=20, cursor=None, vector=None, model=None, hybrid=False, sort=None, min_chars=None, cwd=None,
-           branch=None, title=None, via=None, chat=None, from_user=None):
+def search(relic: "Relic5", index: "Index", query: str, since: str | None = None, until: str | None = None,
+           horizon: str | None = None, repo: str | None = None, session: str | None = None, role: str | None = None,
+           tier: str | None = None, with_: str | None = None, limit: int = 20, cursor: str | None = None,
+           vector: Sequence[float] | None = None, model: str | None = None, hybrid: bool = False, sort: str | None = None,
+           min_chars: int | None = None, cwd: str | None = None, branch: str | None = None, title: str | None = None,
+           via: str | None = None, chat: str | None = None, from_user: str | None = None) -> Json:
     from .query import UsageError, like, repo_pattern
     if sort not in (None, "", "relevant", "newest"):
         raise UsageError("sort is relevant | newest")
@@ -101,7 +113,8 @@ def search(relic, index, query, since=None, until=None, horizon=None, repo=None,
         raise UsageError("horizon and since/until each set the window - pick one.")
     if horizon and horizon not in HORIZONS:
         raise UsageError(f"horizon {horizon}: one of {' | '.join(HORIZONS)}")
-    conds, filt = [], {"hi": hi, "role": role, "sid_prefix": session}
+    conds: list[str] = []
+    filt: "VecFilter" = {"hi": hi, "role": role, "sid_prefix": session}
     if min_chars is not None:
         filt["min_chars"] = min_chars
     for c, v in (("ts <= {}", hi), ("role = {}", role)):
@@ -111,7 +124,7 @@ def search(relic, index, query, since=None, until=None, horizon=None, repo=None,
         conds.append(f"sid LIKE {q_(session.replace('%', '') + '%')}")
     if cwd and not relic.meta_has("cwd"):
         raise UsageError("cwd is not in the index yet (needs relic-scan >= PR #37 on every machine)")
-    channel = {"via": via, "chat": chat, "from_user": from_user}   # relic3 --via/--chat/--from-user: session-level substrings
+    channel: dict[str, str | None] = {"via": via, "chat": chat, "from_user": from_user}   # relic3 --via/--chat/--from-user: session-level substrings
     for col, v in (("branch", branch), ("title", title), *channel.items()):
         if v and not relic.meta_has(col):
             raise UsageError(f"{col} is not in the index yet (needs a newer relic-scan meta on some machine)")
@@ -119,7 +132,8 @@ def search(relic, index, query, since=None, until=None, horizon=None, repo=None,
         meta = relic._meta()
         if not meta:
             raise UsageError("repo/tier need relic-scan's meta/sessions.parquet on the hub (push it)")
-        sub, sp = [], []
+        sub: list[str] = []
+        sp: list[str] = []
         if repo:
             sub.append("proj ILIKE ? ESCAPE '\\'")
             sp.append(repo_pattern(repo))
@@ -139,7 +153,7 @@ def search(relic, index, query, since=None, until=None, horizon=None, repo=None,
             if v:
                 sub.append(f"{col} ILIKE ? ESCAPE '\\'")
                 sp.append(like(v))
-        sids = [r["sid"] for r in relic._rows(f"SELECT DISTINCT sid FROM {meta} WHERE {' AND '.join(sub)}", sp)]
+        sids: list[str] = [r["sid"] for r in relic._rows(f"SELECT DISTINCT sid FROM {meta} WHERE {' AND '.join(sub)}", sp)]
         if not sids:
             return {"hits": [], "next_cursor": None, "horizon": horizon or "archive", "horizons_tried": [], "widened": False,
                     "searched_weeks": [], "searched_months": [], "scope_empty": True}
@@ -158,7 +172,9 @@ def search(relic, index, query, since=None, until=None, horizon=None, repo=None,
         pinned = pinned or horizon or ("window" if lo or hi or session else "archive")
         slug = pick_model(index, model)
     fixed = pinned or horizon or ("window" if lo or hi or session else None)
-    tried, hits, chosen = [], [], None
+    tried: list[str] = []
+    hits: list[Json] = []
+    chosen: str | None = None
     want = off + limit + 1
     for hz in ([fixed] if fixed else WIDEN):
         start = lo if hz == "window" else window(horizon=hz)[0]
@@ -168,7 +184,7 @@ def search(relic, index, query, since=None, until=None, horizon=None, repo=None,
         if vector is not None and hybrid:   # reciprocal-rank fusion (k = 60) of the BM25 and the vector lists
             k = int(want * 1.5) + 8
             lists = [run(index, query, ["prose"], where, k), fold(index.vector(slug, vector, vf, k), set())]
-            fused = {}
+            fused: dict[str, list[Any]] = {}   # uid -> [fused score, row]
             for lst in lists:
                 for rank, r in enumerate(lst):
                     f = fused.setdefault(r["uid"], [0.0, r])
@@ -192,7 +208,7 @@ def search(relic, index, query, since=None, until=None, horizon=None, repo=None,
     more = len(hits) > off + limit
     repos = relic._repos({h["sid"] for h in page if h["sid"]})
     names = relic._names({h["sid"] for h in page if h["sid"]})
-    out = []
+    out: list[Json] = []
     for r in page:
         out.append({"uid": r["uid"], "partition": r["month"], "session_uuid": r["sid"], "role": r["role"], "ts": r["ts"],
                     "day": (r["ts_th"] or "")[:10] or None, "repo_key": repos.get(r["sid"]),
@@ -203,6 +219,6 @@ def search(relic, index, query, since=None, until=None, horizon=None, repo=None,
                     "locator": {"month": r["month"], "stream": r["layer"], "key": r["key"], "chunk": r["chunk"]}})
     nxt = base64.urlsafe_b64encode(json.dumps({"o": off + limit, "q": sig, "h": chosen}).encode()).decode().rstrip("=") if more else None
     months = sorted({h["month"] for h in hits if h.get("month")})
-    extra = {"semantic": True, "model": slug, "hybrid": bool(hybrid)} if vector is not None else {}
+    extra: Json = {"semantic": True, "model": slug, "hybrid": bool(hybrid)} if vector is not None else {}
     return {**extra, "hits": out, "next_cursor": nxt, "horizon": chosen, "horizons_tried": tried, "widened": len(tried) > 1,
             "searched_weeks": months, "searched_months": months}

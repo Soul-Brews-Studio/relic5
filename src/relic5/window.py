@@ -18,17 +18,17 @@ class WindowError(ValueError):
     pass
 
 
-def utcnow():
+def utcnow() -> datetime:
     """Now, or RELIC5_NOW (an ISO time) for tests and replays, as relic3's RELIC_NOW."""
     v = os.environ.get("RELIC5_NOW")
     return datetime.fromisoformat(v.replace("Z", "+00:00")) if v else datetime.now(timezone.utc)
 
 
-def iso(dt):
+def iso(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.") + f"{dt.microsecond // 1000:03d}Z"
 
 
-def bound(v, end=False, now=None):
+def bound(v: str | None, end: bool = False, now: datetime | None = None) -> str | None:
     """One since/until value -> UTC ISO text, or None when v is empty. Raises WindowError for unreadable text."""
     if v is None or v == "":
         return None
@@ -52,7 +52,8 @@ def bound(v, end=False, now=None):
     return iso(d)
 
 
-def window(since=None, until=None, horizon=None, now=None):
+def window(since: str | None = None, until: str | None = None, horizon: str | None = None,
+           now: datetime | None = None) -> tuple[str | None, str | None, str]:
     """-> (since, until, horizon name). horizon and since/until each set the window: one or the other."""
     if horizon and (since or until):
         raise WindowError("horizon and since/until each set the window - pick one.")

@@ -26,6 +26,9 @@ Client settings: RELIC5_URL (default http://white.follow-rankine.ts.net:8795), R
 Hub settings: RELIC5_ROOT (default ~/relic5), RELIC5_TOKENS (default ~/.config/relic5/tokens: `<machine> <token>` lines).
 """
 import json, os, re, secrets, sys, time, urllib.error, urllib.parse, urllib.request
+from typing import overload
+
+from .types_ import Json
 
 ROOT = os.environ.get("RELIC5_ROOT", "~/relic5")
 TOKENS = os.environ.get("RELIC5_TOKENS", "~/.config/relic5/tokens")
@@ -34,7 +37,11 @@ TOKEN_FILE = os.environ.get("RELIC5_TOKEN_FILE", "~/.config/relic5/token")
 PORT = 8795   # 8787, 8791 and 8792 are taken on white (2026-10-23)
 
 
-def _opt(args, name, default=None):
+@overload
+def _opt(args: list[str], name: str, default: str) -> str: ...
+@overload
+def _opt(args: list[str], name: str, default: None = None) -> str | None: ...
+def _opt(args: list[str], name: str, default: str | None = None) -> str | None:
     if name in args:
         i = args.index(name)
         v = args[i + 1]
@@ -43,11 +50,11 @@ def _opt(args, name, default=None):
     return default
 
 
-def read_tokens(path=TOKENS):
+def read_tokens(path: str = TOKENS) -> dict[str, str]:
     p = os.path.expanduser(path)
     if not os.path.exists(p):
         return {}
-    out = {}
+    out: dict[str, str] = {}
     for line in open(p):
         parts = line.split()
         if len(parts) == 2 and not line.startswith("#"):
@@ -55,7 +62,7 @@ def read_tokens(path=TOKENS):
     return out
 
 
-def add_token(machine, path=TOKENS):
+def add_token(machine: str, path: str = TOKENS) -> str:
     if not re.match(r"^[a-z0-9-]+$", machine):
         raise SystemExit(f"bad machine name: {machine!r}")
     p = os.path.expanduser(path)
@@ -71,7 +78,7 @@ def add_token(machine, path=TOKENS):
     return tok
 
 
-def serve(args):
+def serve(args: list[str]) -> None:
     import socket
     import uvicorn
     from .api import make_app
@@ -92,15 +99,16 @@ def serve(args):
     uvicorn.Server(uvicorn.Config(app, log_level="warning", proxy_headers=False)).run(sockets=socks)
 
 
-def call(path, params):
+def call(path: str, params: dict[str, str]) -> Json:
     tok = open(os.path.expanduser(TOKEN_FILE)).read().strip()
     url = URL.rstrip("/") + path + ("?" + urllib.parse.urlencode(params) if params else "")
     req = urllib.request.Request(url, headers={"Authorization": "Bearer " + tok})
     with urllib.request.urlopen(req, timeout=60) as r:
-        return json.load(r)
+        out: Json = json.load(r)
+        return out
 
 
-def _line(h, width=110):
+def _line(h: Json, width: int = 110) -> str:
     txt = " ".join((h.get("text_snippet") or h.get("text") or "").split())[:width]
     who = ",".join(h.get("machines") or [])
     return f"{(h.get('ts') or '')[:16]}  {who:<7} {h.get('role') or '':<9} {(h.get('session_uuid') or '')[:8]}  {txt}"
@@ -110,7 +118,7 @@ def _line(h, width=110):
 EXIT_ERROR, EXIT_USAGE, EXIT_LOCKED, EXIT_CANCELLED = 1, 2, 75, 130
 
 
-def main(argv=None):
+def main(argv: list[str] | None = None) -> None:
     try:
         return _main(argv)
     except KeyboardInterrupt:
@@ -124,7 +132,7 @@ def main(argv=None):
         sys.exit(EXIT_ERROR)
 
 
-def _main(argv=None):
+def _main(argv: list[str] | None = None) -> None:
     args = list(sys.argv[1:] if argv is None else argv)
     if not args or args[0] in ("-h", "--help"):
         print(__doc__)
@@ -170,7 +178,10 @@ def _main(argv=None):
         con = duckdb.connect()
         if vectors:   # the slow lane, on its own: vector tables and watermarks only
             with job(root, "index-vectors") as j:
-                tabs = fts.build(root, con, force=force, lane="vectors", log=lambda m: (print(m), j.progress(message=m)))
+                def echo(m: str) -> None:   # each line printed and kept as the job's progress
+                    print(m)
+                    j.progress(message=m)
+                tabs = fts.build(root, con, force=force, lane="vectors", log=echo)
                 j.progress(done=len(tabs), unit="tables", message="vectors: " + (",".join(tabs) or "none changed"))
                 from . import vec as V
                 marks = {m: V.watermarks(root, con, m) for m in V.models(root)}
@@ -184,7 +195,10 @@ def _main(argv=None):
         with job(root, "index") as j:
             done = Parts(root).index(con, months=rest or None)
             j.progress(done=len(done), unit="months", message="manifests: " + (",".join(done) or "none changed"))
-            tabs = fts.build(root, con, force=force, log=lambda m: (print(m), j.progress(message=m)))
+            def echo_(m: str) -> None:
+                print(m)
+                j.progress(message=m)
+            tabs = fts.build(root, con, force=force, log=echo_)
             j.progress(done=len(tabs), unit="tables", message="fts: " + (",".join(tabs) or "none changed"))
             from . import names as NM
             j.progress(done=NM.build(root, con, Parts(root)), unit="sessions", message="names")
@@ -257,8 +271,8 @@ def _main(argv=None):
     elif cmd == "serve":
         serve(rest)
     elif cmd == "search":
-        p = {k: v for k in ("with", "limit", "role", "since", "until", "repo", "session", "horizon") if (v := _opt(rest, "--" + k))}
-        r = call("/api/search", {"q": " ".join(rest), **p})
+        params = {k: o for k in ("with", "limit", "role", "since", "until", "repo", "session", "horizon") if (o := _opt(rest, "--" + k))}
+        r = call("/api/search", {"q": " ".join(rest), **params})
         if as_json:
             print(json.dumps(r, ensure_ascii=False, indent=1))
         else:
@@ -293,10 +307,10 @@ def _main(argv=None):
             print(f"push {m}: newest row {x['newest_ts']}, pushed {x['pushed_at']}, {x['lag_s']} s behind now")
     elif cmd == "tail":
         import time as _t
-        p = {k: v for k in ("session", "machine", "n") if (v := _opt(rest, "--" + k))}
-        follow, seen = "-f" in rest, set()
+        params = {k: o for k in ("session", "machine", "n") if (o := _opt(rest, "--" + k))}
+        follow, seen = "-f" in rest, set[str]()
         while True:
-            r = call("/api/tail", p)
+            r = call("/api/tail", params)
             for x in reversed(r["rows"]):
                 if x["msgkey"] in seen:
                     continue
@@ -309,14 +323,14 @@ def _main(argv=None):
     elif cmd == "seals":   # on the hub: the machines' month seals as the hub holds them; --verify exits 1 on a difference
         from . import seals
         root = os.path.abspath(os.path.expanduser(_opt(rest, "--root", ROOT)))
-        v = seals.verify(root) if "--verify" in rest else None
+        vf = seals.verify(root) if "--verify" in rest else None
         for m, x in seals.summary(root)["machines"].items():
             print(f"{m:<20} {x['sealed']:>3} sealed months · newest seal {x['newest_sealed_at'] or 'none'} · resealed {x['resealed']}")
-        if v is not None:
-            print(f"verify: {v['checked']} sealed months checked, {len(v['problems'])} problems")
-            for p_ in v["problems"]:
+        if vf is not None:
+            print(f"verify: {vf['checked']} sealed months checked, {len(vf['problems'])} problems")
+            for p_ in vf["problems"]:
                 print("  " + p_)
-            sys.exit(1 if v["problems"] else 0)
+            sys.exit(1 if vf["problems"] else 0)
     elif cmd == "status":
         r = call("/api/status", {})
         print(json.dumps(r, ensure_ascii=False, indent=1))

@@ -10,13 +10,33 @@ reads relic5 the same way. What differs, by design:
 Search is keyword: every word of the query must occur (ILIKE, so a Thai substring matches).
 """
 import base64, hashlib, json, os, re
+from collections.abc import Callable, Collection, Sequence
+from typing import TYPE_CHECKING, TypedDict
 
 from .parts import STREAMS, Parts
+from .types_ import Json
 from .window import window
+
+if TYPE_CHECKING:   # for annotations only: the connection comes from the caller
+    import duckdb
 
 DEFAULT_LIMIT = 20
 HEX32 = re.compile(r"^[0-9a-f]{32}$")
 COLS = "machine, key, msgkey, chunk, month, sid, ts, ts_th, engine, role, type, kind, name, cat, text"
+
+
+class SearchKw(TypedDict):
+    """The filters and paging Relic5.search hands on to search.search and search_ilike alike."""
+    since: str | None
+    until: str | None
+    horizon: str | None
+    repo: str | None
+    session: str | None
+    role: str | None
+    tier: str | None
+    with_: str | None
+    limit: int
+    cursor: str | None
 
 
 class UsageError(ValueError):
@@ -27,20 +47,21 @@ class NotFound(LookupError):
     pass
 
 
-def like(word):
+def like(word: str) -> str:
     return "%" + re.sub(r"([%_\\])", r"\\\1", word) + "%"
 
 
-def repo_pattern(repo):
+def repo_pattern(repo: str) -> str:
     """github.com/laris-co/neo-oracle -> the Claude project folder form, -opt-Code-github-com-laris-co-neo-oracle."""
     return like(re.sub(r"[/.]", "-", repo.strip("/")))
 
 
-def uid(r):
-    return r["msgkey"] + (f":{r['chunk']}" if r.get("chunk") else "")
+def uid(r: Json) -> str:
+    msgkey: str = r["msgkey"]
+    return msgkey + (f":{r['chunk']}" if r.get("chunk") else "")
 
 
-def folded(src, where="TRUE"):
+def folded(src: str, where: str = "TRUE") -> str:
     """Rows of src that pass `where`, one per (msgkey, chunk): the first machine by name, plus every machine."""
     return f"""(SELECT * EXCLUDE (rn) FROM (SELECT *, list(machine) OVER (PARTITION BY msgkey, chunk ORDER BY machine
                ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS machines,
@@ -48,19 +69,21 @@ def folded(src, where="TRUE"):
 
 
 class Relic5:
-    def __init__(self, root, con):
+    _resolved: str | None   # how show() placed an old relic3 id, set by _parse_id
+
+    def __init__(self, root: str, con: "duckdb.DuckDBPyConnection") -> None:
         from .fts import Index
         self.parts = Parts(root)
         self.con = con
         self.index = Index(root)
 
-    def _rows(self, sql, params=()):
+    def _rows(self, sql: str, params: Sequence[object] = ()) -> list[Json]:
         cur = self.con.cursor()   # a cursor per call: the HTTP handlers run in threads
         res = cur.execute(sql, list(params))
         names = [d[0] for d in res.description]
         return [dict(zip(names, r)) for r in res.fetchall()]
 
-    def _meta(self):
+    def _meta(self) -> str | None:
         fs = self.parts.meta()
         if not fs:
             return None
@@ -70,7 +93,7 @@ class Relic5:
                    FROM (SELECT regexp_extract(filename, '/parts/([^/]+)/', 1) AS machine, * EXCLUDE (filename)
                    FROM read_parquet([{lst}], union_by_name = true, filename = true))) WHERE rn = 1)"""
 
-    def meta_has(self, col):
+    def meta_has(self, col: str) -> bool:
         """Does any machine's sessions.parquet carry this column (relic-scan PR #37 added cwd, title, branch, version)?
         Machines without it read NULL there (union_by_name), so one is enough: an import's meta never has them."""
         fs = self.parts.meta()
@@ -81,28 +104,32 @@ class Relic5:
         except Exception:
             return False
 
-    def _names(self, sids):
+    def _names(self, sids: Collection[str]) -> dict[str, str]:
         from .names import path
         p = path(self.parts.root)
         if not sids or not os.path.exists(p):
             return {}
         return {r["sid"]: r["name"] for r in self._rows(f"SELECT sid, name FROM read_parquet('{p}') WHERE sid IN (SELECT unnest(?))", [list(sids)])}
 
-    def _repos(self, sids):
+    def _repos(self, sids: Collection[str]) -> dict[str, str]:
         meta = self._meta()
         if not meta or not sids:
             return {}
         return {r["sid"]: r["proj"] for r in self._rows(f"SELECT sid, proj FROM {meta} WHERE sid IN (SELECT unnest(?))", [list(sids)])}
 
     # ---- search ----
-    def search(self, query, since=None, until=None, horizon=None, repo=None, session=None, role=None, tier=None,
-               with_=None, limit=DEFAULT_LIMIT, cursor=None, vector=None, model=None, hybrid=False, sort=None, min_chars=None, cwd=None, branch=None, title=None, via=None, chat=None, from_user=None):
+    def search(self, query: str | None, since: str | None = None, until: str | None = None, horizon: str | None = None,
+               repo: str | None = None, session: str | None = None, role: str | None = None, tier: str | None = None,
+               with_: str | None = None, limit: int = DEFAULT_LIMIT, cursor: str | None = None,
+               vector: Sequence[float] | None = None, model: str | None = None, hybrid: bool = False, sort: str | None = None,
+               min_chars: int | None = None, cwd: str | None = None, branch: str | None = None, title: str | None = None,
+               via: str | None = None, chat: str | None = None, from_user: str | None = None) -> Json:
         """BM25 over the published index (search.py); ILIKE over the parts when none is built or FTS cannot parse
         the query (relic3 falls back the same way, query.ts:127-140)."""
-        if not (query or "").split():
+        if query is None or not query.split():   # None or blank
             raise UsageError("search needs a query")
-        kw = dict(since=since, until=until, horizon=horizon, repo=repo, session=session, role=role, tier=tier, with_=with_,
-                  limit=limit, cursor=cursor)
+        kw = SearchKw(since=since, until=until, horizon=horizon, repo=repo, session=session, role=role, tier=tier, with_=with_,
+                       limit=limit, cursor=cursor)
         if vector is not None:
             if not self.index.built():
                 raise UsageError("no index published yet")
@@ -123,8 +150,9 @@ class Relic5:
                 return r
         return self.search_ilike(query, **kw)
 
-    def search_ilike(self, query, since=None, until=None, horizon=None, repo=None, session=None, role=None, tier=None,
-                     with_=None, limit=DEFAULT_LIMIT, cursor=None):
+    def search_ilike(self, query: str | None, since: str | None = None, until: str | None = None, horizon: str | None = None,
+                     repo: str | None = None, session: str | None = None, role: str | None = None, tier: str | None = None,
+                     with_: str | None = None, limit: int = DEFAULT_LIMIT, cursor: str | None = None) -> Json:
         words = (query or "").split()
         if not words:
             raise UsageError("search needs a query")
@@ -138,7 +166,8 @@ class Relic5:
             lo, hi, hz = window(since, until, horizon)
         except ValueError as ex:
             raise UsageError(str(ex))
-        where, params = [], []
+        where: list[str] = []
+        params: list[object] = []
         for w in words:
             where.append("text ILIKE ? ESCAPE '\\'")
             params.append(like(w))
@@ -150,7 +179,8 @@ class Relic5:
         if repo or tier:
             if not meta:
                 raise UsageError("repo/tier need relic-scan's meta/sessions.parquet on the hub (push it)")
-            sub, sp = [], []
+            sub: list[str] = []
+            sp: list[object] = []
             if repo:
                 sub.append("proj ILIKE ? ESCAPE '\\'")
                 sp.append(repo_pattern(repo))
@@ -170,7 +200,8 @@ class Relic5:
                 raise UsageError("bad cursor: it belongs to another query")
         srcs = [(s, self.parts.source(s)) for s in streams]
         srcs = [(s, x) for s, x in srcs if x]
-        hits, months = [], []
+        hits: list[Json] = []
+        months: list[str] = []
         if srcs:
             union = " UNION ALL BY NAME ".join(f"SELECT '{s}' AS layer, {COLS} FROM {x}" for s, x in srcs)
             score = " + ".join("(length(lower(text)) - length(replace(lower(text), lower(?), ''))) // ?" for _ in words)
@@ -192,7 +223,7 @@ class Relic5:
         return {"hits": hits, "next_cursor": nxt, "horizon": hz, "horizons_tried": [hz], "widened": False,
                 "searched_weeks": months, "searched_months": months}
 
-    def _hit(self, r, repos):
+    def _hit(self, r: Json, repos: dict[str, str]) -> Json:
         text = " ".join((r.get("snip") or "").split())
         return {"uid": uid(r), "partition": r["month"], "session_uuid": r["sid"], "role": r["role"], "ts": r["ts"],
                 "day": (r["ts_th"] or "")[:10] or None, "repo_key": repos.get(r["sid"]), "text_snippet": "…" + text + "…",
@@ -201,7 +232,7 @@ class Relic5:
                 "locator": {"month": r["month"], "stream": r["layer"], "key": r["key"], "chunk": r["chunk"]}}
 
     # ---- show ----
-    def _relic3(self, ident):
+    def _relic3(self, ident: str) -> tuple[str, str] | None:
         """An old relic3:// link or 40-hex uid -> (msgkey, how) through resolve/relic3.parquet, or None."""
         m = re.search(r"([0-9a-f]{40})$", ident)
         p = os.path.join(self.parts.root, "resolve", "relic3.parquet")
@@ -242,7 +273,7 @@ class Relic5:
                                            f"{r['role']} row at {r['ts']} is not on the hub (relic-extract cleans such rows out)")
         return None
 
-    def _parse_id(self, ident):
+    def _parse_id(self, ident: str) -> tuple[str | None, str, int] | None:
         ident = ident.strip()
         if ident.startswith("relic3://") or re.fullmatch(r"[0-9a-f]{40}", ident):
             found = self._relic3(ident)
@@ -260,10 +291,11 @@ class Relic5:
             return month, m.group(1), int(m.group(2) or 0)
         return None
 
-    def show(self, ident, seq=None, before=2, after=2):
+    def show(self, ident: str | None, seq: int | None = None, before: int = 2, after: int = 2) -> Json:
         if not ident:
             raise UsageError("show needs id (msgkey | relic5:// link | session id with seq)")
         parsed = self._parse_id(ident)
+        month: str | None
         if parsed is None:
             if seq is None:
                 raise UsageError(f"{ident}: not a msgkey or relic5:// link (a session id needs seq)")
@@ -275,7 +307,8 @@ class Relic5:
             month, msgkey, chunk = None, rows[0]["msgkey"], 0
         else:
             month, msgkey, chunk = parsed
-        parts, layer = [], None
+        parts: list[Json] = []
+        layer: str | None = None
         for s in STREAMS:
             src = self.parts.source(s, month if s != "vault" else None)
             if not src:
@@ -296,8 +329,8 @@ class Relic5:
             raise NotFound(f"no message {msgkey}" + (f" in {month}" if month else ""))
         target = next((p for p in parts if p["chunk"] == chunk), parts[0])
         before_rows, after_rows = self._neighbours(target, before, after)
-        clean = lambda r: {k: v for k, v in r.items() if k not in ("machine",)} | {"uid": uid(r), "link": f"relic5://{r['month']}/{uid(r)}"}
-        notes = []
+        clean: Callable[[Json], Json] = lambda r: {k: v for k, v in r.items() if k not in ("machine",)} | {"uid": uid(r), "link": f"relic5://{r['month']}/{uid(r)}"}
+        notes: list[str] = []
         if getattr(self, "_resolved", None):
             notes.append(f"resolved an old relic3 id: {self._resolved}")
             self._resolved = None
@@ -306,7 +339,7 @@ class Relic5:
         return {"link": f"relic5://{target['month']}/{uid(target)}", "target": clean(target), "notes": notes,
                 "parts": [clean(p) for p in parts], "before": before_rows, "after": after_rows, "raw": None, "layer": layer}
 
-    def _neighbours(self, t, before, after):
+    def _neighbours(self, t: Json, before: int, after: int) -> tuple[list[Json], list[Json]]:
         src = self.parts.source("text")
         if not src or not t.get("sid"):
             return [], []
@@ -316,18 +349,19 @@ class Relic5:
                            ORDER BY ts DESC, msgkey DESC LIMIT ?""", [t["sid"], t["ts"], t["ts"], t["msgkey"], before])
         a = self._rows(f"""SELECT {cols} FROM {base} WHERE ts > ? OR (ts = ? AND msgkey > ?)
                            ORDER BY ts, msgkey LIMIT ?""", [t["sid"], t["ts"], t["ts"], t["msgkey"], after])
-        link = lambda r: r | {"uid": r["msgkey"], "link": f"relic5://{r['month']}/{r['msgkey']}"}
+        link: Callable[[Json], Json] = lambda r: r | {"uid": r["msgkey"], "link": f"relic5://{r['month']}/{r['msgkey']}"}
         return [link(r) for r in reversed(b)], [link(r) for r in a]
 
     # ---- tail ----
-    def tail(self, n=50, session=None, machine=None, since=None):
+    def tail(self, n: int = 50, session: str | None = None, machine: str | None = None, since: str | None = None) -> Json:
         """The newest messages as they land (open month first), every machine or one session: chunk 0 of each."""
         from .parts import this_month
         mons = sorted(self.parts.months(), reverse=True)[:2]   # the open month, and the last one across a rollover
         src = self.parts.source("text", months=set(mons))
         if not src:
             return {"rows": []}
-        where, params = ["chunk = 0"], []
+        where: list[str] = ["chunk = 0"]
+        params: list[object] = []
         for cond, v in (("starts_with(sid, ?)", session), ("ts > ?", since)):
             if v:
                 where.append(cond)
@@ -344,7 +378,8 @@ class Relic5:
         return {"rows": rows, "newest": rows[0]["ts"] if rows else None}
 
     # ---- sessions ----
-    def sessions(self, repo=None, since=None, until=None, limit=None, via=None, chat=None, from_user=None):
+    def sessions(self, repo: str | None = None, since: str | None = None, until: str | None = None, limit: int | None = None,
+                 via: str | None = None, chat: str | None = None, from_user: str | None = None) -> Json:
         meta = self._meta()
         if not meta:
             raise NotFound("no sessions on the hub: push relic-scan's meta/sessions.parquet")
@@ -352,7 +387,8 @@ class Relic5:
             lo, hi, _ = window(since, until)
         except ValueError as ex:
             raise UsageError(str(ex))
-        where, params = ["parent_sid IS NULL"], []
+        where: list[str] = ["parent_sid IS NULL"]
+        params: list[object] = []
         for col, v in (("via", via), ("chat", chat), ("from_user", from_user)):
             if v and not self.meta_has(col):
                 raise UsageError(f"{col} is not in the index yet (needs a newer relic-scan meta on some machine)")
@@ -371,13 +407,13 @@ class Relic5:
         return {"total": total, "counted": "top-level sessions only (no parent_sid); subagents fold into children",
                 "events": int(events), "sessions": [self._session_row(r) for r in rows]}
 
-    def _session_row(self, r):
+    def _session_row(self, r: Json) -> Json:
         return {"uuid": r["sid"], "name": r.get("name"), "home": r["machine"], "tenant": r["cat"], "source": r["engine"],
                 "link": f"relic5://session/{r['sid']}", "repo": r["proj"], "worktree": "", "tier": r["tier"],
                 "startedAt": r["first_ts"], "endedAt": r["last_ts"], "events": r["n_rows"], "children": r.get("children", 0),
                 "months": r["months"]}
 
-    def session(self, ident):
+    def session(self, ident: str | None) -> Json:
         if not ident:
             raise UsageError("session needs id (session id prefix)")
         meta = self._meta()

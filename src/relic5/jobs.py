@@ -9,21 +9,24 @@ progress and its pid is alive on this host, or (another host, no pid) when that 
 `relic5 log` prints the same file as a table.
 """
 import json, os, socket, sys, time
+from collections.abc import Iterator
 from contextlib import contextmanager
+
+from .types_ import JobEvent, Json
 
 TAIL = 512 * 1024
 FRESH = 600
 
 
-def log_path(root):
+def log_path(root: str) -> str:
     return os.path.join(os.path.abspath(os.path.expanduser(root)), "logs", "jobs.jsonl")
 
 
-def _now():
+def _now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
-def emit(root, ev):
+def emit(root: str, ev: Json) -> None:
     p = log_path(root)
     os.makedirs(os.path.dirname(p), exist_ok=True)
     line = json.dumps(ev, ensure_ascii=False) + "\n"
@@ -35,22 +38,22 @@ def emit(root, ev):
 
 
 class Job:
-    def __init__(self, root, verb, run=None):
+    def __init__(self, root: str, verb: str, run: str | None = None) -> None:
         self.root, self.verb = root, verb
         self.id = f"{verb}-{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}"
-        self.base = {"job": self.id, "verb": verb, "pid": os.getpid(), "host": socket.gethostname()}
+        self.base: JobEvent = {"job": self.id, "verb": verb, "pid": os.getpid(), "host": socket.gethostname()}
         if run:
             self.base["run"] = run
 
-    def event(self, state, **kw):
+    def event(self, state: str, **kw: object) -> None:
         emit(self.root, {**self.base, "state": state, "at": _now(), **{k: v for k, v in kw.items() if v is not None}})
 
-    def progress(self, done=None, total=None, unit=None, message=None):
+    def progress(self, done: int | None = None, total: int | None = None, unit: str | None = None, message: str | None = None) -> None:
         self.event("progress", done=done, total=total, unit=unit, message=message)
 
 
 @contextmanager
-def job(root, verb, run=None):
+def job(root: str, verb: str, run: str | None = None) -> Iterator[Job]:
     """with job(root, "index") as j: ... -> start, then done (rc 0) or error (rc 1 and the message)."""
     j = Job(root, verb, run)
     who = {"cwd": os.getcwd(), "argv": " ".join(sys.argv[1:])[:400]}
@@ -66,7 +69,7 @@ def job(root, verb, run=None):
     j.event("done", rc=0)
 
 
-def _alive(pid):
+def _alive(pid: int) -> bool:
     try:
         os.kill(pid, 0)
         return True
@@ -76,7 +79,7 @@ def _alive(pid):
         return True
 
 
-def read(root, now=None):
+def read(root: str, now: float | None = None) -> tuple[list[JobEvent], list[JobEvent]]:
     """-> (last event per job, newest first; running ones)."""
     p = log_path(root)
     if not os.path.exists(p):
@@ -84,7 +87,7 @@ def read(root, now=None):
     with open(p, "rb") as f:
         f.seek(max(0, os.path.getsize(p) - TAIL))
         data = f.read().decode("utf-8", "replace").splitlines()
-    last = {}
+    last: dict[str, JobEvent] = {}
     for line in data:
         try:
             ev = json.loads(line)

@@ -13,8 +13,16 @@ search server stays read-only. Any engine may write shards; vectors from another
 before they go in the same folder (relic3: an --also engine passes a parity probe, hub/README.md).
 """
 import os, re
+from collections.abc import Collection, Sequence
+from typing import TYPE_CHECKING, Any, TypedDict
 
 from .parts import Parts, sql_list
+from .types_ import Json
+
+if TYPE_CHECKING:   # for annotations only: numpy, duckdb and lancedb are loaded where they are used
+    import duckdb
+    import lancedb.table
+    from numpy.typing import NDArray
 
 VDIR = "vectors"
 MODEL_DIR = re.compile(r"^[A-Za-z0-9._-]+--[A-Za-z0-9._-]+@[0-9a-f]{8}$")
@@ -26,29 +34,39 @@ MIN_CHARS = int(os.environ.get("RELIC5_VEC_MIN_CHARS", "80"))   # applied per qu
 BUILD_MIN = int(os.environ.get("RELIC5_VEC_BUILD_MIN", "1"))     # what goes in the table at all
 
 
-def models(root):
+class VecFilter(TypedDict, total=False):
+    """The filters of one vector search (Matrix.search): a ts window, a role, a session prefix or set, min chars."""
+    lo: str | None
+    hi: str | None
+    role: str | None
+    sid_prefix: str | None
+    sids: set[str]
+    min_chars: int
+
+
+def models(root: str) -> list[str]:
     d = os.path.join(root, VDIR)
     if not os.path.isdir(d):
         return []
     return sorted(m for m in os.listdir(d) if MODEL_DIR.match(m) and shards(root, m))
 
 
-def shards(root, model):
+def shards(root: str, model: str) -> list[str]:
     d = os.path.join(root, VDIR, model)
     return sorted(os.path.join(d, f) for f in os.listdir(d) if f.endswith(".parquet") and not f.startswith(".")) if os.path.isdir(d) else []
 
 
-def slug(model):
+def slug(model: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", model.lower()).strip("_")
 
 
-def vectors_sql(root, model):
+def vectors_sql(root: str, model: str) -> str | None:
     """One vector per key: shards may overlap (relic4: read them as any_value ... GROUP BY key)."""
     fs = shards(root, model)
     return f"(SELECT key, any_value(vector) AS vector FROM read_parquet({sql_list(fs)}) GROUP BY key)" if fs else None
 
 
-def text_sql(parts, months=None):
+def text_sql(parts: Parts, months: Collection[str] | None = None) -> str | None:
     fs = [p for _, mon, p in parts.files("text") if months is None or mon in months]
     if not fs:
         return None
@@ -57,7 +75,8 @@ def text_sql(parts, months=None):
                WHERE text IS NOT NULL AND text <> '')"""
 
 
-def missing(root, con, model=DEFAULT, limit=1000, prefix="", max_chars=6000):
+def missing(root: str, con: "duckdb.DuckDBPyConnection", model: str = DEFAULT, limit: int = 1000, prefix: str = "",
+            max_chars: int = 6000) -> Json:
     """Keys of the prose text stream with no vector yet, newest first (the open month first), one row per key.
     prefix: only keys starting with it, so two workers (m5, gb300) can take disjoint slices."""
     parts = Parts(root)
@@ -67,14 +86,16 @@ def missing(root, con, model=DEFAULT, limit=1000, prefix="", max_chars=6000):
     have = vectors_sql(root, model)
     anti = f"AND key NOT IN (SELECT key FROM {have})" if have else ""
     pre = "AND starts_with(key, ?)" if prefix else ""
-    params = [prefix] if prefix else []
+    params: list[object] = [prefix] if prefix else []
     base = f"SELECT key, max(ts) AS ts, any_value(substr(text, 1, {int(max_chars)})) AS text FROM {src} WHERE TRUE {anti} {pre} GROUP BY key"
-    pending = con.execute(f"SELECT count(*) FROM ({base})", params).fetchone()[0]
+    one = con.execute(f"SELECT count(*) FROM ({base})", params).fetchone()
+    assert one is not None   # count(*) always answers one row
+    pending = one[0]
     rows = con.execute(f"SELECT key, ts, text FROM ({base}) ORDER BY ts DESC LIMIT ?", params + [int(limit)]).fetchall()
     return {"model": model, "pending": pending, "rows": [{"key": k, "ts": t, "text": x} for k, t, x in rows]}
 
 
-def watermarks(root, con, model=DEFAULT):
+def watermarks(root: str, con: "duckdb.DuckDBPyConnection", model: str = DEFAULT) -> dict[str, Json]:
     """Per machine: the newest ts at or before which every text chunk has a vector, and how many have none."""
     parts = Parts(root)
     src, have = text_sql(parts), vectors_sql(root, model)
@@ -85,14 +106,19 @@ def watermarks(root, con, model=DEFAULT):
     rows = con.execute(f"""SELECT machine, min(ts) FILTER (WHERE v.key IS NULL) AS first_gap, max(ts) AS newest,
                            count(*) FILTER (WHERE v.key IS NULL) AS pending
                            FROM {src} t LEFT JOIN {have} v USING (key) GROUP BY machine""").fetchall()
-    out = {}
+    out: dict[str, Json] = {}
     for m, gap, newest, pending in rows:
-        at = newest if gap is None else con.execute(f"SELECT max(ts) FROM {src} WHERE machine = ? AND ts < ?", [m, gap]).fetchone()[0]
+        if gap is None:
+            at = newest
+        else:
+            one = con.execute(f"SELECT max(ts) FROM {src} WHERE machine = ? AND ts < ?", [m, gap]).fetchone()
+            assert one is not None   # max() always answers one row
+            at = one[0]
         out[m] = {"at": at, "pending": pending}
     return out
 
 
-def table_sql(parts, root, model, months):
+def table_sql(parts: Parts, root: str, model: str, months: Collection[str]) -> str | None:
     """Folded prose text rows of some months joined to their vectors (rows with no vector are left out)."""
     src, have = text_sql(parts, months), vectors_sql(root, model)
     if src is None or have is None:
@@ -105,7 +131,7 @@ def table_sql(parts, root, model, months):
                FROM {src} t JOIN {have} v USING (key) WHERE length(t.text) >= {BUILD_MIN}) WHERE rn = 1 ORDER BY ts, msgkey, chunk"""
 
 
-def probe_rows(root, con, model=DEFAULT, n=200):
+def probe_rows(root: str, con: "duckdb.DuckDBPyConnection", model: str = DEFAULT, n: int = 200) -> list[Json]:
     """n random text chunks (>= MIN_CHARS) with their stored vector: a parity probe for another engine."""
     src, have = text_sql(Parts(root)), vectors_sql(root, model)
     if src is None or have is None:
@@ -121,18 +147,21 @@ class Matrix:
     """Exact vector search held in memory, ported from agent-relic-v4 src/relic4/vecmem.py (PR #6 @b399119): LanceDB's
     flat scan cost ~2.2 s a query here (measured 2026-10-23, 593 k rows); one float32 matrix makes it a matmul plus a
     boolean mask for the filters, same results. Loaded on first use, replaced when a new generation is published."""
-    META = ["uid", "msgkey", "chunk", "key", "month", "sid", "ts", "ts_th", "role", "engine", "cat", "layer", "text", "title", "chars"]
+    META: list[str] = ["uid", "msgkey", "chunk", "key", "month", "sid", "ts", "ts_th", "role", "engine", "cat", "layer", "text", "title", "chars"]
 
-    def __init__(self, table):
+    _ts: "NDArray[Any]"    # ts and sid as str arrays, made on the first search
+    _sid: "NDArray[Any]"
+
+    def __init__(self, table: "lancedb.table.Table") -> None:
         import numpy as np
         tab = table.to_lance().to_table(columns=self.META + ["machines", "vector"])
-        n = tab.num_rows
-        self.M = tab.column("vector").combine_chunks().values.to_numpy(zero_copy_only=False).astype(np.float32).reshape(n, -1)
-        self.cols = {c: tab.column(c).to_numpy(zero_copy_only=False) for c in self.META}
-        self.machines = tab.column("machines").to_pylist()
+        n: int = tab.num_rows
+        self.M: NDArray[np.float32] = tab.column("vector").combine_chunks().values.to_numpy(zero_copy_only=False).astype(np.float32).reshape(n, -1)
+        self.cols: dict[str, NDArray[Any]] = {c: tab.column(c).to_numpy(zero_copy_only=False) for c in self.META}
+        self.machines: list[list[str]] = tab.column("machines").to_pylist()
         self.n = n
 
-    def search(self, q, f, limit):
+    def search(self, q: Sequence[float], f: VecFilter, limit: int) -> list[Json]:
         """q: unit vector; f: {lo, hi, role, sid_prefix, sids, min_chars}. -> rows with _score = cosine.
         One matmul over every row, then the filters as a mask (no copy of the matrix: M[idx] copied 2.5 GB a query)."""
         import numpy as np
@@ -147,8 +176,8 @@ class Matrix:
             mask &= self._ts <= f["hi"]
         if f.get("role"):
             mask &= c["role"] == f["role"]
-        if f.get("sid_prefix"):
-            mask &= np.char.startswith(self._sid, f["sid_prefix"])
+        if sid_prefix := f.get("sid_prefix"):
+            mask &= np.char.startswith(self._sid, sid_prefix)
         if f.get("sids") is not None:
             mask &= np.isin(self._sid, list(f["sids"]))
         s = np.where(mask, s, -np.inf)
@@ -157,9 +186,9 @@ class Matrix:
             return []
         top = np.argpartition(-s, k - 1)[:k]
         top = top[np.argsort(-s[top])]
-        out = []
+        out: list[Json] = []
         for i in top:
-            r = {k2: (v.item() if hasattr(v, "item") else v) for k2, v in ((k2, c[k2][i]) for k2 in self.META)}
+            r: Json = {k2: (v.item() if hasattr(v, "item") else v) for k2, v in ((k2, c[k2][i]) for k2 in self.META)}
             r["machines"] = self.machines[i]
             r["_score"] = float(s[i])
             out.append(r)
