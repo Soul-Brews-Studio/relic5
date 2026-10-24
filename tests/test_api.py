@@ -128,3 +128,34 @@ def test_connected_devices(client):
     assert devs[("token:mba", "claude-code (http)")]["tools"] == {"relic_search": 1}
     assert any(door == "token:m5" and c.endswith("(mcp)") for door, c in devs)
     assert all(d["calls_24h"] >= 1 and d["last"] for d in devs.values())
+
+
+@pytest.fixture
+def hub_with_tokens(root, tmp_path):
+    from relic5.tokens import Tokens
+    t = Tokens(str(tmp_path / "tokens.json"), str(tmp_path / "legacy"))
+
+    class Local(Doors):        # the test client is not 127.0.0.1: no bearer = the loopback door; tokens checked for real
+        def door(self, server, client, host, bearer):
+            return super().door(server, client, host, bearer) if bearer else "loopback"
+    return TestClient(make_app(root, t, Local(t, enabled=False))), t
+
+
+def test_tokens_from_the_ui(hub_with_tokens):
+    c, t = hub_with_tokens
+    J = {"X-Relic5-Request": "1", "Host": "127.0.0.1"}
+    assert c.get("/api/tokens", headers={"Host": "127.0.0.1"}).json() == []            # loopback door: allowed
+    r = c.post("/api/tokens", json={"action": "new", "name": "phone", "expires": "90d"}, headers=J).json()
+    secret = r["token"]
+    assert r["name"] == "phone" and len(secret) > 30 and t.check(secret) == "phone"   # works as a token at once
+    assert [x["name"] for x in c.get("/api/tokens", headers={"Host": "127.0.0.1"}).json()] == ["phone"]
+    assert secret not in open(t.path).read()                                          # stored hashed only
+    # a token never mints a token
+    assert c.post("/api/tokens", json={"action": "new", "name": "x"}, headers={"Authorization": f"Bearer {secret}", "X-Relic5-Request": "1"}).status_code == 403
+    # a cross-site form post (no header, not JSON) is refused
+    assert c.post("/api/tokens", data="action=new&name=evil", headers={"Host": "127.0.0.1", "Content-Type": "text/plain"}).status_code == 400
+    assert c.post("/api/tokens", json={"action": "new", "name": "phone"}, headers=J).status_code == 400   # exists
+    new = c.post("/api/tokens", json={"action": "rotate", "name": "phone", "grace": "1h"}, headers=J).json()["token"]
+    assert t.check(new) == "phone" and t.check(secret) == "phone"                     # the old one lasts the grace hour
+    assert c.post("/api/tokens", json={"action": "revoke", "name": "phone"}, headers=J).json() == {"name": "phone", "action": "revoke"}
+    assert t.check(new) is None and c.get("/api/tokens", headers={"Host": "127.0.0.1"}).json() == []
