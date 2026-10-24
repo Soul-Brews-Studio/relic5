@@ -83,6 +83,13 @@ Tests: `uv run pytest` (33 tests: push against a fake hub, month manifests, fold
 
 Search is keyword: every word must occur, with ILIKE over the parquet in place. There is no cache, so expect about 1 s a query.
 
+## Docs
+
+- `docs/RETIRED.md`: the trinity rule (cease as active, keep as record, name what succeeded it) and the ledger of
+  everything relic5 retired. Read it before you unload, remove or move anything.
+- `docs/APPS.md`: every session-history app, with its verdict (keep, merge, retire).
+- `docs/RESTORE.md`: the nightly backup and how to restore white.
+
 ## Next
 
 1. mba (`nat@mba.follow-rankine.ts.net`): its own token, then `parts/mba/`.

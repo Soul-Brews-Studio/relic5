@@ -74,19 +74,27 @@ def load(root: str) -> Record:
     return rec
 
 
-def retire(root: str, machine: str, why: str) -> int:
-    """A machine whose parts went to the attic: its seal records move to index/_seals/retired.json (kept, with when and
-    why), so verify stops reporting its parts missing. Returns the number of months moved. A retired machine that
-    pushes again simply gets new records."""
+def retire(root: str, machine: str, why: str, succeeded_by: str) -> int:
+    """A machine whose parts went to the attic: its seal records move to index/_seals/retired.json (kept, with when,
+    why and what succeeded it: docs/RETIRED.md, the trinity rule), so verify stops reporting its parts missing, and a
+    "retire" job event says so. Returns the number of months moved. A retired machine that pushes again simply gets
+    new records."""
+    from .jobs import emit
+    if not succeeded_by.strip():
+        raise ValueError("retire needs what succeeded it (docs/RETIRED.md): a machine, or 'nothing: <reason>'")
     rec = load(root)
     months = rec.pop(machine, None)
     if months is None:
         return 0
     p = os.path.join(_dir(root), "retired.json")
     old: dict[str, Json] = json.load(open(p)) if os.path.exists(p) else {}
-    old[f"{machine}@{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}"] = {"why": why, "months": months}
+    at = time.gmtime()
+    old[f"{machine}@{time.strftime('%Y%m%dT%H%M%SZ', at)}"] = {"why": why, "succeeded_by": succeeded_by, "months": months}
     _save(root, "retired.json", old)
     _save(root, "seals.json", rec)
+    emit(root, {"job": f"retire-{machine}-{time.strftime('%Y%m%d-%H%M%S', at)}", "verb": "retire", "state": "done",
+                "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", at), "pid": os.getpid(), "host": socket.gethostname(),
+                "message": f"{machine} retired: {len(months)} sealed months kept in retired.json; succeeded by {succeeded_by}", "rc": 0})
     verify(root)
     return len(months)
 
