@@ -18,17 +18,23 @@ relic3's live files are the ones its current manifest names (index/_manifest/cur
 generations in the same folders are ignored. Thinking was never collected by relic3 (D2), so there is none to import.
 """
 import json, os, time
+from typing import TYPE_CHECKING, Callable, Iterable
+
+from .types_ import Json
+
+if TYPE_CHECKING:
+    import duckdb
 
 SCHEMA = ("s VARCHAR, h BIGINT, idx BIGINT, engine VARCHAR, role VARCHAR, type VARCHAR, sid VARCHAR, ts VARCHAR, ts_th VARCHAR, "
           "text VARCHAR, kind VARCHAR, call_id VARCHAR, name VARCHAR, body VARCHAR, err BOOLEAN, red VARCHAR, machines VARCHAR[], "
           "sources VARCHAR[], model VARCHAR, msg_id VARCHAR, out_tokens BIGINT")
 
 
-def live_files(index_dir):
+def live_files(index_dir: str) -> tuple[str, Json, dict[str, list[str]]]:
     """{"events": [...], "tools": [...]}: the parquet files of relic3's current generation."""
     run = open(os.path.join(index_dir, "_manifest", "current")).read().strip()
     m = json.load(open(os.path.join(index_dir, "_manifest", f"{run}.json")))
-    out = {"events": [], "tools": []}
+    out: dict[str, list[str]] = {"events": [], "tools": []}
     for week, w in m["weeks"].items():
         year = week[:4]
         for f in w["files"]:
@@ -42,7 +48,7 @@ def live_files(index_dir):
     return run, m["totals"], out
 
 
-def _lst(fs):
+def _lst(fs: list[str]) -> str:
     return "[" + ", ".join("'" + f.replace("'", "''") + "'" for f in fs) + "]"
 
 
@@ -51,7 +57,7 @@ TS_TH = "strftime((ts AT TIME ZONE 'UTC') + INTERVAL 7 HOUR, '%Y-%m-%dT%H:%M:%S.
 MONTH = "strftime((ts AT TIME ZONE 'UTC') + INTERVAL 7 HOUR, '%Y-%m')"
 
 
-def select_sql(files, known_table=None):
+def select_sql(files: dict[str, list[str]], known_table: str | None = None) -> str:
     keep = f"AND session_uuid NOT IN (SELECT sid FROM {known_table})" if known_table else ""
     ev = f"""SELECT 'text' AS s, (hash(text_hash, uid) & 9223372036854775807)::BIGINT AS h, 0::BIGINT AS idx, coalesce(source, 'claude') AS engine,
                role, CASE WHEN role = 'assistant' THEN 'relic3-merged' ELSE role END AS type,
@@ -76,7 +82,8 @@ def select_sql(files, known_table=None):
     return ev + " UNION ALL " + tl
 
 
-def convert(con, index_dir, out_dir, known=None, log=print, weeks=None):
+def convert(con: "duckdb.DuckDBPyConnection", index_dir: str, out_dir: str, known: Iterable[str] | None = None,
+            log: Callable[[str], object] = print, weeks: list[str] | None = None) -> dict[str, int]:
     """Write <out_dir>/YYYY-MM.parquet (+ meta/sessions.parquet for relic-extract's cat/probe). -> rows per month."""
     run, totals, files = live_files(index_dir)
     if weeks:
@@ -102,18 +109,19 @@ def convert(con, index_dir, out_dir, known=None, log=print, weeks=None):
                     'relic3-import' AS cat, false AS probe, min(ts) AS first_ts, max(ts) AS last_ts, count(*)::BIGINT AS n_rows,
                     list(DISTINCT month) AS months FROM imp GROUP BY sid) TO '{mp}.tmp' (FORMAT parquet, COMPRESSION zstd)""")
     os.replace(mp + ".tmp", mp)
-    n_s = con.execute("SELECT count(DISTINCT sid) FROM imp").fetchone()[0]
+    n_s = con.execute("SELECT count(DISTINCT sid) FROM imp").fetchone()[0]   # type: ignore[index]  # count() always returns a row
     log(f"import: {sum(rows.values()):,} rows, {n_s:,} sessions, {len(rows)} months -> {out_dir} ({time.time() - t:.0f}s)")
     return rows
 
 
-def msgkey_sql():
+def msgkey_sql() -> str:
     """relic-extract's MSGKEY (agent-relic-v4 src/relic4/sql.py, byte-identical in relic-extract): no sid in it."""
     return ("CASE WHEN s = 'tools' THEN md5(to_json([s, ts, CAST(idx AS VARCHAR), kind, call_id, name, body, CAST(err AS VARCHAR)])) "
             "ELSE md5(to_json([s, role, ts, text])) END")
 
 
-def convert_truth(con, truth_dir, out_dir, known=None, log=print):
+def convert_truth(con: "duckdb.DuckDBPyConnection", truth_dir: str, out_dir: str, known: Iterable[str] | None = None,
+                  log: Callable[[str], object] = print) -> dict[str, int]:
     """jsonl-truth (~/jsonl-truth/<tenant>/YYYY-MM-Month.duckdb, table `truth`) is relic-scan's month schema already,
     minus model / msg_id / out_tokens: keep the sessions no live machine holds, add those three as NULL, mark the rows'
     machines ["jsonl-truth-import"] and keep its own sources (agent@machine:path:line). Months are re-derived from ts_th."""
@@ -124,7 +132,9 @@ def convert_truth(con, truth_dir, out_dir, known=None, log=print):
         con.executemany("INSERT INTO known VALUES (?)", [(s,) for s in known])
     cols = [c.split()[0] for c in SCHEMA.split(", ")]
     os.makedirs(out_dir, exist_ok=True)
-    t, total, sessions = time.time(), {}, set()
+    t = time.time()
+    total: dict[str, int] = {}
+    sessions: set[str] = set()
     parts = []
     for i, f in enumerate(files):
         con.execute(f"ATTACH '{f}' AS t{i} (READ_ONLY)")
@@ -144,12 +154,12 @@ def convert_truth(con, truth_dir, out_dir, known=None, log=print):
                     'jsonl-truth-import' AS cat, false AS probe, min(ts) AS first_ts, max(ts) AS last_ts, count(*)::BIGINT AS n_rows,
                     list(DISTINCT month) AS months FROM imp GROUP BY sid) TO '{mp}.tmp' (FORMAT parquet, COMPRESSION zstd)""")
     os.replace(mp + ".tmp", mp)
-    n_s = con.execute("SELECT count(DISTINCT sid) FROM imp").fetchone()[0]
+    n_s = con.execute("SELECT count(DISTINCT sid) FROM imp").fetchone()[0]   # type: ignore[index]  # count() always returns a row
     log(f"import jsonl-truth: {sum(rows.values()):,} rows, {n_s:,} sessions, {len(rows)} months -> {out_dir} ({time.time() - t:.0f}s)")
     return rows
 
 
-def relic3_links(con, index_dir, out_path, log=print):
+def relic3_links(con: "duckdb.DuckDBPyConnection", index_dir: str, out_path: str, log: Callable[[str], object] = print) -> int:
     """The resolver's map: every relic3 uid (events and tools) -> session, ts (relic5's form), role, layer, and the msgkey
     the row would have in relic5 (relic-extract's MSGKEY over the converted row; equal for ~91% of prose, measured on
     2026W38). relic_show looks an old relic3:// link or 40-hex uid up here instead of refusing it."""
@@ -164,6 +174,6 @@ def relic3_links(con, index_dir, out_path, log=print):
           FROM read_parquet({_lst(files['tools'])}, union_by_name = true) WHERE ts IS NOT NULL
     ) TO '{out_path}.tmp' (FORMAT parquet, COMPRESSION zstd)""")
     os.replace(out_path + ".tmp", out_path)
-    n = con.execute(f"SELECT count(*) FROM '{out_path}'").fetchone()[0]
+    n: int = con.execute(f"SELECT count(*) FROM '{out_path}'").fetchone()[0]   # type: ignore[index]  # count() always returns a row
     log(f"relic3 links: {n:,} uids from run {run} -> {out_path} ({os.path.getsize(out_path) / 1e6:.0f} MB, {time.time() - t:.0f}s)")
     return n

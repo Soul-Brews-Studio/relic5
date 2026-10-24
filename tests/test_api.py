@@ -103,6 +103,14 @@ def test_ui_assets(client):
     assert client.get("/assets/index.html").status_code == 404                # only listed types
 
 
+def test_a_query_parameter_cannot_pick_the_tool(client):
+    """?tool= is an ordinary (unknown) argument, never the tool the route runs."""
+    client.get("/login", params={"t": "tok-mba"})
+    r = client.get("/api/status", params={"tool": "relic_show"})
+    assert r.status_code == 400 or "you" in r.json()          # status ran (or refused the argument); show never did
+    assert "target" not in r.text
+
+
 def test_status_says_which_door(client):
     assert client.get("/api/status", headers={"Authorization": "Bearer tok-mba"}).json()["you"] == "token:mba"
     r = rpc(client, "tools/call", {"name": "relic_status", "arguments": {}}).json()["result"]

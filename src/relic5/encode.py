@@ -7,13 +7,25 @@ the model has it, normalize_embeddings=True. Needs the `embed` extra (sentence-t
 from the local Hugging Face cache (HF_HUB_OFFLINE=1, as relic4).
 """
 import os
+from typing import TYPE_CHECKING, Iterable, TypedDict
 
-MODELS = {"unsloth--embeddinggemma-300m@806f5f90": dict(name="unsloth/embeddinggemma-300m", doc_prompt="document",
+if TYPE_CHECKING:
+    from sentence_transformers import SentenceTransformer
+
+
+class ModelSettings(TypedDict):
+    name: str
+    doc_prompt: str
+    query_prompt: str
+    max_seq: int
+
+
+MODELS: dict[str, ModelSettings] = {"unsloth--embeddinggemma-300m@806f5f90": dict(name="unsloth/embeddinggemma-300m", doc_prompt="document",
                                                        query_prompt="query", max_seq=2048)}
-_cache = {}
+_cache: dict[str, "SentenceTransformer"] = {}
 
 
-def _model(model):
+def _model(model: str) -> "SentenceTransformer":
     if model not in MODELS:
         raise SystemExit(f"no local settings for {model} (have {', '.join(MODELS)})")
     if model not in _cache:
@@ -32,12 +44,12 @@ ANE_MODEL = {"unsloth--embeddinggemma-300m@806f5f90": "embeddinggemma:ane-w8a16"
 PROMPT = {"query": "task: search result | query: ", "document": "title: none | text: "}   # gemma's own prompt strings
 
 
-def encode_ane(texts, model, kind="query", batch=64):
+def encode_ane(texts: list[str], model: str, kind: str = "query", batch: int = 64) -> list[list[float]]:
     """The same model on the Neural Engine, over ANEEmbedBar's /api/embed. The prompt is sent in the text (the engine
     takes raw input); w8a16 weights, so whether these vectors may share model@hash is decided by `relic5 embed --probe
     --engine ane`, never assumed."""
     import json, math, urllib.request
-    out = []
+    out: list[list[float]] = []
     for i in range(0, len(texts), batch):
         body = {"model": ANE_MODEL[model], "input": [PROMPT[kind] + t for t in texts[i:i + batch]]}
         req = urllib.request.Request(f"{ANE_URL}/api/embed", data=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
@@ -47,13 +59,14 @@ def encode_ane(texts, model, kind="query", batch=64):
     return out
 
 
-def encode(texts, model, kind="query", engine=None):
+def encode(texts: Iterable[str], model: str, kind: str = "query", engine: str | None = None) -> list[list[float]]:
     """-> list of unit vectors (lists of float). kind = query | document; engine = mps (sentence-transformers here,
     the default) | ane (ANEEmbedBar on this Mac). RELIC5_ENGINE sets the default."""
     engine = engine or os.environ.get("RELIC5_ENGINE", "mps")
     if engine == "ane":
         return encode_ane(list(texts), model, kind)
     m = _model(model)
-    p = MODELS[model][f"{'query' if kind == 'query' else 'doc'}_prompt"]
-    kw = {"prompt_name": p} if p in (m.prompts or {}) else {}
-    return [v.tolist() for v in m.encode(list(texts), normalize_embeddings=True, batch_size=64, **kw)]
+    p = MODELS[model]["query_prompt" if kind == "query" else "doc_prompt"]
+    # prompt_name=None is encode's own default (its default prompt), the same as not passing it
+    return [v.tolist() for v in m.encode(list(texts), normalize_embeddings=True, batch_size=64,
+                                         prompt_name=p if p in (m.prompts or {}) else None)]

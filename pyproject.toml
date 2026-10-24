@@ -15,7 +15,12 @@ dependencies = [
 embed = ["sentence-transformers==6.2.0", "torch==2.14.1", "transformers==5.20.2"]   # Mac clients only (encode.py)
 
 [dependency-groups]
-dev = ["pytest>=8", "httpx>=0.27", "pyarrow>=17"]
+dev = [
+    "pytest>=8",
+    "httpx>=0.27",
+    "pyarrow>=17",
+    "mypy>=2.4.0",
+]
 
 [project.scripts]
 relic5 = "relic5.cli:main"
@@ -27,3 +32,14 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/relic5"]
 artifacts = ["src/relic5/web/*.html", "src/relic5/web/assets/*"]
+
+[tool.mypy]
+# Strict typing for src/relic5, enforced by tests/test_types.py (Nat, 2026-10-24: "can python have a strong type?").
+strict = true
+python_version = "3.12"
+files = ["src/relic5"]
+
+[[tool.mypy.overrides]]
+# no type information shipped: their values are typed where they enter our code
+module = ["pyarrow", "pyarrow.*", "lancedb", "lancedb.*", "duckdb", "uvicorn", "numpy", "numpy.*"]
+ignore_missing_imports = true

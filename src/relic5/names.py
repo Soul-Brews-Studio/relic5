@@ -8,12 +8,17 @@ these remain: the host's title wins (rule 1, from relic-scan's meta `title` when
   index/_search/names.parquet    sid, name, first_ts
 """
 import os, re
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import duckdb
+    from .parts import Parts
 
 PREAMBLE = re.compile(r"^\s*(# AGENTS\.md instructions|<environment_context>|<recommended_plugins>|<codex_internal_context>|"
                       r"You have oh-my-codex installed|<INSTRUCTIONS>)")
 
 
-def name_of(text):
+def name_of(text: str | None) -> str:
     d = str(text or "")
     if PREAMBLE.match(d):
         return "(untitled)"
@@ -25,11 +30,11 @@ def name_of(text):
     return d[:70] if d else "(untitled)"
 
 
-def path(root):
+def path(root: str) -> str:
     return os.path.join(root, "index", "_search", "names.parquet")
 
 
-def titles(con, parts):
+def titles(con: "duckdb.DuckDBPyConnection", parts: "Parts") -> dict[str, str]:
     """Rule 1: the host's own title (relic-scan PR #37: the newest Claude custom-title), when the meta carries it."""
     from .parts import sql_list
     fs = parts.meta()
@@ -40,7 +45,7 @@ def titles(con, parts):
                                                      WHERE title IS NOT NULL AND trim(title) <> '' GROUP BY sid""").fetchall()}
 
 
-def build(root, con, parts):
+def build(root: str, con: "duckdb.DuckDBPyConnection", parts: "Parts") -> int:
     fs = [p for _, _, p in parts.files("text")]
     if not fs:
         return 0

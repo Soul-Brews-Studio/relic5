@@ -1,9 +1,17 @@
 """evaluate.py: `relic5 eval tests/eval/semantic.json [--semantic] [--url URL]`: recall@10 of a query file against the
 hub, over HTTP like any client. A query passes when any session it wants is among the top-10 hits' sessions."""
 import json, os, sys, urllib.parse, urllib.request
+from typing import TypedDict
+
+from .types_ import Json
 
 
-def _post(url, q, vector, limit, hybrid=False):
+class Row(TypedDict):
+    q: str
+    rank: int | None
+
+
+def _post(url: str, q: str, vector: list[float], limit: int, hybrid: bool = False) -> list[Json]:
     body = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "relic_search", "arguments": {
         "query": q, "semantic": True, "vector": vector, "limit": limit, **({"hybrid": True} if hybrid else {})}}}
     req = urllib.request.Request(f"{url}/mcp", data=json.dumps(body).encode(), headers={"Content-Type": "application/json", "X-Relic5-Client": "eval"})
@@ -11,14 +19,17 @@ def _post(url, q, vector, limit, hybrid=False):
         res = json.load(r)["result"]
     if res.get("isError"):
         raise SystemExit(res["content"][0]["text"])
-    return json.loads(res["content"][0]["text"])["hits"]
+    hits: list[Json] = json.loads(res["content"][0]["text"])["hits"]
+    return hits
 
 
-def run(path, semantic=False, url=None, limit=10, model="unsloth--embeddinggemma-300m@806f5f90", hybrid=False):
+def run(path: str, semantic: bool = False, url: str | None = None, limit: int = 10, model: str = "unsloth--embeddinggemma-300m@806f5f90",
+        hybrid: bool = False) -> Json:
     spec = json.load(open(path))
     url = (url or os.environ.get("RELIC5_URL", "http://white.follow-rankine.ts.net:8795")).rstrip("/")
-    ok, rows = 0, []
-    vecs = {}
+    ok = 0
+    rows: list[Row] = []
+    vecs: dict[str, list[float]] = {}
     if semantic:
         from .encode import encode
         vecs = dict(zip([i["q"] for i in spec["queries"]], encode([i["q"] for i in spec["queries"]], model)))
@@ -39,7 +50,7 @@ def run(path, semantic=False, url=None, limit=10, model="unsloth--embeddinggemma
             "mode": ("hybrid" if hybrid else "semantic") if semantic else "keyword", "rows": rows}
 
 
-def main(args):
+def main(args: list[str]) -> Json:
     sem, hyb = "--semantic" in args or "--hybrid" in args, "--hybrid" in args
     args = [a for a in args if a not in ("--semantic", "--hybrid")]
     r = run(args[0] if args else "tests/eval/semantic.json", semantic=sem, hybrid=hyb)

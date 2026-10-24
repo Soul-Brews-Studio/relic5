@@ -7,15 +7,18 @@ same GET routes as the web UI, so it runs on any machine that reaches the hub (t
   r refresh · q quit · auto-refresh every 15 s
 """
 import curses, json, textwrap, time, urllib.parse, urllib.request
+from typing import Any
+
+from .types_ import Json, JobEvent
 
 TABS = ["status", "live", "search", "jobs", "queries"]
 
 
 class Hub:
-    def __init__(self, url, token=None):
+    def __init__(self, url: str, token: str | None = None) -> None:
         self.url, self.token = url.rstrip("/"), token
 
-    def get(self, path, **q):
+    def get(self, path: str, **q: object) -> Any:   # Any: a JSON object or array, by route (/api/log is an array)
         req = urllib.request.Request(f"{self.url}{path}" + (("?" + urllib.parse.urlencode({k: v for k, v in q.items() if v not in (None, "")})) if q else ""))
         if self.token:
             req.add_header("Authorization", "Bearer " + self.token)
@@ -23,15 +26,15 @@ class Hub:
             return json.load(r)
 
 
-def size(b):
+def size(b: float | None) -> str:
     return "?" if b is None else f"{b / 1e9:.2f} GB" if b > 1e9 else f"{b / 1e6:.1f} MB"
 
 
-def ago(s):
+def ago(s: int | None) -> str:
     return "?" if s is None else f"{s} s" if s < 120 else f"{s // 60} min" if s < 7200 else f"{s // 3600} h"
 
 
-def status_lines(s):
+def status_lines(s: Json) -> list[str]:
     out = [f"{s['code']['name']} {s['code']['version']} · {s['home']} · you: {s.get('you')}", ""]
     for w in s["warnings"] or ["no warnings"]:
         out.append(("! " if s["warnings"] else "  ") + w)
@@ -56,17 +59,17 @@ def status_lines(s):
     return out
 
 
-def live_lines(t):
+def live_lines(t: Json) -> list[str]:
     return [f"{(x['ts_th'] or '')[5:16].replace('T', ' ')}  {','.join(x['machines']):<12} {x['role']:<9} "
             f"{(x.get('session_name') or x['sid'] or '')[:26]:<26} {' '.join((x['text'] or '').split())}" for x in t["rows"]]
 
 
-def job_lines(evs):
+def job_lines(evs: list[JobEvent]) -> list[str]:
     return [f"{e['at'][5:19].replace('T', ' ')}  {e['verb']:<14} {e['state']:<8} rc={e.get('rc', '')!s:<3} {e.get('host', '')[:10]:<10} "
-            f"{(str(e['done']) + ' ' + e.get('unit', '')) if e.get('done') is not None else '':<16} {e.get('message') or ''}" for e in evs]
+            f"{(str(e['done']) + ' ' + (e.get('unit') or '')) if e.get('done') is not None else '':<16} {e.get('message') or ''}" for e in evs]
 
 
-def query_lines(q):
+def query_lines(q: Json) -> list[str]:
     out = [f"running now: {len(q['running'])}", ""]
     out += [f"  {r['at'][11:19]}  {r['door']:<16} {r['tool']:<15} {r['for_s']:>4} s  {r['query']}" for r in q["running"]]
     out += ["last:"] + [f"  {r['at'][5:19].replace('T', ' ')}  {r.get('door') or '':<16} {r.get('tool') or '':<15} {r.get('mode') or '':<8} "
@@ -76,16 +79,20 @@ def query_lines(q):
     return out
 
 
-def run(stdscr, hub):
+def run(stdscr: curses.window, hub: Hub) -> None:
     curses.curs_set(0)
     curses.use_default_colors()
     for i, c in enumerate((curses.COLOR_CYAN, curses.COLOR_YELLOW, curses.COLOR_RED, curses.COLOR_GREEN), 1):
         curses.init_pair(i, c, -1)
     stdscr.timeout(500)
-    tab, lines, scroll, sel, last, err = 0, [], 0, 0, 0, None
-    query, hits, shown, typing = "", [], None, False
+    tab, scroll, sel, err = 0, 0, 0, None
+    lines: list[str] = []
+    last: float = 0
+    query, typing = "", False
+    hits: list[Json] = []
+    shown: list[str] | None = None
 
-    def load():
+    def load() -> None:
         nonlocal lines, err
         try:
             name = TABS[tab]
@@ -195,5 +202,5 @@ def run(stdscr, hub):
             scroll = max(0, scroll - body)
 
 
-def main(url, token=None):
+def main(url: str, token: str | None = None) -> None:
     curses.wrapper(run, Hub(url, token))

@@ -15,15 +15,39 @@ and its row count per stream) next to the seal, in index/_seals/seals.json, and 
              machine still reports the same sealed_keys; `relic5 seals --verify` exits 1 when one does not.
 """
 import json, os, socket, time
+from typing import Callable, TypedDict
 
 from .parts import MONTH_STREAMS, Parts
+from .types_ import Json, SealRecord
+
+Record = dict[str, dict[str, SealRecord]]
+"""index/_seals/seals.json: {machine: {month: SealRecord}}."""
 
 
-def _dir(root):
+class Verify(TypedDict):
+    """index/_seals/verify.json."""
+    at: str
+    checked: int
+    problems: list[str]
+
+
+class MachineSeals(TypedDict):
+    sealed: int
+    newest_sealed_at: str | None
+    resealed: int
+    months: list[str]
+
+
+class Summary(TypedDict):
+    machines: dict[str, MachineSeals]
+    verify: Verify | None
+
+
+def _dir(root: str) -> str:
     return os.path.join(root, "index", "_seals")
 
 
-def machine_seals(parts, machine):
+def machine_seals(parts: Parts, machine: str) -> dict[str, Json]:
     """{month: entry} of the sealed months a machine reported (empty when its relic-scan predates seals)."""
     p = os.path.join(parts.dir, machine, "meta", "months.json")
     try:
@@ -33,10 +57,10 @@ def machine_seals(parts, machine):
     return {m["month"]: m for m in months if m.get("sealed") and m.get("sealed_keys")}
 
 
-def held(parts, machine, month):
+def held(parts: Parts, machine: str, month: str) -> dict[str, list[int]]:
     """What the hub holds for one machine-month: {stream: [bytes, mtime, rows]}."""
     import pyarrow.parquet as pq
-    out = {}
+    out: dict[str, list[int]] = {}
     for s in MONTH_STREAMS:
         for _, _, f in parts.files(s, month, machine):
             st = os.stat(f)
@@ -44,12 +68,13 @@ def held(parts, machine, month):
     return out
 
 
-def load(root):
+def load(root: str) -> Record:
     p = os.path.join(_dir(root), "seals.json")
-    return json.load(open(p)) if os.path.exists(p) else {}
+    rec: Record = json.load(open(p)) if os.path.exists(p) else {}
+    return rec
 
 
-def _save(root, name, obj):
+def _save(root: str, name: str, obj: Record | Verify) -> None:
     os.makedirs(_dir(root), exist_ok=True)
     p = os.path.join(_dir(root), name)
     with open(p + ".tmp", "w") as f:
@@ -57,16 +82,17 @@ def _save(root, name, obj):
     os.replace(p + ".tmp", p)
 
 
-def update(root, log=print):
+def update(root: str, log: Callable[[str], object] = print) -> tuple[list[str], Verify]:
     """Record new seals, notice reseals and re-cuts, then verify. Returns (events, verify result)."""
     from .jobs import emit
-    parts, rec, events = Parts(root), load(root), []
+    parts, rec = Parts(root), load(root)
+    events: list[str] = []
     for m in parts.machines():
         for month, e in machine_seals(parts, m).items():
             now = held(parts, m, month)
             prev = rec.get(m, {}).get(month)
-            entry = {"sealed_keys": e["sealed_keys"], "sealed_rows": e.get("sealed_rows"), "sealed_at": e.get("sealed_at"),
-                     "resealed": e.get("resealed", 0), "held": now, "recorded_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+            entry: SealRecord = {"sealed_keys": e["sealed_keys"], "sealed_rows": e.get("sealed_rows"), "sealed_at": e.get("sealed_at"),
+                                 "resealed": e.get("resealed", 0), "held": now, "recorded_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
             if prev is None:
                 rec.setdefault(m, {})[month] = entry
                 continue
@@ -86,10 +112,11 @@ def update(root, log=print):
     return events, verify(root)
 
 
-def verify(root):
+def verify(root: str) -> Verify:
     """Check every recorded seal against the hub as it is now; writes index/_seals/verify.json."""
     import pyarrow.parquet as pq
-    parts, rec, problems, checked = Parts(root), load(root), [], 0
+    parts, rec, checked = Parts(root), load(root), 0
+    problems: list[str] = []
     for m, months in rec.items():
         live = machine_seals(parts, m)
         for month, r in months.items():
@@ -104,14 +131,15 @@ def verify(root):
                 n = pq.ParquetFile(fs[0]).metadata.num_rows
                 if n != rows:
                     problems.append(f"{m} {month} {s}: {n:,} rows, sealed with {rows:,}")
-    out = {"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "checked": checked, "problems": problems}
+    out: Verify = {"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "checked": checked, "problems": problems}
     _save(root, "verify.json", out)
     return out
 
 
-def summary(root):
+def summary(root: str) -> Summary:
     """For relic_status: per machine, sealed months, newest seal, reseals; the last verify."""
-    rec, per = load(root), {}
+    rec = load(root)
+    per: dict[str, MachineSeals] = {}
     for m, months in rec.items():
         per[m] = {"sealed": len(months), "newest_sealed_at": max((r.get("sealed_at") or "" for r in months.values()), default=None),
                   "resealed": sum(1 for r in months.values() if r.get("resealed")), "months": sorted(months)}

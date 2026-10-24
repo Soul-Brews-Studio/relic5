@@ -15,18 +15,40 @@ second row (both versions stay findable). role = "memory-<type>", so role filter
 """
 import hashlib, json, os, re
 from datetime import datetime, timedelta, timezone
+from typing import TypedDict
+
+from .types_ import MemoryRow
 
 FRONT = re.compile(r"\A---\n(.*?)\n---\n?", re.S)
 KEY = re.compile(r"^\s*([A-Za-z_][\w-]*):\s*(.*)$")
 TYPES = ("user", "feedback", "project", "reference")
 
 
-def parse(text):
+class Note(TypedDict):
+    """One note of listing(): a MemoryRow without its body."""
+    uid: str
+    link: str
+    ts: str
+    type: str
+    project: str
+    title: str
+    description: str
+    machines: list[str]
+    home: str
+
+
+class Listing(TypedDict):
+    notes: list[Note]
+    types: dict[str, int]
+    projects: dict[str, int]
+
+
+def parse(text: str) -> tuple[dict[str, str], str]:
     """(frontmatter dict, body). Nested keys (metadata: type: ...) are flattened; quotes stripped."""
     m = FRONT.match(text)
     if not m:
         return {}, text.strip()
-    meta = {}
+    meta: dict[str, str] = {}
     for line in m.group(1).splitlines():
         k = KEY.match(line)
         if k and k.group(2).strip():
@@ -34,9 +56,10 @@ def parse(text):
     return meta, text[m.end():].strip()
 
 
-def files(root):
+def files(root: str) -> list[tuple[str, str, str, str]]:
     """[(machine, home, project, path)] of every pushed note."""
-    out, pdir = [], os.path.join(root, "parts")
+    out: list[tuple[str, str, str, str]] = []
+    pdir = os.path.join(root, "parts")
     if not os.path.isdir(pdir):
         return out
     for machine in sorted(os.listdir(pdir)):
@@ -53,13 +76,13 @@ def files(root):
     return out
 
 
-def short(project):
+def short(project: str) -> str:
     """'-opt-Code-github-com-laris-co-neo-oracle' -> 'laris-co-neo-oracle' (org-repo; the org may hold a hyphen)."""
     return re.sub(r"^-(opt-Code|Users-[^-]+-Code)-github-com-", "", project)
 
 
-def rows(root):
-    out = {}
+def rows(root: str) -> list[MemoryRow]:
+    out: dict[str, MemoryRow] = {}
     for machine, home, project, path in files(root):
         text = open(path, encoding="utf-8", errors="replace").read()
         meta, body = parse(text)
@@ -87,11 +110,11 @@ def rows(root):
     return sorted(out.values(), key=lambda r: (r["ts"], r["msgkey"]))
 
 
-def sig(root):
+def sig(root: str) -> list[list[str | int]]:
     return [[os.path.relpath(p, root), os.path.getsize(p), int(os.path.getmtime(p))] for _, _, _, p in files(root)]
 
 
-def build(root):
+def build(root: str) -> str | None:
     """Write index/_memory/notes.parquet when the pushed notes changed; returns its path (None: no notes)."""
     import pyarrow as pa, pyarrow.parquet as pq
     d = os.path.join(root, "index", "_memory")
@@ -110,26 +133,28 @@ def build(root):
     return p
 
 
-def counts(root):
+def counts(root: str) -> dict[str, int]:
     """{type: notes} of the built table, for relic_status."""
     p = os.path.join(root, "index", "_memory", "notes.parquet")
     if not os.path.exists(p):
         return {}
     import pyarrow.parquet as pq
-    out = {}
+    out: dict[str, int] = {}
     for role in pq.read_table(p, columns=["role"]).column("role").to_pylist():
         out[role[7:]] = out.get(role[7:], 0) + 1
     return out
 
 
-def listing(root):
+def listing(root: str) -> Listing:
     """Every note without its body, newest first, for the hub's Memory tab: title, description, type, project, when,
     machines, link. The body is one relic_show away."""
     p = os.path.join(root, "index", "_memory", "notes.parquet")
     if not os.path.exists(p):
         return {"notes": [], "types": {}, "projects": {}}
     import pyarrow.parquet as pq
-    notes, types, projects = [], {}, {}
+    notes: list[Note] = []
+    types: dict[str, int] = {}
+    projects: dict[str, int] = {}
     for r in pq.read_table(p, columns=["msgkey", "month", "ts", "role", "cat", "title", "text", "machines", "engine"]).to_pylist():
         typ = r["role"][7:]
         head = (r["text"] or "").split("\n\n", 1)[0]

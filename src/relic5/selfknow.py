@@ -9,17 +9,26 @@ the tailnet: never in git, never in an eval file.
   resources load average, memory, this process (RSS, open files, threads), the container's cgroup memory, running jobs
 """
 import json, os, shutil, statistics, threading, time
+from collections.abc import Callable
+from typing import TypedDict
+
+from .types_ import Json
 
 LOCK = threading.Lock()
-RUNNING = {}          # id -> {at, door, tool, query}
-_sizes = (0, None)    # cache: (time, value)
+RUNNING: dict[str, Json] = {}          # id -> {at, door, tool, query}
+_sizes: tuple[float, Json | None] = (0, None)    # cache: (time, value)
 
 
-def _log(root):
+class TopQuery(TypedDict):
+    query: str
+    n: int
+
+
+def _log(root: str) -> str:
     return os.path.join(root, "logs", "queries.jsonl")
 
 
-def start(tool, door, query, client=None):
+def start(tool: str, door: str | None, query: str | None, client: str | None = None) -> tuple[str, float]:
     qid = f"{time.time():.6f}-{threading.get_ident()}"
     with LOCK:
         RUNNING[qid] = {"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "door": door, "tool": tool, "query": (query or "")[:200],
@@ -27,11 +36,11 @@ def start(tool, door, query, client=None):
     return qid, time.time()
 
 
-def finish(root, qid, t0, result=None, args=None, error=None):
+def finish(root: str, qid: str, t0: float, result: object = None, args: Json | None = None, error: str | None = None) -> None:
     with LOCK:
         q = RUNNING.pop(qid, {})
     args = args or {}
-    r = result if isinstance(result, dict) else {}
+    r: Json = result if isinstance(result, dict) else {}
     line = q | {"ms": round((time.time() - t0) * 1000), "hits": len(r.get("hits", [])) if "hits" in r else None,
                 "mode": ("hybrid" if r.get("hybrid") else "semantic") if r.get("semantic") else ("keyword" if "hits" in r else None),
                 "horizon": r.get("horizon"), "vector": "vector" in args, "error": (error or "")[:200] or None}
@@ -44,12 +53,12 @@ def finish(root, qid, t0, result=None, args=None, error=None):
         os.close(fd)
 
 
-def _tail(path, n=5000):
+def _tail(path: str, n: int = 5000) -> list[Json]:
     if not os.path.exists(path):
         return []
     with open(path, "rb") as f:
         f.seek(max(0, os.path.getsize(path) - 2_000_000))
-        out = []
+        out: list[Json] = []
         for line in f.read().decode("utf-8", "replace").splitlines()[-n:]:
             try:
                 out.append(json.loads(line))
@@ -58,10 +67,10 @@ def _tail(path, n=5000):
     return out
 
 
-def queries(root):
+def queries(root: str) -> Json:
     rows = _tail(_log(root))
     now = time.time()
-    hours = {}
+    hours: dict[str, list[int]] = {}
     for r in rows:
         try:
             t = time.mktime(time.strptime(r["at"], "%Y-%m-%dT%H:%M:%SZ")) - time.timezone
@@ -72,7 +81,7 @@ def queries(root):
     per_hour = {h: {"n": len(v), "p50_ms": round(statistics.median(v)), "p95_ms": round(sorted(v)[max(0, int(len(v) * 0.95) - 1)])}
                 for h, v in sorted(hours.items())}
     real = [r for r in rows if r.get("client") != "eval"]   # eval runs say so (X-Relic5-Client: eval); keep them out of Nat's view
-    counts = {}
+    counts: dict[str, int] = {}
     for r in real:
         if r.get("query"):
             counts[r["query"]] = counts.get(r["query"], 0) + 1
@@ -80,14 +89,14 @@ def queries(root):
     with LOCK:
         running = [v | {"for_s": round(now - time.mktime(time.strptime(v["at"], "%Y-%m-%dT%H:%M:%SZ")) + time.timezone)} for v in RUNNING.values()]
     return {"running": running, "total_logged": len(rows), "eval_logged": len(rows) - len(real), "last": real[-20:][::-1], "per_hour": per_hour,
-            "top": sorted(({"query": q, "n": n} for q, n in counts.items() if n > 1), key=lambda x: -x["n"])[:15],
+            "top": sorted((TopQuery(query=q, n=n) for q, n in counts.items() if n > 1), key=lambda x: -x["n"])[:15],
             "zero_hits": [{"at": r["at"], "query": r["query"], "tool": r.get("tool")} for r in zero[-20:][::-1]]}
 
 
-def _du(path):
+def _du(path: str) -> int:
     """Bytes under path, each inode once: relic3's generations are hardlinked copies (rsync --link-dest), and counting
     every link reported ~/.relic3-gens as 254.7 GB where it uses ~80 GB (2026-10-24)."""
-    total, seen = 0, set()
+    total, seen = 0, set[tuple[int, int]]()
     for d, _, fs in os.walk(path):
         for f in fs:
             try:
@@ -102,12 +111,12 @@ def _du(path):
     return total
 
 
-def store(root, ttl=120):
+def store(root: str, ttl: int = 120) -> Json:
     """Sizes, cached for ttl seconds (walking 6 GB of LanceDB files on every status call would be wasteful)."""
     global _sizes
     if _sizes[1] is not None and time.time() - _sizes[0] < ttl:
         return _sizes[1]
-    out = {"parts": {}, "search": {}, "vectors": {}, "manifests": 0, "logs": 0}
+    out: Json = {"parts": {}, "search": {}, "vectors": {}, "manifests": 0, "logs": 0}
     pd = os.path.join(root, "parts")
     for m in sorted(os.listdir(pd)) if os.path.isdir(pd) else []:
         out["parts"][m] = {s: _du(os.path.join(pd, m, s)) for s in sorted(os.listdir(os.path.join(pd, m))) if os.path.isdir(os.path.join(pd, m, s))}
@@ -130,7 +139,7 @@ def store(root, ttl=120):
     return out
 
 
-def record_size(root):
+def record_size(root: str) -> None:
     """At most one line an hour in logs/sizes.jsonl (called by `relic5 index`), for growth per day."""
     p = os.path.join(root, "logs", "sizes.jsonl")
     day = time.strftime("%Y-%m-%dT%H")
@@ -144,12 +153,12 @@ def record_size(root):
                             "disk_free": s["disk"]["free"]}) + "\n")
 
 
-def growth(root, total_now):
+def growth(root: str, total_now: int) -> Json:
     """Bytes per day from the first and the newest size line; an estimate until a full day is covered (None before 6 h)."""
     rows = _tail(os.path.join(root, "logs", "sizes.jsonl"), 2000)
     if len(rows) < 2:
         return {"per_day": None, "since": rows[0]["day"] if rows else None}
-    t = lambda d: time.mktime(time.strptime(d[:13], "%Y-%m-%dT%H" if "T" in d else "%Y-%m-%d"))
+    t: Callable[[str], float] = lambda d: time.mktime(time.strptime(d[:13], "%Y-%m-%dT%H" if "T" in d else "%Y-%m-%d"))
     a, b = rows[0], rows[-1]
     hours = (t(b["day"]) - t(a["day"])) / 3600
     if hours < 6:
@@ -157,15 +166,15 @@ def growth(root, total_now):
     return {"per_day": round((b["total"] - a["total"]) / hours * 24), "since": a["day"], "estimate": hours < 24}
 
 
-def _read(p):
+def _read(p: str) -> str:
     try:
         return open(p).read()
     except OSError:
         return ""
 
 
-def resources():
-    out = {"load": list(os.getloadavg()), "cpus": os.cpu_count()}
+def resources() -> Json:
+    out: Json = {"load": list(os.getloadavg()), "cpus": os.cpu_count()}
     mem = {l.split(":")[0]: int(l.split()[1]) * 1024 for l in _read("/proc/meminfo").splitlines() if l.split(":")[0] in ("MemTotal", "MemAvailable")}
     if mem:
         out["memory"] = {"total": mem.get("MemTotal"), "available": mem.get("MemAvailable")}
@@ -178,7 +187,7 @@ def resources():
     return out
 
 
-def warnings(st, res):
+def warnings(st: Json, res: Json) -> list[str]:
     w = []
     if st["disk"]["free_pct"] < 20:
         w.append(f"disk: only {st['disk']['free_pct']}% free on the hub (relic5 itself: {st.get('total', 0) / 1e9:.1f} GB; "

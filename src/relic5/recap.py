@@ -8,35 +8,43 @@ src/read/recap.ts and src/verbs/tail.ts --handoff (@9f0bdb5): projections of sto
 """
 import json, re, statistics
 from datetime import datetime
+from typing import TYPE_CHECKING
+
+from .types_ import Json
+
+if TYPE_CHECKING:
+    from .query import Relic5
 
 FILE = re.compile(r'"file_path"\s*:\s*"([^"]+)"')
 EDITS = {"Edit", "Write", "MultiEdit", "NotebookEdit", "apply_patch"}
 
 
-def _t(iso):
+def _t(iso: str | None) -> float | None:
     return datetime.fromisoformat(iso.replace("Z", "+00:00")).timestamp() if iso else None
 
 
-def _turns(relic, sid):
+def _turns(relic: "Relic5", sid: str) -> list[Json]:
     src = relic.parts.source("text")
     if not src:
         return []
     from .query import folded
-    return relic._rows(f"""SELECT role, ts, ts_th, string_agg(text, '' ORDER BY chunk) AS text FROM {folded(src, "sid = ?")}
+    rows: list[Json] = relic._rows(f"""SELECT role, ts, ts_th, string_agg(text, '' ORDER BY chunk) AS text FROM {folded(src, "sid = ?")}
                            GROUP BY msgkey, role, ts, ts_th ORDER BY ts, min(msgkey)""", [sid])
+    return rows
 
 
-def _resolve(relic, ident):
+def _resolve(relic: "Relic5", ident: str) -> tuple[str, Json]:
     s = relic.session(ident)          # prefix -> one session, or a clear error
     return s["uuid"], s
 
 
-def recap(relic, ident, limit=20):
+def recap(relic: "Relic5", ident: str, limit: int = 20) -> Json:
     sid, s = _resolve(relic, ident)
     turns = _turns(relic, sid)
     user = [t for t in turns if t["role"] == "user"]
     shown = user if not limit else user[-limit:]
-    tools, files = {}, {}
+    tools: dict[str, int] = {}
+    files: dict[str, int] = {}
     src = relic.parts.source("tools")
     if src:
         from .query import folded
@@ -54,7 +62,7 @@ def recap(relic, ident, limit=20):
             "more": None if not limit or len(user) <= limit else f"relic5 recap {sid[:8]} --limit 0   ({len(user) - limit} earlier turns)"}
 
 
-def handoff(relic, ident, user_only=False):
+def handoff(relic: "Relic5", ident: str, user_only: bool = False) -> Json:
     sid, s = _resolve(relic, ident)
     turns = _turns(relic, sid)
     user = [i for i, t in enumerate(turns) if t["role"] == "user"]

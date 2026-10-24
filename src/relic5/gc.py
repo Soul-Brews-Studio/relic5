@@ -7,9 +7,11 @@ of it is named (relic3-import: relic3's own index on m5; an import is rebuilt fr
   logs          logs/*.jsonl sizes (queries, jobs, eval, sizes)
 """
 import json, os, subprocess
+from typing import TypedDict
 
 from .fts import current, search_dir
 from .selfknow import _du
+from .types_ import Json
 
 # Big neighbours on the hub's disk that are NOT relic5's: reported so the disk warning says where the space is, never
 # touched (relic4-scan, 2026-10-24). Paths are relative to the hub user's home.
@@ -19,15 +21,35 @@ OTHER_COPY = {"relic3-import": "relic3's own index (m5 ~/.relic3-hub/index) + `r
               "jsonl-truth-import": "~/jsonl-truth on m5 + `relic5 import jsonl-truth`"}
 
 
-def report(root):
+class Generation(TypedDict):
+    gen: str
+    bytes: int
+    live: bool
+    mtime: int
+
+
+class AtticItem(TypedDict):
+    item: str
+    bytes: int
+    other_copy: str | None
+    safe: bool
+
+
+class NotOurs(TypedDict):
+    what: str
+    about: str
+    bytes: int | None
+
+
+def report(root: str) -> Json:
     sd = search_dir(root)
     live = {v.split("/")[0] for v in current(root).values()}
-    gens = []
+    gens: list[Generation] = []
     for d in sorted(os.listdir(sd)) if os.path.isdir(sd) else []:
         p = os.path.join(sd, d)
         if os.path.isdir(p) and d[:8].isdigit():
             gens.append({"gen": d, "bytes": _du(p), "live": d in live, "mtime": int(os.path.getmtime(p))})
-    attic = []
+    attic: list[AtticItem] = []
     ad = os.path.join(root, "attic")
     for d in sorted(os.listdir(ad)) if os.path.isdir(ad) else []:
         other = next((v for k, v in OTHER_COPY.items() if d.startswith(k)), None)
@@ -39,10 +61,10 @@ def report(root):
             "not_ours": not_ours()}
 
 
-def not_ours(home=None):
+def not_ours(home: str | None = None) -> list[NotOurs]:
     """Sizes of what else fills the disk: relic3's generations, Docker's reclaimable space. For Nat to decide."""
     home = home or os.path.expanduser("~")
-    out = []
+    out: list[NotOurs] = []
     for rel, what in NOT_OURS.items():
         p = os.path.join(home, rel)
         if os.path.isdir(p):

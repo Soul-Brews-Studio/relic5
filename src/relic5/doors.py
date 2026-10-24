@@ -13,13 +13,23 @@ loopback), so a web page in a browser cannot reach the hub by DNS rebinding (rel
 Honest limit: no password inside follow-rankine; anyone who joins that tailnet as Nat can read everything.
 """
 import ipaddress, json, socket, subprocess, time
+from collections.abc import Callable
+from typing import TYPE_CHECKING, TypedDict
+
+if TYPE_CHECKING:
+    from .tokens import Tokens
 
 LOOPBACK = {"127.0.0.1", "::1"}
 CGNAT = ipaddress.ip_network("100.64.0.0/10")
 TTL = 300
 
 
-def tailscale_whois(ip):
+class Whois(TypedDict):
+    node: str
+    login: str
+
+
+def tailscale_whois(ip: str) -> Whois | None:
     """-> {"node": name, "login": owner} or None."""
     try:
         out = subprocess.run(["tailscale", "whois", "--json", ip], capture_output=True, text=True, timeout=3)
@@ -29,7 +39,7 @@ def tailscale_whois(ip):
         return None
 
 
-def tailscale_self():
+def tailscale_self() -> tuple[str | None, set[str]]:
     """-> (owner login, {names and addresses that mean this hub})."""
     try:
         d = json.loads(subprocess.run(["tailscale", "status", "--json"], capture_output=True, text=True, timeout=3).stdout)
@@ -41,16 +51,17 @@ def tailscale_self():
 
 
 class Doors:
-    def __init__(self, tokens, owner=None, names=None, whois=tailscale_whois, enabled=True):
+    def __init__(self, tokens: "Tokens | dict[str, str]", owner: str | None = None, names: set[str] | None = None,
+                 whois: Callable[[str], Whois | None] = tailscale_whois, enabled: bool = True) -> None:
         self.tokens, self.whois, self.enabled = tokens, whois, enabled
         if enabled and (owner is None or names is None):
             o, n = tailscale_self()
             owner, names = owner or o, names if names is not None else n
         self.owner = owner
         self.names = {x.lower() for x in (names or set())} | {socket.gethostname().lower(), "localhost", "127.0.0.1", "::1"}
-        self.cache = {}
+        self.cache: dict[str, tuple[float, Whois | None]] = {}
 
-    def _whois(self, ip):
+    def _whois(self, ip: str) -> Whois | None:
         hit = self.cache.get(ip)
         if hit and time.time() - hit[0] < TTL:
             return hit[1]
@@ -58,7 +69,7 @@ class Doors:
         self.cache[ip] = (time.time(), r)
         return r
 
-    def door(self, server, client, host, bearer):
+    def door(self, server: str, client: str, host: str | None, bearer: str) -> str | None:
         """-> "loopback" | "tailnet:<node>" | "token:<machine>" | None (refused)."""
         if bearer:
             if hasattr(self.tokens, "check"):          # tokens.Tokens: hashed, expiring, rotating

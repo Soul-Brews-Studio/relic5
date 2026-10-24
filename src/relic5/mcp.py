@@ -9,10 +9,13 @@ Accepted but not served yet, each with a clear error: semantic (embed milestone)
 (relic-extract's parts do not carry them).
 """
 import json
+from collections.abc import Callable, Iterable
+from typing import Any
 
 from . import __version__
-from .query import DEFAULT_LIMIT, NotFound, UsageError
+from .query import DEFAULT_LIMIT, NotFound, Relic5, UsageError
 from .status import status
+from .types_ import Json
 
 SERVER_INFO = {"name": "relic5", "version": __version__}
 SUPPORTED = ["2025-06-18", "2025-03-26", "2024-11-05"]
@@ -67,22 +70,25 @@ UNAVAILABLE = {
     "relic_trace": "relic_trace is not available in relic5; use relic_search then relic_show",
     "relic_pending": "relic_pending is not available in relic5; relic_status reports pending/warnings",
 }
+# (True, the tool's reply) or (False, (kind, error)); Any because mypy cannot narrow the second item by the first
+ToolReply = tuple[bool, Any]
+ToolCall = Callable[[Relic5, str, Json, str | None], ToolReply]
 
 
-def _check(args, allowed):
+def _check(args: Iterable[str], allowed: list[str]) -> None:
     for k in args:
         if k not in allowed:
             raise UsageError(f"unknown argument {json.dumps(k)} (allowed: {', '.join(allowed) or 'none'})")
 
 
-def _str(a, k):
+def _str(a: Json, k: str) -> str | None:
     v = a.get(k)
     if v is not None and not isinstance(v, str):
         raise UsageError(f"{k} must be a string")
     return v
 
 
-def _int(a, k, minimum=0):
+def _int(a: Json, k: str, minimum: int = 0) -> int | None:
     v = a.get(k)
     if v is None:
         return None
@@ -91,7 +97,7 @@ def _int(a, k, minimum=0):
     return v
 
 
-def run_tool(relic, name, a, door=None):
+def run_tool(relic: Relic5, name: str, a: Json, door: str | None = None) -> Json:
     if name == "relic_search":
         _check(a, list(SEARCH_PROPS))
         vec = a.get("vector")
@@ -128,7 +134,7 @@ def run_tool(relic, name, a, door=None):
     raise UsageError(f"unknown tool {json.dumps(name)}")
 
 
-def call_tool(relic, name, args, door=None):
+def call_tool(relic: Relic5, name: str, args: object, door: str | None = None) -> ToolReply:
     """-> (ok, data | (kind, error))."""
     if name in UNAVAILABLE:
         return False, ("unavailable", UNAVAILABLE[name])
@@ -144,15 +150,15 @@ def call_tool(relic, name, args, door=None):
         return False, ("failed", f"{type(ex).__name__}: {ex}")
 
 
-def _ok(i, result):
+def _ok(i: object, result: Json) -> Json:
     return {"jsonrpc": "2.0", "id": i, "result": result}
 
 
-def _err(i, code, message):
+def _err(i: object, code: int, message: str) -> Json:
     return {"jsonrpc": "2.0", "id": i, "error": {"code": code, "message": message}}
 
 
-def handle(relic, msg, door=None, call=None):
+def handle(relic: Relic5, msg: object, door: str | None = None, call: ToolCall | None = None) -> Json | None:
     """One JSON-RPC message -> its reply, or None for a notification."""
     if not isinstance(msg, dict) or msg.get("jsonrpc") != "2.0" or not isinstance(msg.get("method"), str):
         return _err(msg.get("id") if isinstance(msg, dict) else None, -32600, "invalid request")

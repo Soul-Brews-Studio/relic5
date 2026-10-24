@@ -7,15 +7,17 @@ counts so a relic3 consumer that reads weeks.total still gets a number. Watermar
   vectors   nothing embedded yet (embed milestone): pending = every folded text row
 """
 import os, time
+from datetime import datetime as _datetime
 
 from . import __version__
 from .parts import MONTH_STREAMS, Parts, this_month
+from .types_ import JobEvent, Json
 
 
 BACKUP_STALE_S = 36 * 3600   # nightly, plus a day of slack (relic4-scan, 2026-10-24)
 
 
-def last_backup(evs, now=None):
+def last_backup(evs: list[JobEvent], now: _datetime | None = None) -> Json:
     """The newest finished backup (bin/relic5-backup writes a JobEvent "backup"): when, how big, how old."""
     from datetime import datetime
     from .window import utcnow
@@ -29,13 +31,13 @@ def last_backup(evs, now=None):
     return {"at": b["at"], "bytes": b.get("done"), "message": b.get("message"), "age_s": age, "host": b.get("host")}
 
 
-def status(root, now=None):
+def status(root: str, now: _datetime | None = None) -> Json:
     p = Parts(root)
     mans = p.manifests()
     months = p.months()
     stale = p.stale()
     warnings = [f"month {m}: parts newer than its manifest (run relic5 index)" for m in stale]
-    machines = {}
+    machines: dict[str, dict[str, Json]] = {}
     for mon, man in mans.items():
         for s, v in man["streams"].items():
             for m, mv in v["machines"].items():
@@ -50,7 +52,7 @@ def status(root, now=None):
     for m in p.machines():
         if not os.path.isfile(os.path.join(p.dir, m, "meta", "sessions.parquet")):
             warnings.append(f"machine {m}: no meta/sessions.parquet (sessions and repo filters miss it)")
-    versions = {}
+    versions: dict[str, Json] = {}
     for m in p.machines():
         vp = os.path.join(p.dir, m, "_versions.json")
         if os.path.isfile(vp):
@@ -58,15 +60,15 @@ def status(root, now=None):
                 versions[m] = __import__("json").load(open(vp))
             except ValueError:
                 warnings.append(f"machine {m}: unreadable _versions.json")
-    live = {m: v for m, v in versions.items() if not m.endswith("-import")}   # an import is a one-off push, not a machine with a chain
+    chained = {m: v for m, v in versions.items() if not m.endswith("-import")}   # an import is a one-off push, not a machine with a chain
     # relic5-push is compared by its behaviour version (push-format), not its git hash; an old push without the field
     # counts as format 0, so a machine that never got the new script still shows
     for tool, key in (("relic-scan", "relic-scan"), ("relic-extract", "relic-extract"), ("relic5-push", "push-format")):
-        seen = {v.get(key, 0 if key == "push-format" else None) for v in live.values()}
+        seen = {v.get(key, 0 if key == "push-format" else None) for v in chained.values()}
         if len(seen) > 1:
             warnings.append(f"{tool} differs between machines: " + ", ".join(
                 f"{m} {v.get(key, 0 if key == 'push-format' else None)}" + (f" ({v.get('relic5-push')})" if key == "push-format" else "")
-                for m, v in sorted(live.items())))
+                for m, v in sorted(chained.items())))
     rows = {s: sum(man["streams"].get(s, {}).get("rows", 0) for man in mans.values()) for s in MONTH_STREAMS}
     built = max((man["built"] for man in mans.values()), default=None)
     from .fts import current, search_dir
@@ -82,10 +84,11 @@ def status(root, now=None):
     evs, running = read_jobs(p.root)
     last_error = next((e for e in evs if e.get("state") == "error"), None)
     if last_error and not any(e["verb"] == last_error["verb"] and e.get("state") == "done" and e["at"] > last_error["at"] for e in evs):
-        warnings.append(f"last {last_error['verb']} failed at {last_error['at']}: {last_error.get('message', '')[:200]}")
+        warnings.append(f"last {last_error['verb']} failed at {last_error['at']}: {(last_error.get('message') or '')[:200]}")
     from . import seals as SL
     seal_info = SL.summary(p.root)
-    for prob in ((seal_info["verify"] or {}).get("problems") or [])[:3]:
+    vfy = seal_info["verify"]
+    for prob in ((vfy.get("problems") if vfy else None) or [])[:3]:
         warnings.append(f"seal: {prob}")
     backup = last_backup(evs, now)
     if backup["at"] is None:
@@ -98,7 +101,7 @@ def status(root, now=None):
                "models": vs["models"], "tables": {k: v["rows"] for k, v in fst.items() if k in live and k.startswith("vec_")}}
     # freshness: how far behind each machine and each index is (relic-chain runs every 10 min on m5, 2026-10-23)
     t_now = time.time()
-    def lag(iso):
+    def lag(iso: str | None) -> int | None:
         if not iso:
             return None
         try:
@@ -106,7 +109,7 @@ def status(root, now=None):
             return round(t_now - datetime.fromisoformat(iso.replace("Z", "+00:00")).timestamp())
         except ValueError:
             return None
-    fresh = {"machines": {}, "fts": {"at": fts["at"]}, "vectors": {"at": vectors["at"]}}
+    fresh: Json = {"machines": {}, "fts": {"at": fts["at"]}, "vectors": {"at": vectors["at"]}}
     for m in p.machines():
         x, v = machines.get(m, {}).get("text", {}), versions.get(m, {})
         pushed = v.get("at")
