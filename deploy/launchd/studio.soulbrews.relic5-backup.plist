@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!-- m5 (user beta): pull a snapshot of the hub on white every night at 03:30, run the restore test against it, then
-     fork an agent (herdr) to write the recap of the newest reconciled month that has none (bin/relic5-month-recap).
+     write the recap of the newest reconciled month that has none, one headless claude -p run (bin/relic5-month-recap).
      Install: cp to ~/Library/LaunchAgents/ and `launchctl load -w` it (docs/RESTORE.md). Log: ~/Library/Logs/relic5-backup.log -->
 <plist version="1.0"><dict>
   <key>Label</key><string>studio.soulbrews.relic5-backup</string>
