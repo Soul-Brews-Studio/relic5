@@ -133,6 +133,47 @@ export function NavDrawer({ open, onClose, view, go, state, foot, badges, onPale
   );
 }
 
+/** The hub's own pages (jobs, disk, what was asked, search quality, connect) in one menu, so the top bar holds
+ *  only what people come for (Nat, 2026-10-24: "too long menu"). Escape or a click outside closes it. */
+function HubMenu({ view, go, badges }: { view: View; go: (v: View) => void; badges?: Partial<Record<View, number>> }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const items = VIEWS.filter(v => v.group === 1);
+  const here = items.find(v => v.id === view);
+  const busy = items.reduce((n, v) => n + (badges?.[v.id] ?? 0), 0);
+  useEffect(() => {
+    if (!open) return;
+    const off = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    addEventListener("mousedown", off); addEventListener("keydown", esc);
+    return () => { removeEventListener("mousedown", off); removeEventListener("keydown", esc); };
+  }, [open]);
+  return (
+    <div ref={ref} className="relative flex-none">
+      <button type="button" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}
+        className={cx("flex min-h-10 items-center gap-1.5 rounded-lg px-3 text-sm whitespace-nowrap transition-colors", here ? "bg-raised font-semibold text-text" : "text-soft hover:bg-raised hover:text-text")}>
+        {here ? here.label : "Hub"}
+        {busy > 0 && <span className="rounded-full bg-accent px-1.5 text-xs font-bold text-on-accent">{busy}</span>}
+        <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden className={cx("transition-transform", open && "rotate-180")}><path d="M3 4.5l3 3 3-3" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+      </button>
+      {open && (
+        <div role="menu" className="absolute top-full left-0 z-30 mt-1.5 w-56 rounded-xl border border-line-strong bg-panel p-1.5 shadow-[var(--shadow-pop)]">
+          {items.map(v => {
+            const I = v.icon, on = view === v.id;
+            return (
+              <a key={v.id} role="menuitem" href={`#tab=${v.id}`} onClick={e => { e.preventDefault(); go(v.id); setOpen(false); }}
+                className={cx("flex min-h-10 items-center gap-3 rounded-lg px-3 text-sm", on ? "bg-raised font-semibold text-text" : "text-soft hover:bg-raised hover:text-text")}>
+                <span className={on ? "text-accent" : "text-muted"}><I size={18} /></span>{v.label}
+                {!!badges?.[v.id] && <span className="ml-auto rounded-full bg-accent px-1.5 text-xs font-bold text-on-accent">{badges[v.id]}</span>}
+              </a>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Desktop: the old ARRA Oracle Studio's header (ui-oracle apps/studio Header.tsx, 2026-04-19), not relic-scan's
  *  sidebar (Nat, 2026-10-24: "make this ui diff from relic scanner"): one sticky bar, the name in the accent, the views
  *  as text links in two groups split by a hairline, the palette, the theme and the hub's state on the right. */
@@ -161,10 +202,9 @@ export function TopNav({ view, go, state, foot, theme, setTheme, badges, onPalet
         <b className="text-xl font-bold tracking-[-0.01em] text-accent">relic5</b>
         {version && <span className="rounded bg-raised px-1.5 py-0.5 font-mono text-xs text-muted max-[1400px]:hidden">{version}</span>}
       </a>
-      <nav aria-label="Views" className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none]">
+      <nav aria-label="Views" className="flex min-w-0 flex-1 items-center gap-1">
         {VIEWS.filter(v => v.group === 0).map(link)}
-        <span aria-hidden className="mx-2 h-4 w-px flex-none bg-line-strong" />
-        {VIEWS.filter(v => v.group === 1).map(link)}
+        <HubMenu view={view} go={go} badges={badges} />
       </nav>
       <div className="flex flex-none items-center gap-2">
         <button type="button" onClick={onPalette}
