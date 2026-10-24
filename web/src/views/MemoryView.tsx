@@ -66,7 +66,9 @@ export function MemoryView() {
         </div>
       </div>
       <div className="border-b border-line bg-panel px-6 py-2.5 text-[12px] text-muted">{num(list.length)} notes{q || type || project ? " match" : ""} · newest first · GET /api/memory</div>
-      {list.length === 0 && <State>no note matches</State>}
+      {list.length === 0 && <State>{total === 0
+        ? "No memory notes on this hub yet. Each machine's push sends them (push-format 5, since 2026-10-24); a copy restored from an older snapshot has none until its next refresh."
+        : "no note matches"}</State>}
       {list.slice(0, shown).map(n => (
         <button key={n.uid} type="button" onClick={() => read(n)} className="block w-full cursor-pointer border-b border-line px-6 py-4 text-left font-sans hover:bg-panel">
           <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-[12px] text-muted">

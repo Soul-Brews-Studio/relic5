@@ -128,7 +128,7 @@ export function GlancePage({ s, error, at, theme, setTheme }:
   const months = s.months.list.filter(m => m.rows.text > 0);
   const machines = Object.keys({ ...s.machines, ...s.versions }).sort((a, b) => (s.machines[b]?.text?.rows ?? 0) - (s.machines[a]?.text?.rows ?? 0));
   const machinesOk = list.filter(c => c.key.startsWith("m-") && c.level === "ok").length, machinesAll = list.filter(c => c.key.startsWith("m-")).length;
-  const verdict = s.copy ? `A copy of ${s.copy.of}'s hub, as of ${bkk(s.copy.at)}. Search works; nothing new arrives here.`
+  const verdict = s.copy ? `A copy of ${s.copy.of}'s hub, as of ${bkk(s.copy.at)} Bangkok (${ago(s.copy.at)}). Search works; nothing new arrives here.`
     : level === "ok"
     ? `All in. ${machinesOk} of ${machinesAll} machines synced, searchable to ${secs(s.freshness.fts?.age_s)} ago, backed up ${secs(s.backup?.age_s)} ago.`
     : `${bad.length + s.warnings.length} ${bad.length + s.warnings.length === 1 ? "thing needs" : "things need"} you: ${bad.map(c => c.title).join(", ") || "see the hub's warnings"}.`;
