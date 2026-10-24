@@ -40,6 +40,10 @@ function writeHash(view: View, machine: string, s: SearchState) {
     const h = new URLSearchParams({ tab: view });
     if (machine) h.set("machine", machine);
     if (view === "search" || view === "live") for (const [k, v] of Object.entries(s)) if (v) h.set(k, v);
+    // a view's own place in the hash stays (#tab=oracles&oracle=neo-oracle): with the views loading lazily, the
+    // shell writes the hash before the view has read it, and a deep link to one oracle fell back to the list
+    const was = new URLSearchParams(location.hash.slice(1));
+    if (view === "oracles" && was.get("tab") === "oracles" && was.get("oracle")) h.set("oracle", was.get("oracle")!);
     next = "#" + h;
   }
   if (next !== (location.hash || "#")) history.pushState(null, "", next === "#" ? location.pathname : next);
