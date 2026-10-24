@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
 import { usePoll } from "./api";
 import type { Status } from "./types";
-import { Rail } from "./components/Rail";
-import { StatusBar } from "./components/StatusBar";
+import { pill, TopBar, type Theme } from "./components/TopBar";
 import { cx, Kbd, Seg, State } from "./components/ui";
 import { SearchView, type SearchState } from "./views/SearchView";
 import { LiveView } from "./views/LiveView";
@@ -14,7 +13,6 @@ import { GlancePage } from "./views/GlancePage";
 
 const TABS = ["search", "live", "jobs", "queries", "compare", "store"] as const;
 type Tab = (typeof TABS)[number];
-type Theme = "dark" | "paper";
 
 /** The URL hash holds the view: #tab=search&q=...&horizon=...&with=...&repo=...&machine=..., so a view is a link and
  *  back/forward work (relic4-scan src/page/shell.js ?view= deep links). */
@@ -55,43 +53,45 @@ export function App() {
   }, []);
 
   if (glance) return <GlancePage s={s} error={status.error} at={status.at} theme={theme} setTheme={setTheme} />;
-  const dot = status.error ? "bg-danger" : s ? "bg-accent shadow-[0_0_0_4px_var(--accent-wash)]" : "bg-warning";
+  const machines = s ? Object.keys({ ...s.machines, ...s.versions }).sort() : [];
   return (
-    <div className="grid h-dvh grid-rows-[auto_minmax(0,1fr)] overflow-hidden">
-      <header className="z-10 flex min-h-[58px] flex-wrap items-center gap-3.5 border-b border-line bg-panel px-4 py-2">
-        <a href="#" title="the glance page" className="flex items-baseline whitespace-nowrap font-sans text-[15px] font-bold text-accent">
-          RELIC<span className="font-medium text-faint">5</span><small className="ml-2.5 font-mono text-[10px] text-faint">{s ? `${s.code.name} ${s.code.version}` : "hub"}</small>
-        </a>
-        <Seg label="Theme" value={theme} onChange={setTheme} options={[{ value: "dark", label: "Dark" }, { value: "paper", label: "Paper" }]} />
-        <span className="hidden gap-1 text-[10px] text-faint lg:flex"><Kbd>/</Kbd> search <Kbd>j</Kbd><Kbd>k</Kbd> move <Kbd>↵</Kbd> open <Kbd>esc</Kbd> close</span>
-        <div role="status" className="ml-auto flex min-w-0 items-center gap-2 text-[11px] text-muted">
-          <span className={cx("size-2 flex-none rounded-full", dot)} />
-          <span className="min-w-0"><strong className="font-semibold text-soft">{status.error ? "hub unreachable" : s ? `door ${s.you}` : "connecting…"}</strong>
-            <small className="block max-w-[34vw] truncate text-[9px] text-faint">{s ? `${location.host} · ${s.home} · read ${status.at?.toLocaleTimeString()}` : status.error}</small></span>
-        </div>
-      </header>
-
-      <main className="grid min-h-0 grid-cols-1 md:grid-cols-[288px_minmax(0,1fr)]">
-        {s ? <Rail s={s} machine={view.machine} setMachine={m => setView(v => ({ ...v, machine: m }))} /> : <aside className="border-r border-line bg-rail"><State error={!!status.error}>{status.error ?? "loading…"}</State></aside>}
-        <section className="min-h-0 min-w-0 overflow-y-auto">
-          <StatusBar s={s} error={status.error} />
-          <nav role="tablist" aria-label="View" className="flex flex-wrap border-b border-line bg-bg px-4 py-3">
-            {TABS.map((t, i) => (
+    <div className="h-dvh overflow-y-auto">
+      <TopBar theme={theme} setTheme={setTheme}
+        note={status.error ? "hub unreachable" : s ? `${s.code.name} ${s.code.version} · door ${s.you} · read ${status.at?.toLocaleTimeString()}` : "reading…"}
+        link={<a href="#" className={pill}>Glance</a>} />
+      <main className="mx-auto max-w-[1200px] px-5 pt-8 pb-20 font-sans">
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+          <nav role="tablist" aria-label="View" className="flex flex-wrap gap-1.5">
+            {TABS.map(t => (
               <button key={t} role="tab" type="button" aria-selected={view.tab === t} onClick={() => setView(v => ({ ...v, tab: t }))}
-                className={cx("min-h-[34px] border border-line px-4 text-[11px] font-semibold capitalize", i === 0 && "rounded-l-[5px]",
-                  i === TABS.length - 1 ? "rounded-r-[5px]" : "border-r-0",
-                  view.tab === t ? "border-line-strong bg-accent-dim text-accent-ink" : "bg-raised text-muted hover:text-text")}>
-                {t}{t === "jobs" && s?.jobs.running.length ? ` · ${s.jobs.running.length}` : ""}
+                className={cx("rounded-full px-4 py-2 text-[14px] font-semibold capitalize",
+                  view.tab === t ? "bg-accent-dim text-accent-ink" : "text-muted hover:bg-panel hover:text-text")}>
+                {t}{t === "jobs" && s?.jobs.running.length ? <span className="ml-1.5 rounded-full bg-warning px-1.5 text-[11px] text-bg">{s.jobs.running.length}</span> : null}
               </button>
             ))}
           </nav>
+          {machines.length > 0 && (view.tab === "search" || view.tab === "live") && (
+            <span className="ml-auto flex items-center gap-2.5 text-[13px] text-muted">Machine
+              <Seg label="Machine" value={view.machine} onChange={m => setView(v => ({ ...v, machine: m }))}
+                options={[{ value: "", label: "all" }, ...machines.filter(m => !m.endsWith("-import")).map(m => ({ value: m, label: m }))]} />
+            </span>
+          )}
+        </div>
+        <span className="mt-3 hidden gap-1 text-[12px] text-faint lg:flex"><Kbd>/</Kbd> search · <Kbd>j</Kbd> <Kbd>k</Kbd> move · <Kbd>↵</Kbd> open · <Kbd>esc</Kbd> close</span>
+        {(status.error || (s?.warnings.length ?? 0) > 0) && (
+          <div className="mt-4 flex flex-col gap-1.5">
+            {status.error && <p className="m-0 rounded-xl border border-danger bg-danger-wash px-4 py-2.5 text-[13px] text-danger">last poll failed: {status.error}</p>}
+            {s?.warnings.map(w => <p key={w} className="m-0 rounded-xl border border-warning px-4 py-2.5 text-[13px] text-soft">{w}</p>)}
+          </div>
+        )}
+        <div className="mt-6 overflow-hidden rounded-2xl border border-line bg-bg">
           <div hidden={view.tab !== "search"}><SearchView st={view.search} setSt={st => setView(v => ({ ...v, search: st }))} machine={view.machine} focusKey={focusKey} /></div>
           {view.tab === "live" && <LiveView machine={view.machine} on />}
           {view.tab === "jobs" && <JobsView s={s} on />}
           {view.tab === "queries" && <QueriesView on />}
           {view.tab === "compare" && <CompareView on />}
           {view.tab === "store" && (s ? <StoreView s={s} /> : <State>loading…</State>)}
-        </section>
+        </div>
       </main>
     </div>
   );

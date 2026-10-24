@@ -2,9 +2,10 @@ import type { ComponentType, ReactNode } from "react";
 import { usePoll } from "../api";
 import { ago, bkk, bytes, compact, num, secs, sum } from "../format";
 import { Badge, HealthCard, levelText, levelWord, type Level } from "../components/HealthCard";
-import { Arrow, Disk, Machine, Moon, Pulse, Search, Shield, Sun, Vector } from "../components/Icons";
+import { Arrow, Disk, Machine, Pulse, Search, Shield, Vector } from "../components/Icons";
+import { pill, TopBar } from "../components/TopBar";
 import { Ring } from "../components/Ring";
-import { syncChip } from "../components/Rail";
+import { syncChip } from "../components/sync";
 import { cx } from "../components/ui";
 import type { JobEvent, Status } from "../types";
 
@@ -102,21 +103,8 @@ export function GlancePage({ s, error, at, theme, setTheme }:
   { s: Status | null; error: string | null; at: Date | null; theme: "dark" | "paper"; setTheme: (t: "dark" | "paper") => void }) {
   const log = usePoll<JobEvent[]>("/api/log?n=300", 30000);
   const sessions = usePoll<{ total: number; events: number }>("/api/sessions?limit=0", 0);
-  const top = (
-    <header className="sticky top-0 z-10 border-b border-line bg-[color-mix(in_srgb,var(--bg)_88%,transparent)] backdrop-blur-sm">
-      <div className="mx-auto flex max-w-[1200px] items-center gap-4 px-5 py-3 font-sans">
-        <span className="text-[17px] font-bold text-accent">relic<span className="text-faint">5</span></span>
-        <span className="hidden text-[13px] text-muted sm:inline">{error ? "hub unreachable" : at ? `read ${at.toLocaleTimeString()} · every 15 s` : "reading…"}</span>
-        <button type="button" onClick={() => setTheme(theme === "dark" ? "paper" : "dark")} aria-label={`Switch to ${theme === "dark" ? "Paper" : "Dark"}`}
-          className="ml-auto grid size-9 place-items-center rounded-full border border-line text-soft hover:border-line-strong hover:text-text">
-          {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
-        </button>
-        <a href="#tab=search" className="flex items-center gap-1.5 rounded-full border border-line px-4 py-1.5 text-[13px] font-semibold text-soft hover:border-line-strong hover:text-text">
-          Open the hub <Arrow size={16} />
-        </a>
-      </div>
-    </header>
-  );
+  const top = <TopBar theme={theme} setTheme={setTheme} note={error ? "hub unreachable" : at ? `read ${at.toLocaleTimeString()} · every 15 s` : "reading…"}
+    link={<a href="#tab=search" className={pill}>Open the hub <Arrow size={16} /></a>} />;
   if (!s) return <div className="h-dvh overflow-y-auto">{top}<p className="mx-auto max-w-[1200px] px-5 py-16 font-sans text-lg text-muted">{error ?? "Reading the hub…"}</p></div>;
 
   const list = checks(s, log.data ?? []).sort((a, b) => rank[a.level] - rank[b.level]);

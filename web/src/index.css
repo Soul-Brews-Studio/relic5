@@ -35,7 +35,7 @@
 
 @layer base {
   html, body { height: 100%; overflow: hidden; background: var(--bg); }
-  body { margin: 0; color: var(--text); font: 13px/1.5 var(--font-mono); font-synthesis: none; }
+  body { margin: 0; color: var(--text); font: 14px/1.5 var(--font-sans); font-synthesis: none; }
   * { scrollbar-color: var(--line-strong) transparent; scrollbar-width: thin; }
   ::selection { color: var(--bg); background: var(--accent); }
   :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }

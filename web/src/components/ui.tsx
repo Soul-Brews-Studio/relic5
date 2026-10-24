@@ -5,7 +5,7 @@ const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).jo
 export { cx };
 
 export function Lbl({ children, className }: { children: ReactNode; className?: string }) {
-  return <span className={cx("text-[9px] font-semibold uppercase tracking-[.12em] text-muted", className)}>{children}</span>;
+  return <span className={cx("text-[12px] font-semibold text-muted", className)}>{children}</span>;
 }
 
 export function Btn({ children, primary, ...p }: { primary?: boolean } & React.ButtonHTMLAttributes<HTMLButtonElement>) {
@@ -62,9 +62,9 @@ export function Chip({ tone = "dim", children, title }: { tone?: Tone; children:
 export function Stat({ label, value, tone, note }: { label: string; value: ReactNode; tone?: Tone; note?: string }) {
   const color = tone === "ok" ? "text-accent" : tone === "warn" ? "text-warning" : tone === "bad" ? "text-danger" : "text-text";
   return (
-    <div className="border-r border-line px-4 py-3 last:border-r-0">
+    <div className="border-r border-line px-5 py-4 last:border-r-0">
       <Lbl className="mb-1 block">{label}</Lbl>
-      <b className={cx("text-base tabular-nums", color)}>{value}</b>
+      <b className={cx("text-[22px] font-bold tabular-nums", color)}>{value}</b>
       {note && <div className="truncate text-[10px] text-faint">{note}</div>}
     </div>
   );
@@ -74,13 +74,13 @@ export function Stats({ children }: { children: ReactNode }) {
 }
 
 export function SectionHead({ children }: { children: ReactNode }) {
-  return <div className="px-4 pt-3.5 pb-1.5"><Lbl>{children}</Lbl></div>;
+  return <div className="px-5 pt-6 pb-2"><h3 className="m-0 text-[15px] font-semibold text-text">{children}</h3></div>;
 }
 export function Hint({ children }: { children: ReactNode }) {
-  return <div className="border-b border-line bg-panel px-4 py-2 text-[11px] text-muted">{children}</div>;
+  return <div className="border-b border-line bg-panel px-5 py-2.5 text-[12px] text-muted">{children}</div>;
 }
 export function State({ children, error }: { children: ReactNode; error?: boolean }) {
-  return <div className={cx("px-4 py-6 text-xs", error ? "border-l-2 border-danger bg-danger-wash whitespace-pre-wrap text-danger" : "text-faint")}>{children}</div>;
+  return <div className={cx("px-5 py-6 text-[13px]", error ? "border-l-2 border-danger bg-danger-wash whitespace-pre-wrap text-danger" : "text-faint")}>{children}</div>;
 }
 export const Loading = () => <div className="loading-bar" />;
 
