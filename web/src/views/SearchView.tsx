@@ -389,14 +389,17 @@ export function SearchView({ st, setSt, machine, setMachine, machines, recent, t
           )}
           {res && (
             <p role="status" aria-live="polite" className="m-0 mb-3 flex flex-wrap items-baseline gap-x-3 gap-y-1 px-5 text-sm text-muted">
-              <b className="text-base text-text tabular-nums">{hits.length === 40 ? "Top 40" : `${hits.length} hits`}</b>
+              <b className="text-base text-text tabular-nums">{hits.length === 40 ? "Top 40" : machine && res.hits.length ? `${hits.length} of ${res.hits.length}` : `${hits.length} hits`}</b>
               <span>{machine ? `on ${machine}, ` : ""}{res.horizon === "archive" ? "from all time" : res.horizon === "window" ? "in the chosen window" : `from the last ${res.horizon}`}</span>
               {!!res.older_hits && res.horizon !== "archive" && <button type="button" onClick={() => narrow({ horizon: "archive" })} className={linkBtn}>show the {res.older_hits} older hits</button>}
               <span className="ml-auto font-mono text-xs text-faint">{res.searched_months.length} months · {ms} ms</span>
             </p>
           )}
           {err && <State error>{err}</State>}
-          {res && !hits.length && <State>No match. Pick a wider window above, or try fewer words: every word must appear.</State>}
+          {res && !hits.length && (machine && res.hits.length
+            ? <State>None of these {res.hits.length} hits are on {machine}. The machine choice narrows the hits already found; it does not search {machine} on its own.
+                <span className="mt-3 block"><Btn type="button" onClick={() => setMachine("")}>Show all {res.hits.length}</Btn></span></State>
+            : <State>No match. Pick a wider window above, or try fewer words: every word must appear.</State>)}
           <div className="flex flex-col gap-1">
             {rows.map((r, n) => <HitRow key={r.h.uid + n} h={r.h} q={st.q} active={n === active} more={unfold.has(r.h.uid) ? 0 : r.more.length}
               onMore={() => setUnfold(u => new Set(u).add(r.h.uid))}

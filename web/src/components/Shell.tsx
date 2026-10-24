@@ -15,7 +15,7 @@ export const VIEWS: { id: View; label: string; icon: ComponentType<{ size?: numb
   { id: "jobs", label: "Jobs", icon: Jobs, phone: true, group: 1 },
   { id: "store", label: "Disk", icon: Disk, group: 1 },
   { id: "queries", label: "Asked", icon: Asked, group: 1 },
-  { id: "compare", label: "Search quality", icon: Columns, group: 1 },
+  { id: "compare", label: "Quality", icon: Columns, group: 1 },
   { id: "connect", label: "Connect", icon: Plug, group: 1 },
 ];
 
@@ -156,7 +156,7 @@ export function TopNav({ view, go, state, foot, theme, setTheme, badges, onPalet
       <a href="#" onClick={e => { e.preventDefault(); go("home"); }} className="flex flex-none items-center gap-2.5 rounded-lg">
         <Mark size={30} />
         <b className="text-xl font-bold tracking-[-0.01em] text-accent">relic5</b>
-        {version && <span className="rounded bg-raised px-1.5 py-0.5 font-mono text-xs text-muted max-[1100px]:hidden">{version}</span>}
+        {version && <span className="rounded bg-raised px-1.5 py-0.5 font-mono text-xs text-muted max-[1400px]:hidden">{version}</span>}
       </a>
       <nav aria-label="Views" className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none]">
         {VIEWS.filter(v => v.group === 0).map(link)}
@@ -166,7 +166,7 @@ export function TopNav({ view, go, state, foot, theme, setTheme, badges, onPalet
       <div className="flex flex-none items-center gap-2">
         <button type="button" onClick={onPalette}
           className="flex min-h-10 items-center gap-2.5 rounded-lg border border-line bg-deep px-3 text-xs text-muted hover:border-line-strong hover:text-text">
-          <Search size={15} /><span className="max-[1280px]:hidden">Search or jump</span>
+          <Search size={15} /><span className="max-[1500px]:hidden">Search or jump</span>
           <kbd className="rounded border border-line px-1 font-mono text-xs">⌘K</kbd>
         </button>
         <button type="button" onClick={onLayout} aria-label="Menu on the left" title="Menu on the left"
@@ -176,7 +176,7 @@ export function TopNav({ view, go, state, foot, theme, setTheme, badges, onPalet
           {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
         </button>
         <span className="flex items-center gap-2 pl-1 text-xs font-semibold text-soft" title={typeof foot === "string" ? foot : undefined}>
-          <span className={cx("size-2 rounded-full", dot[state])} /><span className="max-[1280px]:hidden">{word[state]}</span>
+          <span className={cx("size-2 rounded-full", dot[state])} /><span className="max-[1500px]:hidden">{word[state]}</span>
         </span>
       </div>
     </header>
