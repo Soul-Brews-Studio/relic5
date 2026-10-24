@@ -26,7 +26,7 @@ export interface Status {
   watermarks: {
     index: { at: string | null; rows: number | null };
     fts: { at: string | null; rows: Record<string, number> };
-    vectors: { at: string | null; pending: number | null; models?: Record<string, Record<string, { at: string; pending: number }>> };
+    vectors: { at: string | null; pending: number | null; tables?: Record<string, number>; models?: Record<string, Record<string, { at: string; pending: number }>> };
   };
   months: { total: number; sealed: number; open: string; list: Month[] };
   freshness: { machines: Record<string, MachineFresh>; fts?: { at: string; age_s: number }; vectors?: { at: string } };
