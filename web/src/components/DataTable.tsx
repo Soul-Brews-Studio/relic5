@@ -17,7 +17,7 @@ export function DataTable<T>({ cols, rows, rowKey, onRow, empty = "nothing yet",
       <table className="w-max min-w-full border-collapse">
         <thead>
           <tr>{cols.map(c => (
-            <th key={c.key} className={cx("sticky top-0 z-[2] border-b border-line bg-bg px-3 py-2.5 text-[9px] font-semibold uppercase tracking-[.12em] text-muted",
+            <th key={c.key} className={cx("sticky top-0 z-[2] border-b border-line bg-bg px-4 py-3 text-[11px] font-semibold text-muted",
               c.num ? "text-right" : "text-left")}>{c.head}</th>
           ))}</tr>
         </thead>
@@ -29,7 +29,7 @@ export function DataTable<T>({ cols, rows, rowKey, onRow, empty = "nothing yet",
                 className={cx(onRow && "cursor-pointer", "hover:[&>td]:bg-panel", flash?.has(k) && "flash", active === i && "[&>td]:bg-accent-wash")}>
                 {cols.map(c => (
                   <td key={c.key} title={c.title?.(r)}
-                    className={cx("max-w-[460px] truncate border-b border-line px-3 py-2 align-top text-xs", c.num && "text-right tabular-nums")}>
+                    className={cx("max-w-[460px] truncate border-b border-line px-4 py-2.5 align-top font-mono text-[12px]", c.num && "text-right tabular-nums")}>
                     {c.cell(r)}
                   </td>
                 ))}
