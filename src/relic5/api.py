@@ -217,6 +217,12 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
         from . import memory
         return memory.listing(relic.parts.root)
 
+    @app.get("/api/memory/map", response_model=None)
+    def memory_map_route() -> Json:
+        """Every memory note with its own vector as a point (universe.memory_map), for the Knowledge page's map."""
+        from . import universe
+        return universe.memory_map(relic)
+
     @app.get("/api/memory/file", response_model=None)
     def memory_file(path: str) -> Response:
         """One memory note as its file holds it (frontmatter and all), for the Knowledge page's raw view. Only a .md under

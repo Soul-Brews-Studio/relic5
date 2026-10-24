@@ -166,3 +166,16 @@ def test_parity_is_checked_once_a_day(tmp_path, monkeypatch):
     import time
     assert worker.parity_fresh(M, "ane") and not worker.parity_fresh(M, "mps")
     assert not worker.parity_fresh(M, "ane", now=time.time() + worker.PARITY_TTL_S + 1)
+
+
+def test_missing_hands_memory_notes_to_the_worker(tmp_path):
+    """Each memory note gets its own vector: missing() lists notes.parquet's keys beside the text stream's."""
+    import duckdb
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    d = tmp_path / "index" / "_memory"
+    d.mkdir(parents=True)
+    pq.write_table(pa.table({"key": ["n1", "n2"], "ts": ["2026-10-01", "2026-10-02"], "text": ["rule one", "decision two"]}), d / "notes.parquet")
+    (tmp_path / "parts").mkdir()
+    m = vec.missing(str(tmp_path), duckdb.connect(), "g--m@00000000", limit=10)
+    assert m["pending"] == 2 and [r["key"] for r in m["rows"]] == ["n2", "n1"]

@@ -2,13 +2,15 @@
 // that combo with code and repo and real file"). After the old ARRA Oracle Studio's Feed and DocDetail
 // (ui-oracle apps/studio, 2026-04-19): a card per note with its kind and project; the note page renders the text, names
 // the repo with a link to it, shows the real file it lives in and opens that file raw with line numbers; J/K step notes.
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { get, usePoll } from "../api";
 import { ago, bkk, num, repoColor } from "../format";
 import { Drawer } from "../components/Drawer";
 import { Markdown, stripFrontmatter } from "../components/Markdown";
 import { Search } from "../components/Icons";
-import { Btn, inputCls, Kbd, Lbl, Loading, PageHead, State, Toggle } from "../components/ui";
+import { Btn, inputCls, Kbd, Lbl, Loading, PageHead, Seg, State, Toggle } from "../components/ui";
+
+const Map3D = lazy(() => import("./Map3D"));
 import type { ShowResult } from "../types";
 
 interface Note { uid: string; link: string; ts: string; type: string; project: string; title: string; description: string; machines: string[]; home: string }
@@ -131,6 +133,92 @@ function NotePage({ n, onBack, onPrev, onNext }: { n: Note; onBack: () => void; 
 
 const unq = (t: string) => t.replace(/\\"/g, '"');
 
+/** The numbers behind the notes (Nat: "should be really stat"): by kind, by project, by month, by machine. */
+function Stats({ notes, types, pick }: { notes: Note[]; types: Record<string, number>; pick: (p: Partial<{ type: string; project: string }>) => void }) {
+  const total = notes.length;
+  const byProject = new Map<string, number>(), byMonth = new Map<string, number>(), byMachine = new Map<string, number>();
+  for (const n of notes) {
+    byProject.set(n.project, (byProject.get(n.project) ?? 0) + 1);
+    if (n.ts) byMonth.set(n.ts.slice(0, 7), (byMonth.get(n.ts.slice(0, 7)) ?? 0) + 1);
+    for (const m of n.machines) byMachine.set(m, (byMachine.get(m) ?? 0) + 1);
+  }
+  const months = [...byMonth.entries()].sort(), mmax = Math.max(1, ...months.map(m => m[1]));
+  const projects = [...byProject.entries()].sort((a, b) => b[1] - a[1]), pmax = projects[0]?.[1] ?? 1;
+  const week = notes.filter(n => n.ts && Date.now() - +new Date(n.ts) < 7 * 864e5).length;
+  const Bar = ({ label, n, max, color, onClick }: { label: string; n: number; max: number; color: string; onClick?: () => void }) => (
+    <button type="button" onClick={onClick} className="block w-full rounded-lg px-2 py-1.5 text-left hover:bg-raised">
+      <span className="flex justify-between gap-3 text-sm"><span className="min-w-0 truncate text-soft">{label}</span><span className="font-mono text-xs text-muted tabular-nums">{num(n)}</span></span>
+      <span className="mt-1 block h-1.5 rounded-full bg-raised"><span className="block h-1.5 rounded-full" style={{ width: `${Math.max(2, (100 * n) / max)}%`, background: color }} /></span>
+    </button>
+  );
+  return (
+    <div className="rise flex flex-col gap-6">
+      <div className="grid grid-cols-2 gap-6 md:grid-cols-4">
+        {([["notes", total], ["projects", byProject.size], ["new this week", week], ["machines", byMachine.size]] as const).map(([l, n]) => (
+          <div key={l}><div className="text-xs font-bold tracking-[0.14em] text-muted uppercase">{l}</div><div className="mt-1 text-2xl font-extrabold text-text tabular-nums">{num(n)}</div></div>))}
+      </div>
+      <div className="grid gap-6 lg:grid-cols-2">
+        <section className="rounded-2xl border border-line bg-panel p-5">
+          <h2 className="m-0 mb-3 text-base font-bold text-text">By kind</h2>
+          {Object.entries(types).sort((a, b) => b[1] - a[1]).map(([t, n]) => <Bar key={t} label={`${t === "user" ? "about Nat" : kind(t).word + "s"} · ${t}`} n={n} max={total} color={kind(t).color} onClick={() => pick({ type: t })} />)}
+          <p className="m-0 mt-3 text-xs text-muted">Claude Code's four kinds: <b>feedback</b> (a rule: how to work), <b>project</b> (a decision or fact about the work), <b>reference</b> (where something lives), <b>user</b> (who the human is).</p>
+        </section>
+        <section className="rounded-2xl border border-line bg-panel p-5">
+          <h2 className="m-0 mb-3 text-base font-bold text-text">Written per month</h2>
+          <div className="flex h-40 items-end gap-1.5" role="img" aria-label="Notes written per month">
+            {months.map(([m, n]) => <div key={m} className="flex min-w-0 flex-1 flex-col items-center gap-1" title={`${m}: ${n} notes`}>
+              <span className="font-mono text-[11px] text-muted">{n}</span>
+              <span className="w-full rounded-t-[4px] bg-[#4a98d8]" style={{ height: `${Math.max(2, (100 * n) / mmax)}%` }} />
+              <span className="font-mono text-[11px] text-faint">{m.slice(2)}</span></div>)}
+          </div>
+          <div className="mt-4 flex flex-wrap gap-x-5 gap-y-1 text-sm text-muted">{[...byMachine.entries()].map(([m, n]) => <span key={m}><b className="text-soft">{m}</b> holds {num(n)}</span>)}</div>
+        </section>
+      </div>
+      <section className="rounded-2xl border border-line bg-panel p-5">
+        <h2 className="m-0 mb-3 text-base font-bold text-text">Projects with the most notes</h2>
+        <div className="grid gap-x-8 md:grid-cols-2">{projects.slice(0, 20).map(([pr, n]) => <Bar key={pr} label={repoOf(pr)?.repo ?? pr} n={n} max={pmax} color={repoColor(repoOf(pr)?.repo ?? pr)} onClick={() => pick({ project: pr })} />)}</div>
+      </section>
+      <section className="rounded-2xl border border-line bg-panel p-5">
+        <h2 className="m-0 text-base font-bold text-text">What is in Claude Code memory</h2>
+        <div className="mt-2 max-w-[80ch]"><Markdown compact text={"Every project an agent works in gets a folder `~/.claude/projects/<project>/memory/`. Each note is one `.md` file holding one fact, with frontmatter: `name`, `description` (the line shown here) and `type` (one of the four kinds). `MEMORY.md` in the same folder is the index Claude Code loads at the start of every session, one line per note; the notes themselves are read when they matter. relic5-push sends every machine's folders raw; `relic5 index` folds a note copied to two machines into one, and keeps an edited copy as a second version."} /></div>
+      </section>
+    </div>
+  );
+}
+
+interface MemPoint { uid: string; x: number; y: number; z: number; type: string; project: string; title: string; ts: string; machines: string[] }
+
+/** Every note as a point placed by its own vector (GET /api/memory/map); colour is the kind. */
+function NotesMap({ notes, onOpen }: { notes: Note[]; onOpen: (uid: string) => void }) {
+  const p = usePoll<{ notes: number; embedded: number; explained: number[]; points: MemPoint[] }>("/api/memory/map", 0);
+  const [hover, setHover] = useState<{ i: number; x: number; y: number }>({ i: -1, x: 0, y: 0 });
+  const [sel, setSel] = useState(-1);
+  const pts = p.data?.points ?? [];
+  const colors = useMemo(() => pts.map(x => kind(x.type).color), [pts]);
+  const dim = useMemo(() => pts.map(() => false), [pts]);
+  if (p.error && !p.data) return <State error>{p.error}</State>;
+  if (!p.data) return <Loading label="Placing the notes" />;
+  if (!pts.length) return <State>{`None of the ${num(p.data.notes)} notes has a vector of its own yet. The embed worker now takes memory notes too (GET /api/missing lists them); after its next run they show here, each placed by its own meaning.`}</State>;
+  const hv = hover.i >= 0 ? pts[hover.i] : undefined;
+  const known = new Set(notes.map(n => n.uid));
+  return (
+    <div className="rise">
+      <p className="m-0 mb-3 text-sm text-muted">{num(p.data.embedded)} of {num(p.data.notes)} notes have their own vector · close points say similar things · colour is the kind · click a point to open its note</p>
+      <div className="relative h-[min(70vh,780px)] min-h-[420px] overflow-hidden rounded-2xl border border-line bg-[radial-gradient(ellipse_at_center,var(--raised)_0%,var(--deep)_75%)]">
+        <Suspense fallback={<div className="p-6"><Loading label="Loading the 3D view" /></div>}>
+          <Map3D points={pts.map(x => ({ sid: x.uid, x: x.x, y: x.y, z: x.z, n: 1, ts: x.ts, repo: x.project, name: x.title, machines: x.machines }))} colors={colors} dim={dim}
+            selected={sel} spin={sel < 0} onHover={(i, x, y) => setHover({ i, x, y })} onSelect={i => { setSel(i); if (known.has(pts[i].uid)) onOpen(pts[i].uid); }} />
+        </Suspense>
+        {hv && <div className="pointer-events-none absolute z-10 max-w-[340px] rounded-xl border border-line-strong bg-panel px-3.5 py-2.5 text-sm shadow-[var(--shadow-pop)]" style={{ left: hover.x + 14, top: hover.y + 14 }}>
+          <div className="font-semibold text-text">{hv.title.replace(/[-_]/g, " ")}</div>
+          <div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted"><span className="size-2 rounded-full" style={{ background: colors[hover.i] }} />{kind(hv.type).word} · {repoOf(hv.project)?.repo ?? hv.project}</div>
+        </div>}
+        <p className="pointer-events-none absolute bottom-3 left-4 m-0 font-mono text-xs text-faint">pca-3d of each note's own vector · axes explain {p.data.explained.map(e => Math.round(e * 100) + "%").join(" / ")} · drag to turn · wheel to zoom</p>
+      </div>
+    </div>
+  );
+}
+
 export function MemoryView() {
   const p = usePoll<Listing>("/api/memory", 60000);
   const [q, setQ] = useState("");
@@ -138,6 +226,7 @@ export function MemoryView() {
   const [project, setProject] = useState("");
   const [shown, setShown] = useState(PAGE);
   const [at, setAt] = useState<number | null>(null);
+  const [mode, setMode] = useState<"feed" | "stats" | "map">("feed");
 
   const list = useMemo(() => {
     const words = q.toLowerCase().split(/\s+/).filter(Boolean);
@@ -155,7 +244,12 @@ export function MemoryView() {
   const projects = Object.entries(p.data.projects);
   return (
     <>
-      <PageHead title="Knowledge" sub={<>{num(total)} one-fact notes agents keep per project: the rules Nat set, the decisions made, where things live. Pushed raw from every machine's <code className="font-mono text-sm text-soft">~/.claude/projects/*/memory</code>.</>} />
+      <PageHead title="Knowledge" sub={<>{num(total)} one-fact notes agents keep per project: the rules Nat set, the decisions made, where things live. Pushed raw from every machine's <code className="font-mono text-sm text-soft">~/.claude/projects/*/memory</code>.</>}>
+        <Seg label="View" value={mode} onChange={setMode} options={[{ value: "feed", label: "Feed" }, { value: "stats", label: "Stats" }, { value: "map", label: "Map" }]} />
+      </PageHead>
+      {mode === "stats" && <Stats notes={p.data.notes} types={p.data.types} pick={x => { if (x.type !== undefined) setType(x.type); if (x.project !== undefined) setProject(x.project); setMode("feed"); }} />}
+      {mode === "map" && <NotesMap notes={list} onOpen={uid => { const i = list.findIndex(n => n.uid === uid); if (i >= 0) setAt(i); }} />}
+      {mode === "feed" && <>
       <div className="mb-6 flex flex-col gap-4">
         <label className="relative flex items-center">
           <span className="pointer-events-none absolute left-4 text-muted"><Search size={20} /></span>
@@ -186,7 +280,8 @@ export function MemoryView() {
         {list.slice(0, shown).map((n, i) => <NoteCard key={n.uid} n={n} q={q} onOpen={() => setAt(i)} />)}
       </div>
       {list.length > shown && <div className="mt-6"><Btn type="button" onClick={() => setShown(shown + PAGE * 2)}>Show {num(Math.min(PAGE * 2, list.length - shown))} more</Btn></div>}
-      <div className="mt-8"><Lbl>source</Lbl> <span className="font-mono text-xs text-faint">GET /api/memory · /api/show · /api/memory/file</span></div>
+      </>}
+      <div className="mt-8"><Lbl>source</Lbl> <span className="font-mono text-xs text-faint">GET /api/memory · /api/memory/map · /api/show · /api/memory/file</span></div>
     </>
   );
 }

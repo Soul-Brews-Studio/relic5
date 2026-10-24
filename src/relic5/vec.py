@@ -109,8 +109,15 @@ def missing(root: str, con: "duckdb.DuckDBPyConnection", model: str = DEFAULT, l
             max_chars: int = 6000) -> Json:
     """Keys of the prose text stream with no vector yet, newest first (the open month first), one row per key.
     prefix: only keys starting with it, so two workers (m5, gb300) can take disjoint slices."""
+    import os
     parts = Parts(root)
     src = text_sql(parts)
+    # the memory notes too (index/_memory/notes.parquet, key = the note's msgkey): each note gets its own vector, so the
+    # Knowledge page can place notes by meaning (Nat, 2026-10-24: "vectorized (individual) vector visualize")
+    mem = os.path.join(root, "index", "_memory", "notes.parquet")
+    if os.path.exists(mem):
+        notes = f"(SELECT key, ts, text FROM read_parquet('{mem.replace(chr(39), chr(39) * 2)}') WHERE text IS NOT NULL AND text <> '')"
+        src = f"(SELECT key, ts, text FROM {src} UNION ALL SELECT * FROM {notes})" if src else notes
     if src is None:
         return {"model": model, "rows": [], "pending": 0}
     have = vectors_sql(root, model)
