@@ -56,6 +56,36 @@ def shards(root: str, model: str) -> list[str]:
     return sorted(os.path.join(d, f) for f in os.listdir(d) if f.endswith(".parquet") and not f.startswith(".")) if os.path.isdir(d) else []
 
 
+def shard_months(root: str, model: str, con: "duckdb.DuckDBPyConnection", parts: Parts) -> dict[str, list[str]]:
+    """{shard file: the months its keys belong to}, cached in index/_search/shard_months.json by (name, size). A new
+    shard of 100 October chunks then changes only the open table's inputs, and the 1M-row history table is left
+    alone (2026-10-24: every shard rebuilt both, 50 s of a 58 s embed)."""
+    import json
+    from .fts import search_dir
+    p = os.path.join(search_dir(root), "shard_months.json")
+    try:
+        cache: dict[str, Json] = json.load(open(p))
+    except (OSError, ValueError):
+        cache = {}
+    fs = [p_ for _, _, p_ in parts.files("text")]
+    out: dict[str, list[str]] = {}
+    for f in shards(root, model):
+        name, size = os.path.basename(f), os.path.getsize(f)
+        hit = cache.get(name)
+        if hit and hit.get("size") == size:
+            out[name] = list(hit["months"])
+            continue
+        months = [m for (m,) in con.execute(f"""SELECT DISTINCT coalesce(month, substr(ts_th, 1, 7)) FROM read_parquet({sql_list(fs)}, union_by_name = true)
+                                                WHERE key IN (SELECT key FROM read_parquet({sql_list([f])})) ORDER BY 1""").fetchall() if m] if fs else []
+        cache[name] = {"size": size, "months": months}
+        out[name] = months
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p + ".tmp", "w") as fh:
+        json.dump({k: v for k, v in cache.items() if k in out}, fh)
+    os.replace(p + ".tmp", p)
+    return out
+
+
 def slug(model: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", model.lower()).strip("_")
 

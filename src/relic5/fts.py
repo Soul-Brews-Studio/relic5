@@ -126,9 +126,13 @@ def build(root: str, con: "duckdb.DuckDBPyConnection", log: Callable[[str], obje
     from . import vec as V
     for model in (V.models(root) if lane == "vectors" else ()):
         layer = "vec_" + V.slug(model)
-        shard_sig = [[os.path.basename(f), os.path.getsize(f)] for f in V.shards(root, model)]
+        sm = V.shard_months(root, model, con, parts)
+        sizes = {os.path.basename(f): os.path.getsize(f) for f in V.shards(root, model)}
         for part, ms in groups.items():
             name = f"{layer}_{part}"
+            mine = set(ms) | ({"undated", None} if part == "history" else set())
+            # only the shards holding keys of this table's months: a new October shard leaves history untouched
+            shard_sig = [[n, sizes[n]] for n in sorted(sm) if mine & set(sm[n])]
             sig = json.loads(json.dumps({"text": _sig(parts, "prose", ms), "shards": shard_sig}))
             if force or state.get(name, {}).get("sig") != sig or name not in current(root):
                 plan[name] = ("vec:" + model, ms, sig)
