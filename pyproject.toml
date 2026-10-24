@@ -1,6 +1,6 @@
 [project]
 name = "relic5"
-version = "0.1.0"
+version = "26.10.24"
 description = "One hub on white for every machine's extracted history and vectors: push, import, embed, serve"
 requires-python = ">=3.12"
 dependencies = [

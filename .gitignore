@@ -8,3 +8,4 @@ feeder/.build/
 feeder/*.app/
 .impeccable/review/
 .impeccable/*.json
+.impeccable/
