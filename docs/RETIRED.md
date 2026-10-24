@@ -30,11 +30,11 @@ its seal records in `index/_seals/retired.json`, and logs a `retire` event in `l
 | 2026-10-24 | skill `/relic3` and the relic3 or session-viewer calls in `ralph-dig`, `day-diary`, `oracle-recap-day`, `jsonl-truth`, `sonnet-scout`, `herdr-lead-scouts` | `SKILL.md.bak-20261024-relic5` beside each | skill `/relic5`; `/relic3` is now a redirect to it | the same tools, now on a live index |
 | 2026-10-24 | `m5-nat` machine (nat's own relic chain, plist renamed `.off`) | white `~/relic5/attic/m5-nat-20261024`; 13 seal records in `index/_seals/retired.json` | m5: beta scans `/Users/Shared/nat-export` (transcripts), and `RELIC5_MEMORY_ROOTS` pushes nat's memory notes | one truth for m5. Every row and note was checked as held by m5 before the move (0 rows missing) |
 | 2026-10-24 | replaced binaries and scripts: relic-scan (947 → 1312), relic5-push (stamps 4eed2b7, 039a4ee, 9a1c9e6), relic-chain (two edits) | `~/.local/bin/<name>.bak-<old version>` on m5, mba and white | the version `relic_status` reports per machine | each install keeps the binary it replaced |
+| 2026-10-24 | relic3's data on m5: `~/.relic3` (19 GB), `~/.relic3-hub` (80 GB), `~/.relic3-mirror` (34 GB sparsebundle) | black `~/relic3-backup-20261024/`: both homes' config, logs, manifests, vectors and current-generation parquet (sha256 lists beside them), plus `orphan-notes/`; the 136 ψ notes that existed only in relic3 also in white `~/relic5/attic/relic3-orphan-notes-20261024` | relic5 hub: every relic3 transcript session held; `resolve/relic3.parquet` maps all 7,742,386 relic3 uids; the 4 Codex sessions held nowhere else imported as machine `relic3-codex` | relic3 frozen since 2026-10-15; certified in docs/RELIC3-CERTIFY.md |
 
 ## Not retired yet (each one needs Nat's OK, see docs/APPS.md)
 
 - `studio.soulbrews.relic-chain` (m5). Its successor is RelicFeeder as a LaunchAgent. The plan is to wait a day
   after RelicFeeder runs on its own.
-- `~/.relic3-gens` (81 GB) and the buildx cache (48 GB). Both are records with a successor (relic5); it is still
-  undecided where they are kept.
+- The buildx cache (48 GB): a record with a successor (relic5); it is still undecided where it is kept.
 - The old MCP entries in mba's and white's own `~/.claude.json`.
