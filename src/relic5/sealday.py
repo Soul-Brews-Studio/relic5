@@ -67,6 +67,7 @@ class MonthState(TypedDict):
     fingerprint: str | None
     reconciled_at: str | None
     amendments: int
+    recap: bool
 
 
 def _days_dir(root: str) -> str:
@@ -114,7 +115,7 @@ def check(root: str, month: str) -> tuple[MonthState, dict[str, MachineSeal]]:
     import pyarrow.parquet as pq
     parts = Parts(root)
     st: MonthState = {"month": month, "state": "open", "waiting": [], "problems": [], "fingerprint": None,
-                      "reconciled_at": None, "amendments": 0}
+                      "reconciled_at": None, "amendments": 0, "recap": False}
     if month == "undated" or month >= this_month():
         return st, {}
     got: dict[str, MachineSeal] = {}
@@ -231,7 +232,13 @@ def summary(root: str) -> list[MonthState]:
     if not os.path.exists(p):
         return []
     months: list[MonthState] = json.load(open(p)).get("months", [])
+    for m in months:   # written by bin/relic5-month-recap after the month reconciled (it may come later than the record)
+        m["recap"] = os.path.isfile(recap_path(root, m["month"]))
     return months
+
+
+def recap_path(root: str, month: str) -> str:
+    return os.path.join(root, "recaps", f"{month}.md")
 
 
 def overdue(states: list[MonthState], now: datetime | None = None) -> list[str]:

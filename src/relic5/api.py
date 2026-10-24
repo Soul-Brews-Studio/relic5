@@ -116,6 +116,17 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
             return JSONResponse({"error": "not found"}, status_code=404)
         return Response(open(path, "rb").read(), media_type=TYPES[ext], headers={"cache-control": "public, max-age=31536000, immutable"})
 
+    @app.get("/api/month-recap", response_model=None)
+    def month_recap(month: str) -> Response:
+        """A sealed month's recap (bin/relic5-month-recap), markdown; 404 until one is written."""
+        from . import sealday
+        if len(month) != 7 or month[4] != "-" or not (month[:4] + month[5:]).isdigit():
+            return JSONResponse({"error": "month is YYYY-MM"}, status_code=400)
+        p = sealday.recap_path(relic.parts.root, month)
+        if not os.path.isfile(p):
+            return JSONResponse({"error": f"no recap for {month} yet"}, status_code=404)
+        return Response(open(p, encoding="utf-8").read(), media_type="text/markdown; charset=utf-8")
+
     @app.get("/api/memory", response_model=None)
     def memory_route() -> "Listing":
         from . import memory

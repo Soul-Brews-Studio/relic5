@@ -111,3 +111,22 @@ def test_push_sends_receipts(tmp_path):
     assert list(rec["months"]) == ["2026-09"]                             # sealed months only
     assert rec["months"]["2026-09"]["parts"]["text"] == {"bytes": 18, "sha256": hashlib.sha256(b"sealed month bytes").hexdigest()}
     assert json.load(open(src / ".receipts-cache.json"))
+
+
+def test_month_recap_route_and_flag(hub):
+    from fastapi.testclient import TestClient
+    from relic5 import sealday as SD
+    from relic5.api import make_app
+    from relic5.doors import Doors
+    tokens = {"mba": "tok-mba"}
+    client = TestClient(make_app(hub, tokens, Doors(tokens, enabled=False)))
+    client.get("/login", params={"t": "tok-mba"})
+    assert client.get("/api/month-recap", params={"month": "2026/09"}).status_code == 400
+    assert client.get("/api/month-recap", params={"month": "2026-09"}).status_code == 404
+    os.makedirs(os.path.join(hub, "recaps"), exist_ok=True)
+    open(os.path.join(hub, "recaps/2026-09.md"), "w").write("# 2026-09 in relic5\n> fingerprint `abc`\n")
+    r = client.get("/api/month-recap", params={"month": "2026-09"})
+    assert r.status_code == 200 and r.text.startswith("# 2026-09 in relic5") and "markdown" in r.headers["content-type"]
+    months_json(hub, "mba", [{"month": "2026-09", "sealed": False}])
+    SD.run(hub)
+    assert {m["month"]: m["recap"] for m in SD.summary(hub)}["2026-09"] is True
