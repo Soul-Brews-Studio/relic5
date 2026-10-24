@@ -20,9 +20,28 @@ export interface Artifact { id: string; oracle: string; title: string; kind: "im
 function Show({ a, big }: { a: Artifact; big?: boolean }) {
   if (a.kind === "image") return <img src={a.url} alt={a.title} loading="lazy" className={cx("h-full w-full", big ? "object-contain" : "object-cover")} />;
   if (a.kind === "video") return <video src={a.url} controls={big} muted={!big} loop autoPlay={!big} playsInline className={cx("h-full w-full", big ? "object-contain" : "object-cover")} />;
-  if (a.kind === "web") return <iframe src={a.url} title={a.title} sandbox="allow-scripts" className={cx("h-full w-full border-0 bg-white", !big && "pointer-events-none")} loading="lazy" />;
+  // a web piece runs only when opened: as a live tile its labels collided at card size (relic4-scan's review)
+  if (a.kind === "web") return big ? <iframe src={a.url} title={a.title} sandbox="allow-scripts" className="h-full w-full border-0 bg-white" />
+    : <div className="grid h-full w-full place-items-center bg-[radial-gradient(circle_at_50%_45%,var(--accent-wash),var(--deep)_70%)] text-center">
+        <span><span className="mx-auto mb-2 grid size-12 place-items-center rounded-full bg-accent text-xl font-bold text-on-accent">▶</span>
+          <span className="block font-mono text-xs text-muted">web piece · open to run</span></span></div>;
   return big ? <Suspense fallback={<Loading label="Loading the 3D model" />}><ModelView url={a.url} label={a.title} /></Suspense>
     : <div className="grid h-full w-full place-items-center bg-deep font-mono text-sm text-muted">3D model · .{a.ext}</div>;
+}
+
+/** A prompt as text in the page's own scroll (relic4-scan's review: never a scrollbar inside a card): wrapped at 80
+ *  characters, the first 12 lines, then "Show all". */
+function PromptText({ text }: { text: string }) {
+  const [all, setAll] = useState(false);
+  const lines = text.split("\n");
+  const shown = all ? lines : lines.slice(0, 12);
+  return (
+    <div className="mt-4 rounded-xl border border-line bg-deep p-4">
+      <pre className="m-0 max-w-[80ch] font-mono text-xs leading-relaxed whitespace-pre-wrap break-words text-soft">{shown.join("\n")}</pre>
+      {lines.length > 12 && <button type="button" onClick={() => setAll(!all)} className="mt-2 inline-flex min-h-9 items-center text-xs font-semibold text-accent">
+        {all ? "Show less" : `Show all ${lines.length} lines`}</button>}
+    </div>
+  );
 }
 
 /** The oracle's artifacts as a gallery; a tile opens the piece big with its record (who sent it, when, the prompt). */
@@ -123,7 +142,7 @@ function OraclePage({ name, onBack }: { name: string; onBack: () => void }) {
           : tab === "character"
           ? `Built only from ${p.name}'s soul notes, learnings and the rules set for it. Paste it into Claude to get its character, voice and style, each claim quoted from a note.`
           : `Built from ${p.name}'s newest learnings and retrospectives. Paste it into Claude to hear what ${p.name} has come to understand, and where the notes are thin.`}</p>
-        <pre className="m-0 mt-4 max-h-[340px] overflow-auto rounded-xl border border-line bg-deep p-4 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words text-soft">{p.prompts[tab] ?? ""}</pre>
+        <PromptText text={p.prompts[tab] ?? ""} />
       </section>
 
       <section className="mb-6 rounded-2xl border border-line bg-panel p-5">

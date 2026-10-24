@@ -60,24 +60,7 @@ export function Seg<T extends string>({ value, options, onChange, label, block }
   );
 }
 
-export function Field({ label, children, wide, htmlFor }: { label: string; children: ReactNode; wide?: boolean; htmlFor?: string }) {
-  return (
-    <div className={cx("flex min-w-0 flex-col gap-2", wide ? "flex-[1_1_300px]" : "flex-[0_1_200px]")}>
-      <label htmlFor={htmlFor}><Lbl>{label}</Lbl></label>
-      {children}
-    </div>
-  );
-}
-
 export const inputCls = "h-11 min-w-0 rounded-lg border border-line bg-deep px-3 text-sm text-text placeholder:text-faint hover:border-line-strong focus:border-accent";
-
-/** A row of controls over a list, inside a card or at the top of one. */
-export function Toolbar({ children, onSubmit }: { children: ReactNode; onSubmit?: () => void }) {
-  return (
-    <form onSubmit={e => { e.preventDefault(); onSubmit?.(); }}
-      className="mb-6 flex flex-wrap items-end gap-x-4 gap-y-4 rounded-2xl border border-line bg-panel px-6 py-5">{children}</form>
-  );
-}
 
 export type Tone = "ok" | "warn" | "bad" | "dim" | "live";
 const tones: Record<Tone, string> = {

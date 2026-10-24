@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { flushSync } from "react-dom";
 import { get } from "./api";
 import { usePoll } from "./api";
@@ -9,17 +9,19 @@ import { Drawer } from "./components/Drawer";
 import { Mark, Menu as MenuIcon, Search as SearchIcon } from "./components/Icons";
 import { cx, Loading, State } from "./components/ui";
 import { Context, SearchView, shortRepo, type SearchState } from "./views/SearchView";
-import { MemoryView } from "./views/MemoryView";
-import { MapView } from "./views/MapView";
-import { OraclesView } from "./views/OraclesView";
-import { FamilyView } from "./views/FamilyView";
-import { ConnectView } from "./views/ConnectView";
-import { LiveView } from "./views/LiveView";
-import { JobsView } from "./views/JobsView";
-import { QueriesView } from "./views/QueriesView";
-import { CompareView } from "./views/CompareView";
-import { StoreView } from "./views/StoreView";
 import { GlancePage } from "./views/GlancePage";
+// Every view but Home and Search loads on first use, so the first page carries only those two (relic4-scan's
+// review, 2026-10-25: "fast"; the main JS had grown to 51.9 KB gz with all ten views in it).
+const MemoryView = lazy(() => import("./views/MemoryView").then(m => ({ default: m.MemoryView })));
+const MapView = lazy(() => import("./views/MapView").then(m => ({ default: m.MapView })));
+const OraclesView = lazy(() => import("./views/OraclesView").then(m => ({ default: m.OraclesView })));
+const FamilyView = lazy(() => import("./views/FamilyView").then(m => ({ default: m.FamilyView })));
+const ConnectView = lazy(() => import("./views/ConnectView").then(m => ({ default: m.ConnectView })));
+const LiveView = lazy(() => import("./views/LiveView").then(m => ({ default: m.LiveView })));
+const JobsView = lazy(() => import("./views/JobsView").then(m => ({ default: m.JobsView })));
+const QueriesView = lazy(() => import("./views/QueriesView").then(m => ({ default: m.QueriesView })));
+const CompareView = lazy(() => import("./views/CompareView").then(m => ({ default: m.CompareView })));
+const StoreView = lazy(() => import("./views/StoreView").then(m => ({ default: m.StoreView })));
 
 const TABS = VIEWS.map(v => v.id).filter(v => v !== "home");
 
@@ -120,6 +122,7 @@ export function App() {
             <SearchView st={st.search} setSt={search2 => setSt(v => ({ ...v, search: search2 }))} machine={st.machine}
               setMachine={m => setSt(v => ({ ...v, machine: m }))} machines={machines} recent={recent} top={queries.data?.top ?? []} sessions={palSessions} focusKey={focusKey} />
           </div>
+          <Suspense fallback={<Loading label="Loading the page" />}>
           {st.view === "live" && <LiveView machine={st.machine} role={st.search.role} machines={machines}
             setMachine={m => setSt(v => ({ ...v, machine: m }))} setRole={role => setSt(v => ({ ...v, search: { ...v.search, role } }))} on />}
           {st.view === "memory" && <MemoryView />}
@@ -132,6 +135,7 @@ export function App() {
           {st.view === "queries" && <QueriesView on />}
           {st.view === "compare" && <CompareView on />}
           {st.view === "store" && (s ? <StoreView s={s} /> : <p className="text-muted">Reading the hub…</p>)}
+          </Suspense>
         </main>
       </div>
       <TabBar view={st.view} go={go} onMore={() => setPalette(true)} />
