@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { usePoll } from "./api";
+import { ago, bkk } from "./format";
 import type { Status } from "./types";
 import { pill, TopBar, type Theme } from "./components/TopBar";
 import { cx, Kbd, Seg, State } from "./components/ui";
@@ -85,7 +86,7 @@ export function App() {
         <span className="mt-3 hidden gap-1 text-[12px] text-faint lg:flex"><Kbd>/</Kbd> search · <Kbd>j</Kbd> <Kbd>k</Kbd> move · <Kbd>↵</Kbd> open · <Kbd>esc</Kbd> close</span>
         {s?.copy && (
           <p className="m-0 mt-4 rounded-xl border border-line bg-panel px-4 py-2.5 text-[13px] text-soft">
-            A copy of {s.copy.of}'s hub, as of {s.copy.at} (snapshot {s.copy.snapshot}). Search works; nothing new arrives here, so push, backup and seal checks are off.
+            A copy of {s.copy.of}'s hub, as of {bkk(s.copy.at)} Bangkok ({ago(s.copy.at)}, snapshot {s.copy.snapshot}). Search works; nothing new arrives here, so push, backup and seal checks are off.
           </p>
         )}
         {(status.error || (s?.warnings.length ?? 0) > 0) && (
