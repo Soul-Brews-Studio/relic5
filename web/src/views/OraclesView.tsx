@@ -3,12 +3,54 @@
 // opens as its own page (GET /api/oracle?name=): who it says it is, what it learned, how its sessions went, the rules
 // its human set, its newest sessions, the words its notes use most, and two prompts built only from those notes, one
 // for its character and style, one for what it has come to understand. Copy a prompt into Claude; nothing is sent.
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { get, usePoll } from "../api";
 import { ago, bkk, num, repoColor } from "../format";
 import { Markdown } from "../components/Markdown";
 import { Search } from "../components/Icons";
 import { Btn, cx, Lbl, Loading, PageHead, State } from "../components/ui";
+import { Drawer } from "../components/Drawer";
+
+const ModelView = lazy(() => import("./ModelView"));
+
+export interface Artifact { id: string; oracle: string; title: string; kind: "image" | "video" | "model" | "web"; ext: string; mime: string; bytes: number; at: string; by?: string; note?: string; prompt?: string; url: string }
+
+/** What an artifact looks like in a tile and in the big view: a picture, a video, a 3D model, or a web piece in a
+ *  sandboxed frame (the hub also serves it under a CSP sandbox, so its scripts never touch the hub). */
+function Show({ a, big }: { a: Artifact; big?: boolean }) {
+  if (a.kind === "image") return <img src={a.url} alt={a.title} loading="lazy" className={cx("h-full w-full", big ? "object-contain" : "object-cover")} />;
+  if (a.kind === "video") return <video src={a.url} controls={big} muted={!big} loop autoPlay={!big} playsInline className={cx("h-full w-full", big ? "object-contain" : "object-cover")} />;
+  if (a.kind === "web") return <iframe src={a.url} title={a.title} sandbox="allow-scripts" className={cx("h-full w-full border-0 bg-white", !big && "pointer-events-none")} loading="lazy" />;
+  return big ? <Suspense fallback={<Loading label="Loading the 3D model" />}><ModelView url={a.url} label={a.title} /></Suspense>
+    : <div className="grid h-full w-full place-items-center bg-deep font-mono text-sm text-muted">3D model · .{a.ext}</div>;
+}
+
+/** The oracle's artifacts as a gallery; a tile opens the piece big with its record (who sent it, when, the prompt). */
+export function Gallery({ items, empty }: { items: Artifact[]; empty?: string }) {
+  const [open, setOpen] = useState<Artifact | null>(null);
+  if (!items.length) return empty ? <p className="m-0 text-sm text-muted">{empty}</p> : null;
+  return <>
+    <div className="grid grid-cols-2 gap-3 md:grid-cols-3 2xl:grid-cols-4">
+      {items.map(a => (
+        <button key={a.id} type="button" onClick={() => setOpen(a)} className="group overflow-hidden rounded-xl border border-line bg-panel text-left hover:border-line-strong">
+          <div className="aspect-square overflow-hidden bg-deep"><Show a={a} /></div>
+          <div className="px-3 py-2"><div className="truncate text-sm font-semibold text-text group-hover:text-accent">{a.title}</div>
+            <div className="truncate text-xs text-muted">{a.kind} · {a.oracle} · {ago(a.at)}</div></div>
+        </button>
+      ))}
+    </div>
+    <Drawer open={!!open} onClose={() => setOpen(null)} title={open?.title ?? ""} note={open ? `${open.kind} · .${open.ext} · ${num(open.bytes)} bytes · sha256 ${open.id}… · ${bkk(open.at)} · by ${open.by ?? "unknown"}` : ""}
+      onCopy={open ? () => navigator.clipboard.writeText(location.origin + open.url) : undefined}>
+      {open && <div className="grid h-full grid-rows-[minmax(0,1fr)_auto]">
+        <div className="min-h-[50vh] bg-deep"><Show a={open} big /></div>
+        {(open.prompt || open.note) && <div className="border-t border-line px-6 py-4 text-sm">
+          {open.note && <p className="m-0 mb-2 text-soft">{open.note}</p>}
+          {open.prompt && <><Lbl>the prompt that made it</Lbl><pre className="m-0 mt-2 max-h-40 overflow-auto font-mono text-xs whitespace-pre-wrap text-muted">{open.prompt}</pre></>}
+        </div>}
+      </div>}
+    </Drawer>
+  </>;
+}
 
 interface Oracle { name: string; path: string; notes: number; sections: Record<string, number>; newest?: number; machines: string[]; soul: number; learnings: number; retros: number }
 interface NoteLite { title: string; path: string; ts: string; text: string }
@@ -44,7 +86,12 @@ function OraclePage({ name, onBack }: { name: string; onBack: () => void }) {
   const [p, setP] = useState<Portrait | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [tab, setTab] = useState<"character" | "enlighten">("character");
-  useEffect(() => { setP(null); setErr(null); get<Portrait>(`/api/oracle?name=${encodeURIComponent(name)}`).then(setP).catch(e => setErr(String(e.message ?? e))); }, [name]);
+  const [arts, setArts] = useState<Artifact[]>([]);
+  useEffect(() => {
+    setP(null); setErr(null);
+    get<Portrait>(`/api/oracle?name=${encodeURIComponent(name)}`).then(setP).catch(e => setErr(String(e.message ?? e)));
+    get<{ artifacts: Artifact[] }>(`/api/artifacts?oracle=${encodeURIComponent(name)}`).then(r => setArts(r.artifacts)).catch(() => setArts([]));
+  }, [name]);
   if (err) return <State error>{err}</State>;
   if (!p) return <Loading label={`Gathering ${name}'s notes`} />;
   const max = Math.max(1, ...p.words.map(w => w[1]));
@@ -75,6 +122,11 @@ function OraclePage({ name, onBack }: { name: string; onBack: () => void }) {
           ? `Built only from ${p.name}'s soul notes, learnings and the rules set for it. Paste it into Claude to get its character, voice and style, each claim quoted from a note.`
           : `Built from ${p.name}'s newest learnings and retrospectives. Paste it into Claude to hear what ${p.name} has come to understand, and where the notes are thin.`}</p>
         <pre className="m-0 mt-4 max-h-[340px] overflow-auto rounded-xl border border-line bg-deep p-4 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words text-soft">{p.prompts[tab]}</pre>
+      </section>
+
+      <section className="mb-6 rounded-2xl border border-line bg-panel p-5">
+        <div className="mb-3 flex flex-wrap items-baseline gap-3"><h2 className="m-0 text-base font-bold text-text">Made for {p.name}</h2><span className="text-sm text-muted">{arts.length ? `${arts.length} artifacts` : ""}</span></div>
+        <Gallery items={arts} empty={`Nothing yet. An agent can add an image, a video, a 3D model or a web piece with the MCP tool relic_artifact_put {"oracle": "${p.name}", "filename": "portrait.png", "data": "<base64>", "prompt": "…"}; paste the character prompt above to an image model first.`} />
       </section>
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
@@ -118,6 +170,7 @@ function OraclePage({ name, onBack }: { name: string; onBack: () => void }) {
 
 export function OraclesView() {
   const p = usePoll<{ oracles: Oracle[]; vaults: number }>("/api/oracles", 300000);
+  const art = usePoll<{ artifacts: Artifact[]; oracles: Record<string, number> }>("/api/artifacts?limit=12", 60000);
   const [q, setQ] = useState("");
   const [open, setOpen] = useState<string | null>(() => new URLSearchParams(location.hash.slice(1)).get("oracle"));
   const [only, setOnly] = useState(false);
@@ -136,6 +189,10 @@ export function OraclesView() {
   return (
     <>
       <PageHead title="Oracles" sub={<>{num(p.data.oracles.length)} oracles with their own ψ vault, from {num(p.data.vaults)} vault entries across machines. Open one to meet it: what it says it is, what it learned, and a prompt to bring out its character, or what it has come to understand.</>} />
+      {(art.data?.artifacts.length ?? 0) > 0 && <section className="mb-8">
+        <h2 className="m-0 mb-3 text-base font-bold text-text">Newest made for the oracles</h2>
+        <Gallery items={art.data!.artifacts} />
+      </section>}
       <div className="mb-6 flex flex-wrap items-center gap-3">
         <label className="relative flex min-w-0 flex-1 items-center sm:max-w-md">
           <span className="pointer-events-none absolute left-3.5 text-muted"><Search size={16} /></span>

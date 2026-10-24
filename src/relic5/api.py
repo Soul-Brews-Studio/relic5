@@ -189,6 +189,40 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
             return JSONResponse({"error": f"no recap for {month} yet"}, status_code=404)
         return Response(open(p, encoding="utf-8").read(), media_type="text/markdown; charset=utf-8")
 
+    @app.get("/api/artifacts", response_model=None)
+    def artifacts_route(oracle: str | None = None, limit: int = 500) -> Json:
+        from . import artifacts
+        return artifacts.listing(relic.parts.root, oracle, max(1, min(limit, 2000)))
+
+    @app.get("/api/artifact/{aid}", response_model=None)
+    def artifact_file(aid: str) -> Response:
+        """One artifact's bytes. A web piece or SVG is served under a CSP sandbox, so its scripts never run with the
+        hub's origin; nosniff so a browser never guesses another type."""
+        from fastapi.responses import FileResponse
+        from . import artifacts
+        from .query import NotFound
+        try:
+            path, mime, kind = artifacts.file_of(relic.parts.root, aid)
+        except NotFound:
+            return JSONResponse({"error": "no such artifact"}, status_code=404)
+        h = {"X-Content-Type-Options": "nosniff", "Cache-Control": "private, max-age=31536000, immutable"}
+        if kind == "web" or mime.startswith("image/svg"):
+            h["Content-Security-Policy"] = "sandbox allow-scripts; default-src 'self' data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'none'"
+        return FileResponse(path, media_type=mime, headers=h)
+
+    @app.post("/api/artifact", response_model=None)
+    async def artifact_post(request: Request, oracle: str, filename: str, title: str = "", note: str = "", prompt: str = "", session: str = "") -> Response:
+        """The same as relic_artifact_put for a file too big for an MCP message: the raw bytes as the body.
+        curl --data-binary @portrait.png 'http://hub:8795/api/artifact?oracle=neo-oracle&filename=portrait.png&title=…'"""
+        from . import artifacts
+        from .query import UsageError
+        try:
+            rec = artifacts.put(relic.parts.root, oracle, title, os.path.splitext(filename)[1], await request.body(), note or None,
+                                prompt or None, session or None, getattr(request.state, "door", None))
+        except UsageError as ex:
+            return JSONResponse({"error": str(ex)}, status_code=400)
+        return JSONResponse(rec)
+
     @app.get("/api/oracles", response_model=None)
     def oracles_route() -> Json:
         from . import oracles

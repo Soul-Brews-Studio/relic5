@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from .query import Relic5
 
 _LOCK = threading.Lock()
-_CACHE: dict[tuple[object, str, int, int], Json] = {}
+_CACHE: dict[tuple[object, ...], Json] = {}
 MIN_CHUNKS = 3   # a session with one or two embedded lines lands wherever its one sentence points: noise on the map
 
 
