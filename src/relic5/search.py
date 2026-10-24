@@ -50,26 +50,38 @@ def fold(rows: list[Json], seen: set[tuple[object, ...]]) -> list[Json]:
     return out
 
 
-# Near-duplicates (issue #25): a templated prompt sent once per worktree differs only in its paths, ids and numbers, and
-# filled 8 of a semantic top 10. Two hits are the same when their first 400 characters agree after lowercasing,
-# collapsing whitespace and replacing paths, hex ids and numbers; the best one stays and counts the rest.
+# Near-duplicates (issue #25): a templated prompt sent once per worktree differs only in its paths, ids, numbers and a
+# branch name, and filled 8 of a semantic top 10. Two hits are one when their word 3-grams overlap >= NEAR (Jaccard),
+# compared on the first 800 characters after lowercasing and replacing paths, hex ids and numbers. Claude Code's
+# mid-turn wrapper is removed first, or two different short messages would match on the wrapper alone.
 _VARYING = re.compile(r"(?:~|\.{0,2})?(?:/[\w.@%+-]+)+/?|\b[0-9a-f]{7,}\b|\d+")
+_WRAPPER = re.compile(r"the user sent a new message while you were working:|this is how claude code surfaces messages the user "
+                      r"sends mid-turn.*?(?:conversation turn\.|$)|address the message above as you continue this turn\.")
+NEAR = 0.8
 
 
 def near_key(r: Json) -> str:
-    return _VARYING.sub("#", " ".join((r.get("text") or "").lower().split())[:400])
+    t = " ".join((r.get("text") or "").lower().split())
+    return _VARYING.sub("#", _WRAPPER.sub(" ", t))[:800]
+
+
+def _shingles(t: str) -> set[tuple[str, ...]]:
+    w = t.split()
+    return {tuple(w[i:i + 3]) for i in range(max(1, len(w) - 2))}
 
 
 def collapse(rows: list[Json]) -> list[Json]:
-    """Keep the first (best) hit of each near-duplicate group; it carries near_duplicates = how many it stands for."""
-    kept: dict[str, Json] = {}
+    """Keep the first (best) hit of each near-duplicate group; it carries _dups = how many it stands for."""
+    kept: list[tuple[set[tuple[str, ...]], Json]] = []
     for r in rows:
-        k = near_key(r)
-        if k in kept:
-            kept[k]["_dups"] = kept[k].get("_dups", 0) + 1
+        sh = _shingles(near_key(r))
+        for ksh, k in kept:
+            if sh and ksh and len(sh & ksh) / len(sh | ksh) >= NEAR:
+                k["_dups"] = k.get("_dups", 0) + 1
+                break
         else:
-            kept[k] = r
-    return list(kept.values())
+            kept.append((sh, r))
+    return [k for _, k in kept]
 
 
 def vector_hits(index: "Index", slug: str, vector: Sequence[float], vf: "VecFilter", want: int) -> list[Json]:
