@@ -16,6 +16,17 @@
 
 One local server, a web page and an MCP server, over the tools this lab already has:
 
+## neo, end to end (2026-10-24)
+
+Codex drew neo on a canvas session, the canvas became a seven-state sprite, a 6.7 KB WebAssembly app gives it moods,
+and one jc3248 firmware bundle carries both: [docs/neo-pet.md](docs/neo-pet.md).
+
+| drawn by Codex | idle | busy | heart | sleep | the app in a browser VM |
+|---|---|---|---|---|---|
+| <img src="docs/images/neo-codex-idle.png" width="120"> | ![](docs/images/neo-idle.gif) | ![](docs/images/neo-busy.gif) | ![](docs/images/neo-heart.gif) | ![](docs/images/neo-sleep.gif) | <img src="docs/images/neo-mood-vm.png" width="220"> |
+
+A bundle for a new sprite now takes 3.3 s instead of 18-20 s (one firmware serves every one-pack bundle).
+
 | make | how | goes to the pet |
 |---|---|---|
 | an app **in blocks** | Blockly blocks for the pet API (like KBIDE / DBK Screen), C generated live beside them (`shared/petblocks.ts`), then the same path as code | same as an app |
