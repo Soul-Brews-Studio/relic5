@@ -117,7 +117,9 @@ def run_tool(relic: Relic5, name: str, a: Json, door: str | None = None) -> Json
                          hybrid=bool(a.get("hybrid")) and vec is not None, sort=_str(a, "sort"), cwd=_str(a, "cwd"), branch=_str(a, "branch"), title=_str(a, "title"),
                          via=_str(a, "via"), chat=_str(a, "chat"), from_user=_str(a, "from_user"),
                          min_chars=_int(a, "min_chars") if vec is not None else None)
-        return {"note": note, **r} if note else r
+        if note:   # keep the search's own note (older hits) after this one; never overwrite it (regression of #20)
+            r = r | {"note": note + (f" · {r['note']}" if r.get("note") else "")}
+        return r
     if name == "relic_show":
         _check(a, ["id", "seq", "before", "after"])
         before, after = _int(a, "before"), _int(a, "after")
