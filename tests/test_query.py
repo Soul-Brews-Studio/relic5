@@ -95,6 +95,8 @@ def test_sessions(relic):
     r = relic.sessions()
     assert r["total"] == 2 and [s["uuid"] for s in r["sessions"]] == ["s1-aaaa", "s2-bbbb"]
     assert r["sessions"][0]["children"] == 1   # the subagent is folded into its parent
+    a = r["all"]   # every session once, the subagent too: what "transcript events" on the glance page counts
+    assert a["sessions"] == 3 and a["subagents"] == 1 and a["events"] == r["events"] + a["subagent_events"]
     assert [s["uuid"] for s in relic.sessions(repo="github.com/Soul-Brews-Studio/relic5")["sessions"]] == ["s2-bbbb"]
     assert relic.sessions(since="2026-10-23")["total"] == 1
 
