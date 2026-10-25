@@ -16,6 +16,14 @@ export const ago = (iso: string | null | undefined) => {
   return Number.isNaN(t) ? UNKNOWN : secs((Date.now() - t) / 1000) + " ago";
 };
 
+/** Under 3 hours: "12 min ago"; older: the Bangkok time, "10-24 08:07" (Nat, 2026-10-25: "show ... ago if less than 3h"). */
+export const recent = (iso: string | null | undefined) => {
+  const t = iso ? Date.parse(iso) : NaN;
+  if (Number.isNaN(t)) return iso ? iso.slice(5, 16).replace("T", " ") : UNKNOWN;
+  const s = (Date.now() - t) / 1000;
+  return s >= 0 && s < 3 * 3600 ? (s < 60 ? "just now" : secs(s) + " ago") : new Date(t + 7 * 3600e3).toISOString().slice(5, 16).replace("T", " ");
+};
+
 /** "2026-10-24T01:07:47Z" -> "10-24 08:07" in Bangkok time, the fleet's clock. */
 export const bkk = (iso: string | null | undefined) => {
   if (!iso) return UNKNOWN;
