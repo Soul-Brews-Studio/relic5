@@ -82,6 +82,9 @@ def main(files):
             "relic4 vector": lambda i: r4(i["q"], "vector"),
             "relic3 bm25": lambda i: r3(i["q"]),
         }
+        only = os.environ.get("EVAL_ONLY")   # e.g. "relic3,relic5": relic4 is retired (2026-10-25), its port is gone
+        if only:
+            methods = {n: fn for n, fn in methods.items() if any(n.startswith(p) for p in only.split(","))}
         print(f"\n## {f} ({len(spec['queries'])} queries; client encode ~{enc_ms:.0f} ms/query, batched)")
         print(f"{'method':<24} {'recall@10':>9} {'prec@10':>8} {'MRR':>6} {'p50 ms':>7} {'p95 ms':>7}")
         dated = any("ts" in i for i in spec["queries"])

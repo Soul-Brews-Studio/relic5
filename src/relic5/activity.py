@@ -5,7 +5,7 @@ Counts messages of the text stream (each message once: chunk 0, one msgkey howev
 bucket and, optionally, one dimension. Bangkok time throughout (ts_th), as every other page of the hub.
 
   by     day | week | month | hour (YYYY-MM-DDTHH) | hour_of_day (00..23) | weekday (1 Mon .. 7 Sun) | weekday_hour (1-00 .. 7-23)
-  group  none | role | project (relic-scan's cat: the repo's short name) | machine | engine | tool (tools stream)
+  group  none | role | project (relic-scan's cat: the repo's short name) | machine | engine | tool | file (tools stream)
   stream text (messages) | tools (tool calls) | thinking | git (commits: role commit-claude / commit-codex / commit)
 """
 from typing import Any
@@ -23,7 +23,9 @@ BY = {
     "weekday_hour": "CAST(isodow(TRY_CAST(substr(ts_th, 1, 10) AS DATE)) AS VARCHAR) || '-' || substr(ts_th, 12, 2)",
 }
 GROUP = {"none": "'all'", "role": "coalesce(role, '(none)')", "project": "coalesce(nullif(cat, ''), '(none)')", "machine": "machine",
-         "engine": "engine", "tool": "coalesce(name, '(none)')"}
+         "engine": "engine", "tool": "coalesce(name, '(none)')",
+         # the file an Edit / Write / MultiEdit / NotebookEdit call touched (ChatGPT asked for it, 2026-10-26); relic_files has more
+         "file": """nullif(regexp_extract(text, '"(?:file_path|notebook_path)"\\s*:\\s*"([^"]+)"', 1), '')"""}
 STREAMS = ("text", "tools", "thinking", "git")
 UNIT = {"text": "messages", "tools": "tool calls", "thinking": "thinking blocks", "git": "commits"}
 
@@ -36,11 +38,11 @@ def activity(relic: Any, by: str = "day", group: str = "none", since: str | None
     if by not in BY:
         raise ValueError(f"by is one of {', '.join(BY)}")
     if group not in GROUP:
-        raise ValueError(f"group is one of {', '.join(GROUP)}")
+        raise ValueError(f"group is one of {', '.join(GROUP)} (files changed most: relic_files)")
     if stream not in STREAMS:
         raise ValueError(f"stream is one of {', '.join(STREAMS)}")
-    if group == "tool" and stream != "tools":
-        raise ValueError("group tool needs stream tools")
+    if group in ("tool", "file") and stream != "tools":
+        raise ValueError(f"group {group} needs stream tools")
     if stream == "git":
         import os
         from . import gitlog
@@ -65,6 +67,8 @@ def activity(relic: Any, by: str = "day", group: str = "none", since: str | None
     if project:
         where.append("cat ILIKE ?")
         params.append(f"%{project}%")
+    if group == "file":
+        where.append("name IN ('" + "','".join(EDIT_TOOLS) + "')")
     rows = relic._rows(f"""SELECT {BY[by]} AS b, {GROUP[group]} AS g, count(DISTINCT msgkey) AS n
                            FROM {src} WHERE {' AND '.join(where)} GROUP BY 1, 2""", params)
     totals: dict[str, int] = {}
