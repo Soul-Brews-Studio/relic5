@@ -66,7 +66,7 @@
   figure.shot figcaption { border-top: 1px solid var(--line); padding: 10px 16px; font: 12px var(--mono); color: var(--faint); }
 
   section.band { padding: 72px 0; border-top: 1px solid var(--line); }
-  section.band h2 { font-size: clamp(30px, 3.6vw, 42px); line-height: 1.1; font-weight: 700; max-width: 20em; }
+  section.band h2 { font-size: clamp(30px, 3.6vw, 42px); line-height: 1.1; font-weight: 700; max-width: 20em; text-wrap: balance; }
   section.band p.sub { font-size: 18px; max-width: 40em; margin: 14px 0 0; color: var(--muted); }
 
   .flow { margin-top: 40px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; counter-reset: s; }
@@ -286,7 +286,7 @@
     <div class="wrap">
       <h2>Your agents can ask it too.</h2>
       <p class="sub">relic5 speaks MCP. Register it once in Claude Code, or add it to claude.ai as a connector, and an agent can look up what was decided last week before it starts again.</p>
-      <div class="feat">
+      <div class="feat" style="align-items: start">
         <pre class="call" aria-label="An example MCP call"><span class="c"># what an agent sends</span>
 <span class="k">relic_search</span> {
   <span class="s">"query"</span>: "why did the backup move",
