@@ -103,6 +103,18 @@ export function NavDrawer({ open, onClose, view, go, state, foot, badges, onPale
     if (open && !d.open) { if (wide()) d.show(); else d.showModal(); }
     if (!open && d.open) d.close();
   }, [open]);
+  // a non-modal dialog (the wide-screen panel) gets no Escape from the browser: close it here (Nat, 2026-10-25: "sidebar
+  // can close when esc"), unless a modal (the palette) or a text field is the one Escape is for
+  useEffect(() => {
+    if (!open) return;
+    const esc = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (e.key !== "Escape" || e.defaultPrevented || document.querySelector("dialog:modal") || t?.closest("input, textarea, select, [contenteditable]")) return;
+      onClose();
+    };
+    addEventListener("keydown", esc);
+    return () => removeEventListener("keydown", esc);
+  }, [open, onClose]);
   const item = (v: (typeof VIEWS)[number]) => {
     const I = v.icon, on = view === v.id;
     return (
