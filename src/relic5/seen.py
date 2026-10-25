@@ -54,6 +54,37 @@ def touch(door: str, ip: str, via: str, path: str) -> None:
                 pass   # a read-only config dir: still shown until a restart
 
 
+def seed(root: str, days: int = 30) -> None:
+    """Fill doors never touched since seen.json began from the hub's own logs: the request log (logs/requests/<day>.jsonl)
+    and the MCP call log (logs/queries.jsonl). Those keep no address, so a seeded entry has the time and path only."""
+    from . import store as rfs
+    logs = os.path.join(root, "logs")
+    since = time.strftime("%Y-%m-%d", time.gmtime(time.time() - days * 86400))
+    files = [os.path.join(logs, "requests", f) for f in sorted(rfs.listdir(os.path.join(logs, "requests")))
+             if f.endswith(".jsonl") and f[:10] >= since] if rfs.exists(os.path.join(logs, "requests")) else []
+    best: dict[str, Json] = {}
+    for f in files + [os.path.join(logs, "queries.jsonl")]:
+        try:
+            text = rfs.read_text(f)
+        except (OSError, FileNotFoundError):
+            continue
+        for line in text.splitlines():
+            if '"token:' not in line and '"oauth:' not in line:
+                continue
+            try:
+                r = json.loads(line)
+            except ValueError:
+                continue
+            d, at = str(r.get("door") or ""), str(r.get("at") or "")[:19] + "Z"
+            if d.startswith(("token:", "oauth:")) and at > best.get(d, {}).get("at", ""):
+                best[d] = {"at": at, "ip": None, "via": None, "path": r.get("path") or ("/mcp " + r["tool"] if r.get("tool") else None)}
+    with _LOCK:
+        _load()
+        for d, v in best.items():
+            if v["at"] > _MEM.get(d, {}).get("at", ""):
+                _MEM[d] = v
+
+
 def of(door: str) -> Json:
     """-> {"last_used", "last_ip", "last_via", "last_path"} for a door, empty when never seen."""
     with _LOCK:
