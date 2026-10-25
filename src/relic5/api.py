@@ -12,7 +12,7 @@ no loopback exemption. A hub serves many machines, and a proxy on the same box w
 Parts arrive over ssh (bin/relic5-push), never over HTTP. The routes that write are the hub's own records: tokens
 (Connect), artifacts, and saved searches (trace.py); a POST that changes settings needs X-Relic5-Request: 1.
 """
-import hmac, json, os
+import hmac, json, os, time
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
@@ -56,7 +56,11 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
     if not tokens and doors is None:
         raise SystemExit("no tokens: run `relic5 token new <name>` first")
     doors = doors if doors is not None else Doors(tokens)
-    con = duckdb.connect(":memory:", config={"threads": min(os.cpu_count() or 4, 16)})
+    # a memory limit: DuckDB takes up to 80% of the machine by default, and white's hub was OOM-killed (2026-10-25, 46 GB
+    # box, serve at 24 GB beside an index); RELIC5_DUCK_MEM overrides
+    con = duckdb.connect(":memory:", config={"threads": min(os.cpu_count() or 4, 16), "memory_limit": os.environ.get("RELIC5_DUCK_MEM", "6GB")})
+    from . import perf
+    perf.keep(root)
     relic = Relic5(root, con)
     app = FastAPI(title="relic5", docs_url=None, redoc_url=None, openapi_url=None)
     # gzip what is worth it (the page's JS and CSS went out as 142 KB raw over tailscale, measured 2026-10-25; gz
@@ -368,7 +372,18 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
         if d is None:
             return JSONResponse({"error": "missing or bad Authorization: Bearer token"}, status_code=401)
         request.state.door = d
-        return await call_next(request)
+        t0 = time.perf_counter()
+        resp = await call_next(request)
+        if request.url.path.startswith(("/api/", "/mcp")) and request.url.path != "/api/perf":
+            route = request.scope.get("route")
+            perf.record(request.method, request.url.path, getattr(route, "path", None), resp.status_code,
+                        (time.perf_counter() - t0) * 1000, int(resp.headers.get("content-length") or 0) or None, d, request.url.query)
+        return resp
+
+    @app.get("/api/perf", response_model=None)
+    def perf_route(minutes: int = 60, route: str = "") -> Json:
+        """The request log (perf.py): per route p50/p95/max, the slowest and newest requests, memory and load."""
+        return perf.summary(max(1, min(minutes, 24 * 60)), route or None)
 
     @app.get("/login")
     def login(t: str = "") -> Response:

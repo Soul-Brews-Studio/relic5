@@ -191,7 +191,7 @@ def _main(argv: list[str] | None = None) -> None:
             fcntl.flock(lockf, fcntl.LOCK_EX | (0 if wait else fcntl.LOCK_NB))
         except BlockingIOError:
             sys.exit(print("relic5 index: another index is running (exit 75; --wait to queue)", file=sys.stderr) or 75)
-        con = rfs.duck(duckdb.connect(), rfs.root_of(root))
+        con = rfs.duck(duckdb.connect(config={"memory_limit": os.environ.get("RELIC5_DUCK_MEM", "8GB")}), rfs.root_of(root))
         if vectors:   # the slow lane, on its own: vector tables and watermarks only
             with job(root, "index-vectors") as j:
                 def echo(m: str) -> None:   # each line printed and kept as the job's progress

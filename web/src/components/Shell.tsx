@@ -1,9 +1,9 @@
 // The hub's shell, after the old ARRA Oracle Studio: a sticky top header on desktop, a bottom tab bar on a phone, and a Cmd/Ctrl-K palette to jump or search from anywhere.
 import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
 import { cx } from "./ui";
-import { Alert, Asked, Close, Gear, Globe, Psi, Tree, Columns, Menu, Rows, Disk, Home, Jobs, Live, Mark, More, Moon, Note, Plug, Search, Session, Sun } from "./Icons";
+import { Alert, Pulse, Asked, Close, Gear, Globe, Psi, Tree, Columns, Menu, Rows, Disk, Home, Jobs, Live, Mark, More, Moon, Note, Plug, Search, Session, Sun } from "./Icons";
 
-export type View = "home" | "search" | "map" | "oracles" | "family" | "live" | "memory" | "jobs" | "queries" | "compare" | "store" | "connect" | "incidents" | "settings";
+export type View = "home" | "search" | "map" | "oracles" | "family" | "live" | "memory" | "jobs" | "queries" | "compare" | "store" | "connect" | "incidents" | "settings" | "perf";
 export type Theme = "dark" | "paper";
 export type Layout = "top" | "side";
 
@@ -20,6 +20,7 @@ export const VIEWS: { id: View; label: string; icon: ComponentType<{ size?: numb
   { id: "queries", label: "Asked", icon: Asked, group: 1 },
   { id: "compare", label: "Quality", icon: Columns, group: 1 },
   { id: "connect", label: "Connect", icon: Plug, group: 1 },
+  { id: "perf", label: "Performance", icon: Pulse, group: 1 },
   { id: "incidents", label: "Incidents", icon: Alert, group: 1 },
   { id: "settings", label: "Settings", icon: Gear, group: 1 },
 ];
