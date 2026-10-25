@@ -2,7 +2,7 @@
 # relic5 backup: pull the hub's data from white into a dated snapshot on this machine (m5), hardlinked to the
 # previous snapshot, so a day costs only what changed.
 #
-#   bin/relic5-backup              # RELIC5_HUB_SSH=nat@white.follow-rankine.ts.net, into ~/relic5-backup/white
+#   bin/relic5-backup              # RELIC5_HUB_SSH=nat@white.follow-rankine.ts.net, into <backup volume>/white
 #   bin/relic5-backup -n           # dry run: say what would move
 #
 # Kept: parts (every machine's pushed history), vectors (hours of embedding to redo), resolve (relic3 links),
@@ -12,7 +12,8 @@
 # saved beside the data (hub-status.json), for bin/relic5-restore-test to compare against.
 set -u
 HUB="${RELIC5_HUB_SSH:-nat@white.follow-rankine.ts.net}"
-DEST="${RELIC5_BACKUP_DIR:-$HOME/relic5-backup/white}"
+# a case-sensitive place on this machine (bin/relic5-backup-volume: the hub has folders that differ only by case)
+DEST="${RELIC5_BACKUP_DIR:-$("$(dirname "$0")/relic5-backup-volume")/white}" || { echo "no backup volume" >&2; exit 1; }
 KEEP="${RELIC5_BACKUP_KEEP:-14}"            # newest snapshots kept; older ones are removed after a good run
 PARTS="${RELIC5_BACKUP_PARTS:-parts vectors resolve logs attic}"
 STATUS_URL="${RELIC5_BACKUP_STATUS_URL:-${RELIC5_HUB_URL:-http://white.follow-rankine.ts.net:8795}/api/status}"
@@ -44,9 +45,9 @@ for p in $PARTS; do
   $SSH "$HUB" "test -e '$home/relic5/$p'" || continue
   link=""
   [ -n "$PREV" ] && [ -d "$PREV/$p" ] && link="--link-dest=$PREV/$p"
-  # A push lands every 10 minutes, so a file can change while it is copied: the 2026-10-25 run lost two small files
-  # under parts/white/git and failed (rsync code 23) after 2 GB. Try once more (only what changed moves again);
-  # code 24 (a file vanished on the hub mid-copy) is a finished copy of what is there.
+  # A push lands every 10 minutes, so a file can change while it is copied: try again (only what changed moves again);
+  # code 24 (a file vanished on the hub mid-copy) is a finished copy of what is there. (The 2026-10-24/25 code-23
+  # failures were not this: folders differing only by case, fixed by the case-sensitive volume above.)
   try=0
   while :; do
     out=$("$RSYNC" -a $DRY --delete --timeout=300 --stats $link "$HUB:$home/relic5/$p/" "$SNAP.partial/$p/" 2>&1); r=$?

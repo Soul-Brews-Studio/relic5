@@ -2,7 +2,7 @@
 # relic5 restore test: rebuild a hub from a backup snapshot in a scratch directory and check that it counts the same
 # rows the hub counted when the snapshot was taken (hub-status.json, saved by bin/relic5-backup).
 #
-#   bin/relic5-restore-test                      # the newest snapshot, ~/relic5-backup/white/latest
+#   bin/relic5-restore-test                      # the newest snapshot, <backup volume>/white/latest
 #   bin/relic5-restore-test <snapshot dir>       # a given one
 #   RELIC5_RESTORE_KEEP=1 bin/relic5-restore-test   # leave the scratch hub in place to look at
 #
@@ -12,7 +12,7 @@ set -eu
 REPO=$(cd "$(dirname "$0")/.." && pwd)
 RELIC5="${RELIC5_BIN:-$REPO/.venv/bin/relic5}"
 PY="${RELIC5_PY:-$REPO/.venv/bin/python}"
-SNAP=$(cd "${1:-${RELIC5_BACKUP_DIR:-$HOME/relic5-backup/white}/latest}" && pwd -P)
+SNAP=$(cd "${1:-${RELIC5_BACKUP_DIR:-$("$(dirname "$0")/relic5-backup-volume")/white}/latest}" && pwd -P)
 [ -f "$SNAP/hub-status.json" ] || { echo "$SNAP has no hub-status.json: not a relic5-backup snapshot" >&2; exit 2; }
 SCRATCH=$(mktemp -d "${TMPDIR:-/tmp}/relic5-restore.XXXXXX")
 cleanup() { [ -n "${RELIC5_RESTORE_KEEP:-}" ] && echo "scratch hub kept: $SCRATCH" || rm -rf "$SCRATCH"; }
