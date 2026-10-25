@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { usePoll } from "../api";
 import { DataTable } from "../components/DataTable";
 import { ago, bkk, num } from "../format";
@@ -134,6 +134,52 @@ function Devices() {
   );
 }
 
+/** One prompt per tool, to paste into ChatGPT or Claude with relic5 connected (Nat, 2026-10-26: "let chat gpt help
+ *  people to extract all stuff and visualize all stuff"). Each one was asked of ChatGPT on 2026-10-26. */
+const ASK: Record<string, string> = {
+  relic_hours: "What happened yesterday and so far today? Use relic5's relic_hours.",
+  relic_month: "Give me every month since Sep 2025 in one line each, then October day by day.",
+  relic_activity: "Chart my messages per month (typed by me vs the AI), and a weekday × hour heatmap of when I type.",
+  relic_files: "Which files did the agents change most this month? Group them by project.",
+  relic_readings: "What did z.ai say about yesterday afternoon, 15-minute windows, friction and lessons only?",
+  relic_conversation: "Show me the whole conversation of session 008db2b3 with its tool calls, then summarize it.",
+  relic_team: "Which projects ran on the same days in the last 30 days? Draw it as a timeline.",
+  relic_oracles: "List my oracles by notes, then tell me who neo-oracle says it is.",
+  relic_search: "Find where we decided to move the relic data to S3, and open the best hit.",
+  relic_show: "Open relic5://2026-10/8522d25746ee880fb5a5d7a84a5788be with two messages around it.",
+  relic_sessions: "List my sessions in relic5 from last week, grouped by repo.",
+  relic_session: "What is session 008db2b3: its repo, size and subagents?",
+  relic_asked: "What did I and my agents look for in relic5 today, and what was found?",
+  relic_status: "Is the relic5 hub up to date? Any warnings?",
+};
+
+function WhatToAsk() {
+  const [tools, setTools] = useState<Tool[] | null>(null);
+  const [copied, setCopied] = useState("");
+  useEffect(() => {
+    fetch("/mcp", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }) })
+      .then(r => r.json()).then(j => setTools(j.result.tools)).catch(() => setTools([]));
+  }, []);
+  if (!tools?.length) return null;
+  const ordered = [...tools].sort((a, b) => (a.name in ASK ? Object.keys(ASK).indexOf(a.name) : 99) - (b.name in ASK ? Object.keys(ASK).indexOf(b.name) : 99));
+  return (
+    <>
+      <SectionHead sub={`The ${tools.length} tools this hub offers over MCP, each with something to ask once relic5 is connected in ChatGPT or Claude. Click a prompt to copy it.`}>What to ask</SectionHead>
+      <div className="grid gap-3 lg:grid-cols-2">
+        {ordered.map(t => (
+          <div key={t.name} className="min-w-0 rounded-xl border border-line bg-panel px-5 py-4">
+            <code className="font-mono text-sm font-semibold text-accent">{t.name}</code>
+            <p className="m-0 mt-1.5 line-clamp-3 text-sm text-muted" title={t.description}>{t.description}</p>
+            {ASK[t.name] && <button type="button" onClick={() => { navigator.clipboard.writeText(ASK[t.name]); setCopied(t.name); setTimeout(() => setCopied(""), 1500); }}
+              className="mt-3 w-full rounded-lg border border-line bg-deep px-3 py-2 text-left text-sm text-soft hover:border-line-strong hover:text-text">
+              {copied === t.name ? "Copied" : `“${ASK[t.name]}”`}</button>}
+          </div>))}
+      </div>
+    </>
+  );
+}
+
 export function ConnectView({ repo }: { repo?: string }) {
   const url = `${location.protocol}//${location.host}/mcp`;
   const shim = `${repo ?? "/opt/Code/github.com/Soul-Brews-Studio/relic5"}/.venv/bin/relic5`;
@@ -154,7 +200,7 @@ export function ConnectView({ repo }: { repo?: string }) {
   }
   return (
     <>
-      <PageHead title="Connect" sub={<>relic5 is an MCP server with five tools (relic_search, relic_show, relic_sessions, relic_session, relic_status). This hub's MCP address is <code className="font-mono text-sm text-soft">{url}</code>; on the tailnet no token is needed.</>}>
+      <PageHead title="Connect" sub={<>relic5 is an MCP server: search, open, sessions, whole conversations, days hour by hour, months, activity counts for charts, files changed, model readings, oracles (the list is under What to ask). This hub's MCP address is <code className="font-mono text-sm text-soft">{url}</code>; on the tailnet no token is needed.</>}>
         <Btn primary type="button" onClick={run}>Test the connection</Btn>
       </PageHead>
       {test && <p className={cx("m-0 mb-6 text-sm", test.ok ? "text-ok" : "text-danger")}>{test.ok ? `Connected through the ${test.door} door · ${test.tools?.length} tools: ${test.tools?.map(t => t.name).join(", ")}` : `Failed: ${test.error}`}</p>}
@@ -174,6 +220,7 @@ export function ConnectView({ repo }: { repo?: string }) {
         Remove it again with <code className="font-mono">claude mcp remove relic5</code> or <code className="font-mono">codex mcp remove relic5</code>.
       </div>
       {test && !test.ok && <State error>{test.error}</State>}
+      <WhatToAsk />
       <Tokens url={url} />
       <Devices />
     </>
