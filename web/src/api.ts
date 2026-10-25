@@ -1,12 +1,31 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { report } from "./report";
+
+/** Waits between tries when the hub does not answer at all: a deploy restarts it for some seconds (Nat, 2026-10-26:
+ *  "when click sometimes this ... ERR_CONNECTION_REFUSED"). About 30 s in all, then the error is shown and reported. */
+const RETRY = [1000, 2000, 4000, 8000, 15000];
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 /** GET a hub route. The tailnet and loopback doors need no token; elsewhere /login?t=... sets the cookie once. */
 export async function get<T>(path: string): Promise<T> {
-  const r = await fetch(path, { credentials: "same-origin" });
-  if (r.status === 401) throw new Error("no token: open /login?t=<your token> once");
-  const j = await r.json();
-  if (!r.ok) throw new Error(j.error || String(r.status));
-  return j as T;
+  for (let i = 0; ; i++) {
+    let r: Response;
+    try {
+      r = await fetch(path, { credentials: "same-origin" });
+    } catch (e) {
+      if (i < RETRY.length) { await sleep(RETRY[i]); continue; }
+      report("fetch", `${path.split("?")[0]}: ${(e as Error).message}`);
+      throw new Error("the hub is not answering (restarting?), tried for 30 s");
+    }
+    if (r.status === 401) throw new Error("no token: open /login?t=<your token> once");
+    if (r.status === 502 || r.status === 503) { if (i < RETRY.length) { await sleep(RETRY[i]); continue; } }
+    const j = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+    if (!r.ok) {
+      if (r.status >= 500) report("http", `${path.split("?")[0]}: ${r.status} ${j.error ?? ""}`.trim());
+      throw new Error(j.error || String(r.status));
+    }
+    return j as T;
+  }
 }
 
 export interface Polled<T> { data: T | null; error: string | null; at: Date | null; reload: () => void }

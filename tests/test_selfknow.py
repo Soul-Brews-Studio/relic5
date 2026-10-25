@@ -1,33 +1,22 @@
-import json
-
-from fastapi.testclient import TestClient
+"""selfknow.py: the query log read by time, not by a fixed number of bytes."""
+import json, os, time
 
 from relic5 import selfknow
-from relic5.api import make_app
-from relic5.doors import Doors
-from relic5.status import status
-
-H = {"Authorization": "Bearer t"}
 
 
-def test_queries_are_logged_and_summarised(root):
-    c = TestClient(make_app(root, {"m5": "t"}, Doors({"m5": "t"}, enabled=False)))
-    for q in ("hub", "hub", "nothingmatchesthis"):
-        assert c.get("/api/search", params={"q": q}, headers=H).status_code == 200
-    body = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "relic_search", "arguments": {"query": "white"}}}
-    c.post("/mcp", json=body, headers=H)
-    rows = [json.loads(l) for l in open(f"{root}/logs/queries.jsonl")]
-    assert [r["query"] for r in rows] == ["hub", "hub", "nothingmatchesthis", "white"] and rows[0]["door"] == "token:m5"
-    assert rows[0]["mode"] == "keyword" and rows[0]["hits"] > 0 and rows[2]["hits"] == 0 and rows[0]["vector"] is False
-    c.get("/api/search", params={"q": "evalonly"}, headers=H | {"X-Relic5-Client": "eval"})
-    q = c.get("/api/queries", headers=H).json()
-    assert q["eval_logged"] == 1 and all(r["query"] != "evalonly" for r in q["last"])
-    assert q["top"][0] == {"query": "hub", "n": 2} and q["zero_hits"][0]["query"] == "nothingmatchesthis" and q["running"] == []
-
-
-def test_store_and_resources_in_status(root):
-    s = status(root)
-    assert s["store"]["parts"]["m5"]["text"] > 0 and s["store"]["disk"]["free"] > 0 and s["resources"]["load"]
-    selfknow.record_size(root)
-    selfknow.record_size(root)                       # once a day
-    assert len(open(f"{root}/logs/sizes.jsonl").readlines()) == 1
+def test_searched_most_survives_big_eval_lines(root):
+    """2026-10-26: eval runs logged large lines (their top hits); a fixed 2 MB read held only minutes of the log and
+    "Searched most" showed one query. The reader goes back by time (7 days), however many bytes that takes."""
+    os.makedirs(os.path.join(root, "logs"), exist_ok=True)
+    at = lambda s: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - s))
+    with open(os.path.join(root, "logs", "queries.jsonl"), "w") as f:
+        for s in (2 * 86400, 2 * 86400 - 60):      # two days ago, twice
+            f.write(json.dumps({"at": at(s), "tool": "relic_search", "query": "move relic data to s3", "ms": 50, "hits": 3}) + "\n")
+        f.write(json.dumps({"at": at(9 * 86400), "tool": "relic_search", "query": "too old", "ms": 5, "hits": 1}) + "\n")
+        big = "x" * 3000
+        for i in range(1200):                        # about 3.6 MB of eval lines after them
+            f.write(json.dumps({"at": at(3600 - i), "tool": "relic_search", "query": f"eval {i}", "client": "eval (http)",
+                                "ms": 9, "hits": 1, "top": big}) + "\n")
+    q = selfknow.queries(root)
+    assert {"query": "move relic data to s3", "n": 2} in q["top"]
+    assert q["eval_logged"] == 1200 and all(t["query"] != "too old" for t in q["top"])

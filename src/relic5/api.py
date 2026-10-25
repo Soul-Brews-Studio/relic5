@@ -341,6 +341,24 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
         from . import trace
         return {"saved": trace.public(trace.saved(relic.parts.root))}
 
+    @app.post("/api/client-error", response_model=None)
+    async def client_error(request: Request) -> Response | Json:
+        """The page's own errors (pageerrors.py): a JSON list of reports, with X-Relic5-Request: 1 as every page POST."""
+        from . import pageerrors
+        if request.headers.get("x-relic5-request") != "1" or not request.headers.get("content-type", "").startswith("application/json"):
+            return JSONResponse({"error": "needs Content-Type: application/json and X-Relic5-Request: 1"}, status_code=400)
+        try:
+            body = await request.json()
+        except ValueError:
+            return JSONResponse({"error": "body is not JSON"}, status_code=400)
+        items = body if isinstance(body, list) else [body]
+        return {"kept": pageerrors.record(root, items, request.state.door)}
+
+    @app.get("/api/client-errors", response_model=None)
+    def client_errors(hours: float = 24) -> Json:
+        from . import pageerrors
+        return pageerrors.recent(root, max(0.1, min(hours, 24 * 30)))
+
     @app.post("/api/saved", response_model=None)
     async def saved_change(request: Request) -> Response | Json:
         """add {from | query, args, every, name} | remove {id} | run {id}. A JSON POST with X-Relic5-Request: 1, as the
