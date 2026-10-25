@@ -6,6 +6,7 @@ x-relic: &relic
   network_mode: host
   environment:
     RELIC5_PUBLIC_URL: ${RELIC5_PUBLIC_URL:-}   # the tunnel's https address (.env on the box): /mcp + OAuth only there
+    RELIC5_SERVE_PORT: ${RELIC5_SERVE_PORT:-8796}   # `tailscale serve --https=443 http://127.0.0.1:8796`: HTTPS on the tailnet
   volumes:
     - ${RELIC5_DATA:-~/relic5}:/data
     - ${HOME}/.config/relic5:/config     # tokens (legacy, plain) and tokens.json (hashed): the Connect tab writes it

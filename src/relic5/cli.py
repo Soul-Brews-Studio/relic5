@@ -103,10 +103,13 @@ def serve(args: list[str]) -> None:
     T = Tokens()
     app = make_app(root, T, Doors(T))
     socks = []
-    for h in hosts:   # one process on every address (relic4 cli.py, PR #5 @febfdb7)
+    binds = [(h, port) for h in hosts]
+    if os.environ.get("RELIC5_SERVE_PORT"):   # tailscale serve's target: loopback only (api.py SERVE_PORT, doors.served)
+        binds.append(("127.0.0.1", int(os.environ["RELIC5_SERVE_PORT"])))
+    for h, p in binds:   # one process on every address (relic4 cli.py, PR #5 @febfdb7)
         sk = socket.socket(socket.AF_INET6 if ":" in h else socket.AF_INET)
         sk.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sk.bind((h, port))
+        sk.bind((h, p))
         socks.append(sk)
     print("relic5 serve: " + " · ".join(f"http://{h}:{port}" for h in hosts) + f"  root {root}  (token on every request)", flush=True)
     uvicorn.Server(uvicorn.Config(app, log_level="warning", proxy_headers=False)).run(sockets=socks)

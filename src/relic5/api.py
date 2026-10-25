@@ -384,6 +384,9 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
              "/apple-touch-icon.png": ("icon-180.png", "image/png"), "/icon-192.png": ("icon-192.png", "image/png"),
              "/icon-512.png": ("icon-512.png", "image/png")}
 
+    # the port `tailscale serve` (HTTPS on the tailnet) forwards to, on loopback only; its callers are named by tailscaled
+    SERVE_PORT = int(os.environ.get("RELIC5_SERVE_PORT") or 0)
+
     def base_of(request: Request) -> str:
         return PUBLICS.get((request.url.hostname or "").lower()) or PUBLIC or f"{request.url.scheme}://{request.url.netloc}"
 
@@ -401,8 +404,12 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
         if got.startswith("r5o_"):   # an OAuth access token (oauth.py): claude.ai's connector, /mcp only
             name = oauth.check(got)
             return f"oauth:{name}" if name and request.url.path == "/mcp" else None
-        server = (request.scope.get("server") or ("",))[0]
+        srv = request.scope.get("server") or ("", 0)
+        server = srv[0]
         client = request.client.host if request.client else ""
+        if not got and SERVE_PORT and len(srv) > 1 and srv[1] == SERVE_PORT and client in ("127.0.0.1", "::1") and hasattr(doors, "served"):
+            xff = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+            return doors.served(xff, request.headers.get("tailscale-user-login", ""), request.url.hostname)
         return doors.door(server, client, request.url.hostname, got)
 
     @app.middleware("http")
@@ -416,6 +423,19 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
             return JSONResponse({"error": "not found"}, status_code=404)   # the tunnel shows only the MCP door
         if path == "/login" or path.startswith(OPEN):
             return await call_next(request)   # they check the token themselves, or need none
+        if path.startswith("/arra/"):   # Studio's page is another origin: a preflight carries no credentials
+            from .arra import cors
+            h = cors(request.headers.get("origin"))
+            if request.method == "OPTIONS":
+                return Response(status_code=204 if h else 403, headers=h)
+            d = who(request)
+            if d is None:
+                return JSONResponse({"error": "relic5: open Studio on the tailnet (https://white.follow-rankine.ts.net/arra)"}, status_code=401, headers=h)
+            request.state.door = d
+            seen.touch(d, *where(request), path)
+            resp = await call_next(request)
+            resp.headers.update(h)
+            return resp
         d = who(request)
         if d is None:
             hdr = {"WWW-Authenticate": f'Bearer resource_metadata="{base_of(request)}/.well-known/oauth-protected-resource"'} if path == "/mcp" else {}
@@ -592,6 +612,12 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
     def oracles_route() -> Json:
         from . import oracles
         return oracles.listing(relic)
+
+    # ARRA Oracle Studio reading the hub (arra.py): /arra/api/*, its page on another origin
+    from . import arra
+    from . import __version__ as _ver
+    from .status import status as _status
+    app.include_router(arra.router(relic, lambda: swr.get("arra-status", 30, lambda: _status(root)), oracles_route, _ver))
 
     @app.get("/api/oracle", response_model=None)
     def oracle_route(name: str) -> Json:
