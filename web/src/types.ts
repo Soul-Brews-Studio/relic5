@@ -60,7 +60,8 @@ export interface Hit {
   machines: string[]; link: string;
 }
 
-export interface SearchResult { older_hits?: number;
+export interface TraceRef { id: string; root: string; parent: string | null }
+export interface SearchResult { older_hits?: number; trace?: TraceRef;
   hits: Hit[]; horizon: string; horizons_tried: string[]; searched_months: string[]; widened?: boolean; fallback?: string;
 }
 
@@ -71,6 +72,7 @@ export interface TailRow { ts_th?: string; machines?: string[]; role: string; se
 export interface TailResult { rows: TailRow[]; newest?: string }
 
 export interface QueryRow {
+  id?: string; parent?: string | null; root?: string; n?: number;
   at: string; door: string; tool: string; query: string; client?: string; ms?: number; hits?: number | null;
   mode?: string | null; horizon?: string | null; vector?: boolean; error?: string | null; for_s?: number;
 }
@@ -78,6 +80,24 @@ export interface Queries {
   running: QueryRow[]; last: QueryRow[]; per_hour: Record<string, { n: number; p50_ms: number; p95_ms: number }>;
   top: { query: string; n: number }[]; zero_hits: QueryRow[];
   searches?: { at: string; query: string; hits?: number | null; client?: string | null }[];
+}
+
+export interface TopHit { link: string; session?: string; repo?: string | null; role?: string; ts?: string; score?: number }
+export interface TraceStep {
+  id: string; parent: string | null; at: string; door?: string; client?: string; tool: string; query?: string;
+  args?: Record<string, unknown>; hits?: number | null; ms?: number; mode?: string | null; error?: string | null; top?: TopHit[]; depth: number;
+}
+export interface TraceChain { root: string; id: string; steps: TraceStep[]; searches: number; opened: number; first: string; last: string }
+export interface ChainRow { root: string; steps: number; searches: number; opened: number; query: string | null; first: string; last: string; clients: string[] }
+export interface AccessPage { rows: QueryRow[]; total: number; next_before: number | null }
+export interface AskedStats {
+  hours: { hour: string; n: number; searches: number; zero: number; p50_ms: number | null; p95_ms: number | null }[];
+  window_h: number; calls: number; searches: number; zero: number; zero_share: number | null;
+  by_client: { client: string; n: number }[]; by_tool: { tool: string; n: number }[];
+}
+export interface SavedSearch {
+  id: string; name: string; args: Record<string, unknown>; every: number; from: string | null; door?: string | null; created: string;
+  runs: number; last_run: string | null; last_hits: number | null; last_new: number | null; last_record: string | null; last_error?: string | null; seen: number;
 }
 
 export interface EvalRow {

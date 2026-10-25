@@ -36,7 +36,10 @@ def start(tool: str, door: str | None, query: str | None, client: str | None = N
     return qid, time.time()
 
 
-def finish(root: str, qid: str, t0: float, result: object = None, args: Json | None = None, error: str | None = None) -> None:
+def finish(root: str, qid: str, t0: float, result: object = None, args: Json | None = None, error: str | None = None,
+           rid: str | None = None, parent: str | None = None) -> str | None:
+    """Append the call's line; with rid, also its trace fields (trace.py): id, parent, root, args, top hits. -> the root."""
+    from . import trace
     with LOCK:
         q = RUNNING.pop(qid, {})
     args = args or {}
@@ -44,6 +47,12 @@ def finish(root: str, qid: str, t0: float, result: object = None, args: Json | N
     line = q | {"ms": round((time.time() - t0) * 1000), "hits": len(r.get("hits", [])) if "hits" in r else None,
                 "mode": ("hybrid" if r.get("hybrid") else "semantic") if r.get("semantic") else ("keyword" if "hits" in r else None),
                 "horizon": r.get("horizon"), "vector": "vector" in args, "error": (error or "")[:200] or None}
+    top = None
+    if rid:
+        top = trace.root_of(root, parent) or rid
+        line |= {"id": rid, "parent": parent, "root": top, "args": trace.record_args(args)}
+        if (t := trace.top_hits(result)) is not None:
+            line["top"] = t
     p = _log(root)
     os.makedirs(os.path.dirname(p), exist_ok=True)
     fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
@@ -51,6 +60,7 @@ def finish(root: str, qid: str, t0: float, result: object = None, args: Json | N
         os.write(fd, (json.dumps(line, ensure_ascii=False) + "\n").encode())
     finally:
         os.close(fd)
+    return top
 
 
 def _tail(path: str, n: int = 5000) -> list[Json]:

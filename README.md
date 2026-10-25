@@ -54,8 +54,8 @@ ssh nat@white.follow-rankine.ts.net '~/relic5/app/.venv/bin/relic5 index'
 uv run relic5 search ภาษาไทย --limit 5   # RELIC5_URL defaults to http://white.follow-rankine.ts.net:8795
 ```
 
-MCP is the easy way: an agent calls `relic_search`, `relic_show`, `relic_sessions`, `relic_session` and
-`relic_status` directly. Register it once per machine. `bin/relic5-mcp-headers` reads the 0600 token file, so the token
+MCP is the easy way: an agent calls `relic_search`, `relic_show`, `relic_sessions`, `relic_session`, `relic_trace`,
+`relic_saved` and `relic_status` directly. Register it once per machine. `bin/relic5-mcp-headers` reads the 0600 token file, so the token
 never sits in `~/.claude.json`:
 
 ```sh
@@ -63,6 +63,27 @@ claude mcp add-json -s user relic5 '{"type":"http","url":"http://white.follow-ra
   "headersHelper":"'"$PWD"'/bin/relic5-mcp-headers"}'
 claude mcp get relic5        # Status: ✔ Connected (m5, 2026-10-23)
 ```
+
+### Trace chains and saved searches
+
+Every tool call is a record in the hub's query log (`logs/queries.jsonl`, 0600, never in git). A search's record keeps
+its first 10 hits as links. Each `relic_search`, `relic_show`, `relic_session` and `relic_sessions` result carries
+`trace: {id, root, parent}`. Pass `parent: <trace.id>` with the next call (opening a hit, or a narrower search) and
+the hub links the two calls into one **chain**:
+
+```text
+search "rustfs backup"      #a1  ── relic_show hit 3   parent=#a1
+                                 └─ search "rustfs backup white"  parent=#a1 ── relic_show hit 1
+                                 └─ saved-search run (hourly): 12 hits, 2 new
+```
+
+- `relic_trace {"id": "<trace.id>"}` returns the whole chain, oldest first, each step with its depth, args and top hits.
+  With no id it lists the newest chains.
+- `relic_saved {"action": "add", "from": "<trace.id>", "every": 60}` keeps that search as a job. The hub re-runs it,
+  puts each run in the chain of the search it came from, and writes a `saved-search` event to the Jobs log saying how
+  many hits are new.
+- The Search page passes `parent` for you. The Asked page shows the charts, the full paged log, the chains and the saved
+  searches. Over HTTP: `GET /api/trace`, `/api/access`, `/api/asked`, `/api/saved`, and `POST /api/saved`.
 
 Tests: `uv run pytest` (33 tests: push against a fake hub, month manifests, fold, Thai, cursor, MCP, token).
 
