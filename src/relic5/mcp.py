@@ -106,6 +106,11 @@ TOOLS = [
      "Use it for activity charts, heatmaps, busiest hours, which projects took the time.",
      "inputSchema": {"type": "object", "properties": {"by": STR, "group": STR, "since": STR, "until": STR, "role": STR,
                      "project": STR, "machine": STR, "top": INT, "stream": STR}, "additionalProperties": False}},
+    {"name": "relic_files", "description": "The files the agents changed most: Edit / Write / MultiEdit / NotebookEdit "
+     "calls by file path, with calls, sessions, days, first and last time (Bangkok), the tools and the projects. Filters "
+     "since/until, project (substring), contains (a path substring, e.g. 'relic5/src' or '.md'); top (default 30).",
+     "inputSchema": {"type": "object", "properties": {"since": STR, "until": STR, "project": STR, "contains": STR, "top": INT},
+                     "additionalProperties": False}},
     {"name": "relic_team", "description": "Sessions started per project per Bangkok day over the last N days (default 90), "
      "and which projects ran on the same days (pairs): who worked with whom, for a timeline or a co-activity chart.",
      "inputSchema": {"type": "object", "properties": {"days": INT}, "additionalProperties": False}},
@@ -327,6 +332,11 @@ def run_tool(relic: Relic5, name: str, a: Json, door: str | None = None) -> Json
                                      _str(a, "stream") or "text")
         except ValueError as ex:
             raise UsageError(str(ex)) from ex
+    if name == "relic_files":
+        from . import activity
+        _check(a, ["since", "until", "project", "contains", "top"])
+        return activity.files(relic, _str(a, "since"), _str(a, "until"), _str(a, "project"), _str(a, "contains"),
+                              min(_int(a, "top", 1) or 30, 500))
     if name == "relic_team":
         from . import family
         _check(a, ["days"])

@@ -84,3 +84,43 @@ def activity(relic: Any, by: str = "day", group: str = "none", since: str | None
     return {"by": by, "group": group, "stream": stream, "unit": UNIT[stream], "since": since, "until": until, "buckets": buckets, "series": out,
             "total": sum(sum(c.values()) for _, c in ranked),
             "note": f"{UNIT[stream]}, each once; weekday 1 = Monday; Bangkok time"}
+
+
+EDIT_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
+
+
+def files(relic: Any, since: str | None = None, until: str | None = None, project: str | None = None,
+          contains: str | None = None, top: int = 30) -> Json:
+    """The files the agents changed most (MCP relic_files): Edit / Write / MultiEdit / NotebookEdit calls of the tools
+    stream, by file_path, with how many calls, sessions and days, the first and last time, and which tools."""
+    src = relic.parts.source("tools")
+    if not src:
+        return {"files": [], "total_calls": 0}
+    where: list[str] = ["chunk = 0", "name IN ('" + "','".join(EDIT_TOOLS) + "')"]
+    params: list[object] = []
+    if since:
+        where.append("ts_th >= ?")
+        params.append(since)
+    if until:
+        where.append("substr(ts_th, 1, ?) <= ?")
+        params += [len(until), until]
+    if project:
+        where.append("cat ILIKE ?")
+        params.append(f"%{project}%")
+    path = """regexp_extract(text, '"(?:file_path|notebook_path)"\\s*:\\s*"([^"]+)"', 1)"""
+    having = ""
+    if contains:
+        having = "HAVING f ILIKE ?"
+        params.append(f"%{contains}%")
+    rows = relic._rows(f"""SELECT {path} AS f, count(DISTINCT msgkey) AS calls, count(DISTINCT sid) AS sessions,
+                                  count(DISTINCT substr(ts_th, 1, 10)) AS days, min(ts_th) AS first, max(ts_th) AS last,
+                                  list(DISTINCT name) AS tools, list(DISTINCT cat) AS projects
+                           FROM {src} WHERE {' AND '.join(where)} GROUP BY 1 {having}
+                           ORDER BY calls DESC LIMIT {max(1, min(int(top), 500))}""", params)
+    rows = [r for r in rows if r["f"]]
+    total = relic._rows(f"SELECT count(DISTINCT msgkey) AS n FROM {src} WHERE {' AND '.join(where)}",
+                        params[: len(params) - (1 if contains else 0)])
+    return {"files": [{"file": r["f"], "calls": r["calls"], "sessions": r["sessions"], "days": r["days"], "first": r["first"],
+                       "last": r["last"], "tools": sorted(r["tools"] or []), "projects": sorted(p for p in (r["projects"] or []) if p)}
+                      for r in rows],
+            "total_calls": total[0]["n"] if total else 0, "note": "edit and write calls by the agents; Bangkok time"}
