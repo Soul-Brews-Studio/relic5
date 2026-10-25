@@ -37,6 +37,7 @@ export const Columns = (p: P) => <svg {...base(p)}><rect x="3.5" y="4.5" width="
 export const Filter = (p: P) => <svg {...base(p)}><path d="M4 5.5h16l-6.2 7.3V19l-3.6-1.8v-4.4L4 5.5z" /></svg>;
 export const Session = (p: P) => <svg {...base(p)}><path d="M4.5 6.5a2 2 0 012-2h11a2 2 0 012 2v8a2 2 0 01-2 2H11l-4.5 3.5v-3.5h0a2 2 0 01-2-2v-8z" /><path d="M8.5 9.5h7M8.5 12.5h4.5" /></svg>;
 export const Gear = (p: P) => <svg {...base(p)}><circle cx="12" cy="12" r="3" /><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6" /></svg>;
+export const Clock = (p: P) => <svg {...base(p)}><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" /></svg>;
 export const Close = (p: P) => <svg {...base(p)}><path d="M7 7l10 10M17 7L7 17" /></svg>;
 
 /** The hub's mark: a serif Psi on a circle in relic5's blue (relic-scan keeps the amber one) (ARRA Oracle Unconference #1 logo), with a small 5. SVG text in a
