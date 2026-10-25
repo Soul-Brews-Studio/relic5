@@ -13,6 +13,7 @@ Parts arrive over ssh (bin/relic5-push), never over HTTP. The routes that write 
 (Connect), artifacts, and saved searches (trace.py); a POST that changes settings needs X-Relic5-Request: 1.
 """
 import functools, hmac, json, os, time
+from urllib.parse import parse_qs, urlparse
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
@@ -26,6 +27,7 @@ from .query import Relic5
 from .types_ import JobEvent, Json
 from . import store as rfs
 from . import swr
+from . import oauth
 
 if TYPE_CHECKING:
     from .doors import Doors
@@ -367,22 +369,38 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
 
     WEB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web", "index.html")
 
+    # the public address a tunnel gives the hub (RELIC5_PUBLIC_URL, e.g. https://relic5.example.com): on that host only
+    # /mcp and the OAuth endpoints answer; the page and the rest of the API stay on the tailnet
+    PUBLIC = os.environ.get("RELIC5_PUBLIC_URL", "").rstrip("/")
+    PUBLIC_HOST = (urlparse(PUBLIC).hostname or "").lower() if PUBLIC else ""
+    OPEN = ("/.well-known/oauth-protected-resource", "/.well-known/oauth-authorization-server", "/oauth/")
+
+    def base_of(request: Request) -> str:
+        return PUBLIC or f"{request.url.scheme}://{request.url.netloc}"
+
     def who(request: Request) -> str | None:
         """The door this request came through (doors.py), from the socket's addresses only."""
         h = request.headers.get("authorization", "")
         # a browser shows the token once at /login?t=..., then sends it as an HttpOnly, SameSite=Strict cookie
         got = h[7:] if h.startswith("Bearer ") else request.cookies.get("relic5_t", "")
+        if got.startswith("r5o_"):   # an OAuth access token (oauth.py): claude.ai's connector, /mcp only
+            name = oauth.check(got)
+            return f"oauth:{name}" if name and request.url.path == "/mcp" else None
         server = (request.scope.get("server") or ("",))[0]
         client = request.client.host if request.client else ""
         return doors.door(server, client, request.url.hostname, got)
 
     @app.middleware("http")
     async def auth(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
-        if request.url.path == "/login":
-            return await call_next(request)   # it checks the token itself
+        path = request.url.path
+        if PUBLIC_HOST and (request.url.hostname or "").lower() == PUBLIC_HOST and not (path == "/mcp" or path.startswith(OPEN)):
+            return JSONResponse({"error": "not found"}, status_code=404)   # the tunnel shows only the MCP door
+        if path == "/login" or path.startswith(OPEN):
+            return await call_next(request)   # they check the token themselves, or need none
         d = who(request)
         if d is None:
-            return JSONResponse({"error": "missing or bad Authorization: Bearer token"}, status_code=401)
+            hdr = {"WWW-Authenticate": f'Bearer resource_metadata="{base_of(request)}/.well-known/oauth-protected-resource"'} if path == "/mcp" else {}
+            return JSONResponse({"error": "missing or bad Authorization: Bearer token"}, status_code=401, headers=hdr)
         request.state.door = d
         t0 = time.perf_counter()
         perf.ROUTE.set(request.url.path)   # the queries this request runs are filed under it (perf.query)
@@ -397,6 +415,72 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
     def perf_route(minutes: int = 60, route: str = "") -> Json:
         """The request log (perf.py): per route p50/p95/max, the slowest and newest requests, memory and load."""
         return perf.summary(max(1, min(minutes, 24 * 60)), route or None)
+
+    # ---- OAuth for claude.ai (oauth.py) ----
+    @app.get("/.well-known/oauth-protected-resource")
+    @app.get("/.well-known/oauth-protected-resource/mcp")
+    def oauth_resource(request: Request) -> Json:
+        return oauth.resource(base_of(request))
+
+    @app.get("/.well-known/oauth-authorization-server")
+    @app.get("/.well-known/oauth-authorization-server/mcp")
+    def oauth_meta(request: Request) -> Json:
+        return oauth.metadata(base_of(request))
+
+    @app.post("/oauth/register")
+    async def oauth_register(request: Request) -> Response:
+        try:
+            return JSONResponse(oauth.register(json.loads(await request.body() or b"{}")), status_code=201)
+        except ValueError:
+            return JSONResponse({"error": "invalid_client_metadata", "error_description": "a JSON body"}, status_code=400)
+        except oauth.OAuthError as ex:
+            return JSONResponse(ex.body(), status_code=ex.status)
+
+    def _form(raw: bytes) -> dict[str, str]:
+        return {k: v[0] for k, v in parse_qs(raw.decode(errors="replace"), keep_blank_values=True).items()}
+
+    @app.get("/oauth/authorize")
+    def oauth_authorize(request: Request) -> Response:
+        q = dict(request.query_params)
+        try:
+            c = oauth.check_authorize(q)
+        except oauth.OAuthError as ex:
+            return JSONResponse(ex.body(), status_code=ex.status)
+        return HTMLResponse(oauth.page(q, c), headers={"cache-control": "no-store", "x-frame-options": "DENY"})
+
+    @app.post("/oauth/authorize")
+    async def oauth_approve(request: Request) -> Response:
+        q = _form(await request.body())
+        try:
+            c = oauth.check_authorize(q)
+        except oauth.OAuthError as ex:
+            return JSONResponse(ex.body(), status_code=ex.status)
+        d = doors.door("", "", "", q.get("token", "")) if q.get("token") and not q["token"].startswith("r5o_") else None
+        if not d:
+            time.sleep(1)   # a wrong token costs a second
+            return HTMLResponse(oauth.page({k: v for k, v in q.items() if k != "token"}, c, "That is not one of this hub's tokens."),
+                                status_code=401, headers={"cache-control": "no-store", "x-frame-options": "DENY"})
+        return RedirectResponse(oauth.approve({k: v for k, v in q.items() if k != "token"}, d), status_code=302)
+
+    @app.post("/oauth/token")
+    async def oauth_token(request: Request) -> Response:
+        try:
+            return JSONResponse(oauth.token(_form(await request.body())), headers={"cache-control": "no-store"})
+        except oauth.OAuthError as ex:
+            return JSONResponse(ex.body(), status_code=ex.status)
+
+    @app.get("/api/oauth", response_model=None)
+    def oauth_clients(request: Request) -> Response:
+        if not str(request.state.door).startswith(("loopback", "tailnet:")):
+            return JSONResponse({"error": "connectors are managed from the tailnet"}, status_code=403)
+        return JSONResponse({"clients": oauth.clients(), "public": PUBLIC or None})
+
+    @app.post("/api/oauth", response_model=None)
+    async def oauth_revoke(request: Request) -> Response:
+        if not str(request.state.door).startswith(("loopback", "tailnet:")) or request.headers.get("x-relic5-request") != "1":
+            return JSONResponse({"error": "connectors are managed from the tailnet, with X-Relic5-Request: 1"}, status_code=403)
+        body = json.loads(await request.body() or b"{}")
+        return JSONResponse({"revoked": oauth.revoke(str(body.get("client_id", "")))})
 
     @app.get("/login")
     def login(t: str = "") -> Response:
