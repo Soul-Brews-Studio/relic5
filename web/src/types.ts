@@ -57,7 +57,12 @@ export interface Status {
 export interface Hit {
   uid: string; partition: string; session_uuid: string; role: string; ts: string; repo_key?: string;
   session_name?: string | null; title?: string | null; text_snippet: string; score: number; layer: string;
-  machines: string[]; link: string;
+  machines: string[]; link: string; matched?: string[] | null;
+}
+
+export interface Explain {
+  query: string; tokens: string[]; layers: string[]; rows: number; phrase_rows: number | null; tokenizer: string; ms: number;
+  terms: { token: string; rows: number; capped: boolean; idf: number | null }[];
 }
 
 export interface TraceRef { id: string; root: string; parent: string | null }

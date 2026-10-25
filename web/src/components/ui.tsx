@@ -113,12 +113,28 @@ export function Who({ role }: { role: string }) {
   return <span className={cx("inline-flex items-center gap-1.5 font-semibold", c)}><span className={cx("size-1.5 rounded-full", d)} />{role === "user" ? "human" : role}</span>;
 }
 
-/** Text with each query word wrapped in <mark>, without ever injecting HTML. */
+/** The colour of the query's n-th token, the same in the token panel, the hit matrix and every highlight. Six theme
+ *  hues in a fixed order; a seventh token and later share the neutral (never a cycled hue). */
+export const TOKEN_HUES = ["var(--accent)", "var(--amber)", "var(--ok)", "var(--tool)", "var(--danger)", "var(--code)"];
+export const tokenHue = (i: number) => TOKEN_HUES[i] ?? "var(--muted)";
+
+/** The words of a query the way the index splits it, near enough: letters and digits runs, lower case. */
+export const queryWords = (q: string) => [...new Set((q.toLowerCase().match(/[\p{L}\p{M}\p{N}_]+/gu) ?? []))];
+
+/** Text with each query word wrapped in <mark>, without ever injecting HTML. A Latin word or number matches only as a
+ *  whole word ("we" not inside "were", the index's tokens are whole words); Thai has no spaces, so it matches inside.
+ *  Each word wears its token colour. */
 export function Marked({ text, q }: { text: string; q: string }) {
-  const words = q.split(/\s+/).filter(Boolean).map(w => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const words = queryWords(q);
   if (!words.length) return <>{text}</>;
-  const parts = text.split(new RegExp(`(${words.join("|")})`, "gi"));
-  return <>{parts.map((p, i) => (i % 2 ? <mark key={i}>{p}</mark> : p))}</>;
+  const esc = (w: string) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pat = words.map(w => (/^[\p{Script=Latin}\p{N}_]+$/u.test(w) ? `(?<![\\p{L}\\p{N}])${esc(w)}(?![\\p{L}\\p{N}])` : esc(w)));
+  const parts = text.split(new RegExp(`(${pat.join("|")})`, "giu"));
+  return <>{parts.map((p, i) => {
+    if (i % 2 === 0) return p;
+    const n = words.indexOf(p.toLowerCase()), c = tokenHue(n);
+    return <mark key={i} style={{ background: `color-mix(in srgb, ${c} 26%, transparent)`, color: "var(--text)", boxShadow: `inset 0 -2px 0 ${c}` }}>{p}</mark>;
+  })}</>;
 }
 
 /** The one "pick some of these" control: chips that press (machines, who). Pressed = cyan outline on a cyan wash, the

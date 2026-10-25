@@ -81,7 +81,7 @@ def test_push_sends_memory_notes(tmp_path):
     (fb / "ssh").write_text(FAKE_SSH)
     (fb / "ssh").chmod(0o755)
     e = dict(os.environ, PATH=f"{fb}:{os.environ['PATH']}", FAKE_HUB_HOME=str(hub), RELIC5_SRC=str(src), HOME=str(home),
-             RELIC5_HUB="hub", RELIC5_MACHINE="m5", RELIC5_SCAN=str(tmp_path / "noscan"))
+             RELIC5_HUB="hub", RELIC5_MACHINE="m5", RELIC5_NEW_MACHINE="1", RELIC5_SCAN=str(tmp_path / "noscan"))
     r = subprocess.run([os.path.join(REPO, "bin/relic5-push")], env=e, capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     base = hub / "relic5/parts/m5/memory"

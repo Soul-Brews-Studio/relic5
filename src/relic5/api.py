@@ -175,6 +175,16 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
         return trace.access(relic.parts.root, max(1, min(limit, 500)), before, tool or None, client or None, door or None, q or None,
                             bool(zero), bool(errors), bool(evals))
 
+    @app.get("/api/explain", response_model=None)
+    def explain_route(q: str = "", with_: str = "", w: str = "") -> Response | Json:
+        """How the hub reads a search: its tokens, each token's rows and BM25 weight, the exact-phrase count."""
+        from .explain import explain
+        from .query import UsageError
+        try:
+            return explain(relic, q, w or with_ or None)
+        except UsageError as ex:
+            return JSONResponse({"error": str(ex)}, status_code=400)
+
     @app.get("/api/asked", response_model=None)
     def asked_route(hours: int = 24) -> Json:
         """Per-hour counts and latency, zero-hit share, by client and tool: the Asked page's charts."""
