@@ -191,8 +191,17 @@ def _main(argv: list[str] | None = None) -> None:
             fcntl.flock(lockf, fcntl.LOCK_EX | (0 if wait else fcntl.LOCK_NB))
         except BlockingIOError:
             sys.exit(print("relic5 index: another index is running (exit 75; --wait to queue)", file=sys.stderr) or 75)
-        con = rfs.duck(duckdb.connect(), rfs.root_of(root))
+        # an in-memory DuckDB has no temp directory, so at its memory_limit it fails instead of spilling (white,
+        # 2026-10-25: index-vectors OOM at 7.4 GiB in 7 s); give it one beside the lock
+        con = rfs.duck(duckdb.connect(config={"memory_limit": os.environ.get("RELIC5_DUCK_MEM", "8GB"),
+                                              "temp_directory": os.path.join(lock_dir, ".duck-tmp")}),
+                         rfs.root_of(root))
         if vectors:   # the slow lane, on its own: vector tables and watermarks only
+            # the history vector table (~600 k rows of floats, deduplicated and sorted) does not fit 8 GB: it ran
+            # out at 7.4 GiB even spilling (white, 2026-10-25). Its own limit, and no insertion order to keep
+            # (table_sql ends in ORDER BY). RELIC5_DUCK_MEM_VECTORS overrides
+            con.execute(f"SET memory_limit = '{os.environ.get('RELIC5_DUCK_MEM_VECTORS', '20GB')}'")
+            con.execute("SET preserve_insertion_order = false")
             with job(root, "index-vectors") as j:
                 def echo(m: str) -> None:   # each line printed and kept as the job's progress
                     print(m)

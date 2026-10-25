@@ -1,9 +1,9 @@
 // The hub's shell, after the old ARRA Oracle Studio: a sticky top header on desktop, a bottom tab bar on a phone, and a Cmd/Ctrl-K palette to jump or search from anywhere.
 import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
 import { cx } from "./ui";
-import { Asked, Close, Globe, Psi, Tree, Columns, Menu, Rows, Disk, Home, Jobs, Live, Mark, More, Moon, Note, Plug, Search, Session, Sun } from "./Icons";
+import { Alert, Pulse, Asked, Close, Gear, Globe, Psi, Tree, Columns, Menu, Rows, Disk, Home, Jobs, Live, Mark, More, Moon, Note, Plug, Search, Session, Sun } from "./Icons";
 
-export type View = "home" | "search" | "map" | "oracles" | "family" | "live" | "memory" | "jobs" | "queries" | "compare" | "store" | "connect";
+export type View = "home" | "search" | "map" | "oracles" | "family" | "live" | "memory" | "jobs" | "queries" | "compare" | "store" | "connect" | "incidents" | "settings" | "perf";
 export type Theme = "dark" | "paper";
 export type Layout = "top" | "side";
 
@@ -20,6 +20,9 @@ export const VIEWS: { id: View; label: string; icon: ComponentType<{ size?: numb
   { id: "queries", label: "Asked", icon: Asked, group: 1 },
   { id: "compare", label: "Quality", icon: Columns, group: 1 },
   { id: "connect", label: "Connect", icon: Plug, group: 1 },
+  { id: "perf", label: "Performance", icon: Pulse, group: 1 },
+  { id: "incidents", label: "Incidents", icon: Alert, group: 1 },
+  { id: "settings", label: "Settings", icon: Gear, group: 1 },
 ];
 
 export type HubState = "ok" | "warning" | "failed" | "unknown";
@@ -100,6 +103,18 @@ export function NavDrawer({ open, onClose, view, go, state, foot, badges, onPale
     if (open && !d.open) { if (wide()) d.show(); else d.showModal(); }
     if (!open && d.open) d.close();
   }, [open]);
+  // a non-modal dialog (the wide-screen panel) gets no Escape from the browser: close it here (Nat, 2026-10-25: "sidebar
+  // can close when esc"), unless a modal (the palette) or a text field is the one Escape is for
+  useEffect(() => {
+    if (!open) return;
+    const esc = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (e.key !== "Escape" || e.defaultPrevented || document.querySelector("dialog:modal") || t?.closest("input, textarea, select, [contenteditable]")) return;
+      onClose();
+    };
+    addEventListener("keydown", esc);
+    return () => removeEventListener("keydown", esc);
+  }, [open, onClose]);
   const item = (v: (typeof VIEWS)[number]) => {
     const I = v.icon, on = view === v.id;
     return (

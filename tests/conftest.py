@@ -3,6 +3,10 @@ import hashlib, os
 import duckdb
 import pytest
 
+os.environ.setdefault("RELIC5_SWR", "0")   # tests read what they just wrote; swr's own test turns it on
+import tempfile
+os.environ["RELIC5_SEEN_JSON"] = os.path.join(tempfile.mkdtemp(), "seen.json")   # never the real ~/.config/relic5
+
 COLS = ["key", "msgkey", "chunk", "month", "sid", "ts", "ts_th", "engine", "role", "type", "kind", "name", "cat", "text"]
 
 

@@ -176,12 +176,17 @@ def table_sql(parts: Parts, root: str, model: str, months: Collection[str]) -> s
     src, have = text_sql(parts, months), vectors_sql(root, model)
     if src is None or have is None:
         return None
-    return f"""SELECT msgkey || CASE WHEN chunk > 0 THEN ':' || chunk ELSE '' END AS uid, * EXCLUDE (rn, machine) FROM (
-               SELECT t.*, 'prose' AS layer, NULL::VARCHAR AS title, v.vector::FLOAT[] AS vector, length(t.text) AS chars,
+    # the window (one row per msgkey+chunk, every machine holding it) runs on the text rows alone: carried through a
+    # window, the 1,024 floats of each vector held the whole table in memory, past the index's memory_limit (white,
+    # 2026-10-25: OOM at 7.4 GiB). The vectors join the deduplicated rows after it.
+    return f"""SELECT w.uid, w.* EXCLUDE (uid, rn, machine, chars), v.vector::FLOAT[] AS vector, w.chars FROM (
+               SELECT msgkey || CASE WHEN chunk > 0 THEN ':' || chunk ELSE '' END AS uid, t.*, 'prose' AS layer,
+                 NULL::VARCHAR AS title, length(t.text) AS chars,
                  list(machine) OVER (PARTITION BY msgkey, chunk ORDER BY machine
                    ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS machines,
                  row_number() OVER (PARTITION BY msgkey, chunk ORDER BY machine) AS rn
-               FROM {src} t JOIN {have} v USING (key) WHERE length(t.text) >= {BUILD_MIN}) WHERE rn = 1 ORDER BY ts, msgkey, chunk"""
+               FROM {src} t WHERE length(t.text) >= {BUILD_MIN}) w
+               JOIN {have} v USING (key) WHERE w.rn = 1 ORDER BY w.ts, w.msgkey, w.chunk"""
 
 
 def probe_rows(root: str, con: "duckdb.DuckDBPyConnection", model: str = DEFAULT, n: int = 200) -> list[Json]:

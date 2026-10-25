@@ -13,7 +13,7 @@ one of its months' manifests changed since it was built. The newest 3 generation
 current.json is never removed. Tokenizer settings are relic3's, as relic4 carries them (agent-relic-v4
 src/relic4/embed.py FTS_SETTINGS, PR #6 @b399119): icu, no stemming, no stop words, max token 128.
 """
-import json, os, shutil, time
+import json, os, shutil, threading, time
 from collections.abc import Callable, Collection, Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING, TypedDict
@@ -52,7 +52,13 @@ agent, relic-scan's user@host. Tables built before this have none of them (index
 # with any folders under the home before projects/, sessions/ or a Claude project folder (-Users-...):
 # .codex-team/1/sessions, .codex/path-migration-backup-*/sessions, .claude/rescued-*/full-backup-*/-Users-nat-x
 # (2026-10-25: those left 1,587 sessions without a home)
-HOME_SQL = r"nullif(regexp_extract(src_path, '^(.*/\.(?:claude|codex)[^/]*(?:/[^/]+)*?)/(?:(?:projects|sessions|backups|archived)[^/]*|-[^/]+)/', 1), '')"
+# other agents' homes and copies that hold no .claude/.codex: ~/.omp/agent/sessions, <repo>/.thclaws/sessions,
+# ~/.relic-mirrors/<name>/2026/..., ~/.tmp/projects-bak/-home-nat-x (2026-10-25: the last 648 sessions without a home)
+HOME_SQL = (r"coalesce(nullif(regexp_extract(src_path, '^(.*/\.(?:claude|codex)[^/]*(?:/[^/]+)*?)/(?:(?:projects|sessions|backups|archived|jobs|transcripts)[^/]*|-[^/]+)/', 1), ''),"
+            r" nullif(regexp_extract(src_path, '^(.*/\.(?:omp|thclaws|relic-mirrors|relic3-mirror|tmp)[^/]*(?:/[^/]+)*?)/(?:(?:projects|sessions|state)[^/]*|-[^/]+|20[0-9][0-9])/', 1), ''),"
+            # last: the folder holding Claude project folders (-Users-..., -home-...), under projects/ or not:
+            # ~/mba-claude-backup/-Users-nat-x, <repo>/accounts/2/projects/-home-nat-x
+            r" nullif(regexp_extract(src_path, '^(/.*?)/(?:projects[^/]*/)?-(?:Users|home|opt|private|tmp|var|Volumes)-[^/]*/', 1), ''))")
 KEEP = 3
 
 
@@ -76,26 +82,62 @@ def search_dir(root: str) -> str:
 
 
 def seed_local(root: str, log: Callable[[str], object] = print) -> int:
-    """An S3 hub with no local index yet: copy the bucket's index/_search down (a mirror of a disk hub carries one), the
-    pointers last, so it can search at once. -> files copied (0: nothing to seed, or already seeded)."""
+    """Copy the bucket's index/_search down (a mirror of a disk hub carries one), the pointers last, so an S3 hub
+    searches at once: when there is no local index yet, and again when the bucket publishes a newer one while the
+    local index is still the one seeded from it (a hub that built its own index keeps it). Files already here at the
+    same size are not copied again; generations neither pointer names are removed. -> files copied."""
     root = str(root).rstrip("/")
     if not rfs.is_s3(root) or os.environ.get("RELIC5_INDEX_LOCAL", "1") == "0":
         return 0
     local, remote = search_dir(root), os.path.join(root, "index", "_search")
-    if os.path.exists(os.path.join(local, "current.json")) or not rfs.isfile(os.path.join(remote, "current.json")):
+    if not rfs.isfile(os.path.join(remote, "current.json")):
         return 0
-    from .mirror import _copy_one
     cur = rfs.read_json(os.path.join(remote, "current.json"))
-    gens = {v.split("/")[0] for v in cur.values()}
-    todo = [p for g in sorted(gens) for p, _, _ in rfs.files(os.path.join(remote, g))]
+    seeded_p, here_p = os.path.join(local, "seeded.json"), os.path.join(local, "current.json")
+    here = rfs.read_json(here_p) if os.path.exists(here_p) else None
+    seeded = rfs.read_json(seeded_p) if os.path.exists(seeded_p) else None
+    if here is not None and (here != seeded or cur == here):
+        return 0   # built here (not a seed), or already the bucket's
     from concurrent.futures import ThreadPoolExecutor
+    from .mirror import _copy_one
+    gens = {v.split("/")[0] for v in cur.values()}
+    todo = [(p, n) for g in sorted(gens) for p, n, _ in rfs.files(os.path.join(remote, g))]
+    todo = [(p, n) for p, n in todo if not (os.path.isfile(q := os.path.join(local, p[len(remote) + 1:])) and os.path.getsize(q) == n)]
     with ThreadPoolExecutor(max_workers=8) as pool:
-        list(pool.map(lambda p: _copy_one(p, os.path.join(local, p[len(remote) + 1:])), todo))
+        list(pool.map(lambda pn: _copy_one(pn[0], os.path.join(local, pn[0][len(remote) + 1:])), todo))
     for f in ("names.parquet", "homes.parquet", "shard_months.json", "vectors.json", "state.json", "current.json"):
         if rfs.isfile(os.path.join(remote, f)):
             _copy_one(os.path.join(remote, f), os.path.join(local, f))
+    rfs.write_json(seeded_p, cur)
+    keep = gens | {v.split("/")[0] for v in (here or {}).values()}   # the previous one: a query may still hold it open
+    for g in os.listdir(local):
+        if os.path.isdir(os.path.join(local, g)) and g[:1].isdigit() and g not in keep:
+            shutil.rmtree(os.path.join(local, g), ignore_errors=True)
     log(f"seeded the local index from {remote}: {len(todo)} files")
     return len(todo)
+
+
+_MX_LOCK = threading.Lock()
+SEEDING: dict[str, str] = {}   # root -> when its local index began copying from the bucket
+
+
+def seed_in_background(root: str, every: float = 0) -> threading.Thread:
+    """seed_local in a thread; every > 0: again every that many seconds (a newer index mirrored into the bucket)."""
+    def run() -> None:
+        SEEDING[root] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        while True:
+            try:
+                seed_local(root, log=lambda m: print(f"relic5: {m}", flush=True))
+            except Exception as ex:   # no seed: the auto-index builds one
+                print(f"relic5: could not seed the local index: {ex}", flush=True)
+            finally:
+                SEEDING.pop(root, None)
+            if not every:
+                return
+            time.sleep(every)
+    t = threading.Thread(target=run, name="relic5-seed", daemon=True)
+    t.start()
+    return t
 
 
 def current(root: str) -> dict[str, str]:
@@ -231,6 +273,10 @@ def build(root: str, con: "duckdb.DuckDBPyConnection", log: Callable[[str], obje
             i = tab.schema.get_field_index("vector")
             flat = tab.column("vector").combine_chunks().flatten().cast(pa.float32())
             tab = tab.set_column(i, "vector", pa.FixedSizeListArray.from_arrays(flat, dim))
+        from .schema import check as check_schema
+        bad = check_schema(name, tab.schema)   # every table against its class (schema.py) before it is published
+        if bad:
+            raise ValueError("index table does not match its schema: " + "; ".join(bad[:5]))
         tb = db.create_table(name, tab, mode="overwrite")
         if not is_vec:
             tb.create_index("text", config=FTS(**FTS_SETTINGS), replace=True)
@@ -298,19 +344,29 @@ class Index:
         """The in-memory vector matrices (open, history) of one model, made on first use per generation."""
         from . import vec as V
         tabs = self._load()
-        if getattr(self, "_mx_seen", None) != self.seen:
-            self._mx, self._mx_seen = {}, self.seen
-        out: list[V.Matrix] = []
-        for part in ("open", "history"):
-            name = f"vec_{V.slug(model)}_{part}"
-            if name not in tabs:
-                continue
-            if name not in self._mx:
-                self._mx[name] = V.Matrix(tabs[name])
-            out.append(self._mx[name])
-        return out
+        # one builder at a time: a hub's first page asks several routes at once, and each thread built its own copy of
+        # the same 3.4 GB matrix (white's serve peaked at 38 GB after a restart, 2026-10-25)
+        with _MX_LOCK:
+            if getattr(self, "_mx_seen", None) != self.seen:
+                self._mx, self._mx_seen = {}, self.seen
+            out: list[V.Matrix] = []
+            for part in ("open", "history"):
+                name = f"vec_{V.slug(model)}_{part}"
+                if name not in tabs:
+                    continue
+                if name not in self._mx:
+                    self._mx[name] = V.Matrix(tabs[name])
+                out.append(self._mx[name])
+            return out
 
     def vector(self, model: str, vector: Sequence[float], filt: "VecFilter", limit: int) -> list[Json]:
+        from . import perf
+        t0 = time.perf_counter()
+        out = self._vector_untimed(model, vector, filt, limit)
+        perf.query("vector", (time.perf_counter() - t0) * 1000, len(out), f'model {model}', name="Index.vector")
+        return out
+
+    def _vector_untimed(self, model: str, vector: Sequence[float], filt: "VecFilter", limit: int) -> list[Json]:
         """Nearest prose rows to a unit query vector: exact, in memory (vec.Matrix), best first; _score = cosine."""
         out: list[Json] = []
         for mx in self.matrices(model):
@@ -349,6 +405,13 @@ class Index:
         return sum(tb.count_rows() for part in ("open", "history") if (tb := self._load().get(f"{layer}_{part}")) is not None)
 
     def query(self, layer: str, q: str, where: str | None, limit: int) -> list[Json]:
+        from . import perf
+        t0 = time.perf_counter()
+        out = self._query_untimed(layer, q, where, limit)
+        perf.query("bm25", (time.perf_counter() - t0) * 1000, len(out), f'{layer}: {q}', name=f"Index.query {layer}")
+        return out
+
+    def _query_untimed(self, layer: str, q: str, where: str | None, limit: int) -> list[Json]:
         """BM25 hits of one layer (history + open), best first. A query of two or more words also runs as an exact
         phrase, and those hits come first: with any-term ranking, common words ("to use ego browser to") let longer
         texts outrank the one that says it (12 of 22 known-item misses, eval 2026-10-23). A quoted query is a phrase

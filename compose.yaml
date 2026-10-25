@@ -4,6 +4,8 @@ x-relic: &relic
   build: { context: ., args: { UID: "${UID:-1001}", GID: "${GID:-1001}" } }
   image: relic5:${RELIC5_TAG:-local}
   network_mode: host
+  environment:
+    RELIC5_PUBLIC_URL: ${RELIC5_PUBLIC_URL:-}   # the tunnel's https address (.env on the box): /mcp + OAuth only there
   volumes:
     - ${RELIC5_DATA:-~/relic5}:/data
     - ${HOME}/.config/relic5:/config     # tokens (legacy, plain) and tokens.json (hashed): the Connect tab writes it

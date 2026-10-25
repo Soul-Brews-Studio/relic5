@@ -1469,11 +1469,12 @@ wheels = [
 
 [[package]]
 name = "relic5"
-version = "26.10.25a835"
+version = "26.10.25a1203"
 source = { editable = "." }
 dependencies = [
     { name = "duckdb" },
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "lancedb" },
     { name = "numpy" },
     { name = "pylance" },
@@ -1489,7 +1490,6 @@ embed = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "httpx" },
     { name = "mypy" },
     { name = "pyarrow" },
     { name = "pytest" },
@@ -1499,6 +1499,7 @@ dev = [
 requires-dist = [
     { name = "duckdb", specifier = "==1.5.5" },
     { name = "fastapi", specifier = ">=0.115" },
+    { name = "httpx", specifier = ">=0.27" },
     { name = "lancedb", specifier = "==0.40.0" },
     { name = "numpy", specifier = ">=2" },
     { name = "pylance", specifier = "==13.0.0" },
@@ -1511,7 +1512,6 @@ provides-extras = ["embed"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "httpx", specifier = ">=0.27" },
     { name = "mypy", specifier = ">=2.4.0" },
     { name = "pyarrow", specifier = ">=17" },
     { name = "pytest", specifier = ">=8" },

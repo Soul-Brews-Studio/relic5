@@ -44,6 +44,21 @@ def copy_of(root: str) -> Json | None:
         return None
 
 
+def _sessions(root: str) -> int | None:
+    """Sessions on the hub: the rows of the index's names.parquet (one per session), from the file's footer; None before
+    the first index (2026-10-25: claude.ai asked relic_status for it and got null)."""
+    import pyarrow.parquet as pq
+    from .fts import search_dir
+    p = os.path.join(search_dir(root), "names.parquet")
+    try:
+        if rfs.is_s3(p):
+            with rfs.open_input(p) as f:
+                return int(pq.ParquetFile(f).metadata.num_rows)
+        return int(pq.ParquetFile(p).metadata.num_rows) if os.path.exists(p) else None
+    except Exception:
+        return None
+
+
 def status(root: str, now: _datetime | None = None) -> Json:
     p = Parts(root)
     mans = p.manifests()
@@ -95,7 +110,10 @@ def status(root: str, now: _datetime | None = None) -> Json:
     live = current(p.root)
     fts = {"at": max((v["built"] for k, v in fst.items() if k in live), default=None),
            "rows": {k: v["rows"] for k, v in fst.items() if k in live}}
-    if not live:
+    from .fts import SEEDING
+    if SEEDING.get(p.root.rstrip("/")) or SEEDING.get(p.root):
+        warnings.append(f"copying the search index from the bucket to this machine since {SEEDING.get(p.root.rstrip('/')) or SEEDING.get(p.root)}: search answers by substring until it lands")
+    elif not live:
         warnings.append("no BM25 index published: search answers by substring (run relic5 index)")
     from .jobs import read as read_jobs
     evs, running = read_jobs(p.root)
@@ -182,7 +200,7 @@ def status(root: str, now: _datetime | None = None) -> Json:
         "machines": machines,
         "versions": versions,
         "rows": {"events": rows["text"] + rows["thinking"], "text": rows["text"], "thinking": rows["thinking"],
-                 "tools": rows["tools"], "sessions": None, "files": sum(len(p.files(s)) for s in MONTH_STREAMS)},
+                 "tools": rows["tools"], "sessions": _sessions(p.root), "files": sum(len(p.files(s)) for s in MONTH_STREAMS)},
         "jobs": {"running": running, "recent": evs[:10], "last_error": last_error},
         "backup": backup,
         "offsite": offsite,

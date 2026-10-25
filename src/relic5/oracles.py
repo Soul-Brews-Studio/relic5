@@ -108,10 +108,12 @@ _PORTRAITS: dict[tuple[object, ...], Json] = {}
 
 
 def _stamp(root: str) -> tuple[float, ...]:
-    """What a portrait is made from, by file time: every machine's vault notes and vaults.json, and the memory index."""
+    """What a portrait is made from, by size: every machine's vault notes and vaults.json, and the memory index. Not by
+    time: each push rewrites a machine's notes.parquet every 10 minutes, mostly unchanged, and the map's warm loop rebuilt
+    12 portraits each time (36 scans an hour, 15 s, seen in perf.py's query log 2026-10-25)."""
     fs = sorted(rfs.glob(os.path.join(root, "parts", "*", "vault", "notes.parquet")) + rfs.glob(os.path.join(root, "parts", "*", "meta", "vaults.json"))
                 + [os.path.join(root, "index", "_memory", "notes.parquet")])
-    return tuple(rfs.getmtime(f) for f in fs if rfs.exists(f))
+    return tuple(rfs.getsize(f) for f in fs if rfs.exists(f))
 
 
 def portrait(relic: "Relic5", name: str) -> Json:

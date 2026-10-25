@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { get, usePoll } from "../api";
-import { bkk, clock, repoColor } from "../format";
+import { clock, recent, repoColor } from "../format";
 import { Drawer } from "../components/Drawer";
 import { Loading, MachinePick } from "../components/ui";
 import { DataTable } from "../components/DataTable";
@@ -38,10 +38,10 @@ export function LiveView({ machine, role = "", on, machines, setMachine, setRole
         <WhoPick role={role} onChange={setRole} />
         <MachinePick machine={machine} machines={machines} onChange={setMachine} />
       </PageHead>
-      <Hint>{p.data ? `GET /api/tail · newest ${bkk(p.data.newest)} · read ${clock(p.at)} · ${fresh.size} new since the last read` : "reading /api/tail…"}</Hint>
+      <Hint>{p.data ? `GET /api/tail · newest ${recent(p.data.newest)} · read ${clock(p.at)} · ${fresh.size} new since the last read` : "reading /api/tail…"}</Hint>
       {p.error && <State error>{p.error}</State>}
       <DataTable rows={(p.data?.rows ?? []).filter(r => !role || r.role === role)} rowKey={keyOf} flash={fresh} onRow={read} cols={[
-        { key: "t", head: "time (+07)", w: "w-32", cell: r => <time>{(r.ts_th ?? "").slice(5, 16).replace("T", " ")}</time> },
+        { key: "t", head: "when", w: "w-32", cell: r => <time dateTime={r.ts_th} title={(r.ts_th ?? "").slice(0, 19).replace("T", " ") + " +07"} className="tabular-nums">{recent(r.ts_th)}</time> },
         { key: "m", head: "machine", w: "w-28", cell: r => (r.machines ?? []).join(", ") },
         { key: "r", head: "who", w: "w-32", cell: r => <Who role={r.role} /> },
         // repo first: a title is the session's first one ("Restart self" stays after the session moves on to other work)

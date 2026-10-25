@@ -181,3 +181,28 @@ or `backups` in that path.
   export) is found from any of them; a hit shows its home and how many others hold it.
 - The search index carries `home`, `homes` and `agent` from the first `relic5 index --force` after this change.
   Parts pushed before relic-scan wrote `src_path` (white's, today) show home unknown.
+
+## Reaching the hub from outside: tunnel, tokens, claude.ai
+
+On the tailnet and on the hub itself no token is needed (doors.py). From anywhere else the hub answers at
+`https://relic5-mcp.buildwithoracle.com` (a route on white's Cloudflare tunnel `white4` to `http://127.0.0.1:8795`,
+`RELIC5_PUBLIC_URL` in `~/relic5/app/.env` on white). On that host only `/mcp`, `/.well-known/oauth-*` and
+`/oauth/*` answer; the page and the rest of the API stay on the tailnet.
+
+`/mcp` there takes either:
+
+- **a hub token** (`Authorization: Bearer …`, Settings > Access tokens or `relic5 token new <name>`): Claude Code
+  (`claude mcp add --transport http relic5 https://relic5-mcp.buildwithoracle.com/mcp --header "Authorization: Bearer …"`),
+  scripts, or claude.ai with "No sign-in" and that header;
+- **OAuth 2.1** (oauth.py): claude.ai > Customize > Connectors > Add custom connector, URL `…/mcp`. claude.ai registers
+  itself and opens the hub's approve page; paste a hub token there to let it in. Settings > Connectors lists and revokes
+  them. Access tokens last 7 days, refresh tokens 90 and rotate.
+
+## Speed: what is measured and kept
+
+- Performance page (`#tab=perf`, `/api/perf`): every request timed (route, status, ms, bytes, door), every query timed
+  under the code that ran it (`Relic5._rows`, `Index.query`, `Index.vector`), memory, load and rate every 10 s; the
+  log in `logs/requests/<day>.jsonl`.
+- swr.py: the heavy GET answers (status, sessions, memory, map, oracles, homes, tail, ...) come from memory and refresh
+  behind the reader; a start asks them once (`RELIC5_WARM=0` turns it off).
+- DuckDB has a memory limit (`RELIC5_DUCK_MEM`, 6 GB serve / 8 GB index); the image sets `MALLOC_ARENA_MAX=2`.

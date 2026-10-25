@@ -1,4 +1,4 @@
-import json
+import json, os
 
 import pytest
 from fastapi.testclient import TestClient
@@ -161,6 +161,39 @@ def test_tokens_from_the_ui(hub_with_tokens):
     assert t.check(new) is None and c.get("/api/tokens", headers={"Host": "127.0.0.1"}).json() == []
 
 
+def test_tokens_show_when_last_used(hub_with_tokens):
+    c, t = hub_with_tokens
+    J = {"X-Relic5-Request": "1", "Host": "127.0.0.1"}
+    secret = c.post("/api/tokens", json={"action": "new", "name": "laptop"}, headers=J).json()["token"]
+    row = lambda: next(x for x in c.get("/api/tokens", headers={"Host": "127.0.0.1"}).json() if x["name"] == "laptop")
+    assert "last_used" not in row()                                                   # never used yet
+    assert c.get("/api/status", headers={"Authorization": f"Bearer {secret}", "cf-connecting-ip": "203.0.113.9"}).status_code == 200
+    r = row()
+    assert r["last_used"] and r["last_path"] == "/api/status" and r["last_via"] == "direct"   # cf header only trusted from loopback
+    assert r["last_ip"] != "203.0.113.9"
+
+
+def test_last_used_seeded_from_the_logs(tmp_path):
+    import json, os
+    from relic5 import seen
+    os.makedirs(tmp_path / "logs" / "requests")
+    day = __import__("time").strftime("%Y-%m-%d", __import__("time").gmtime())
+    (tmp_path / "logs" / "requests" / f"{day}.jsonl").write_text(
+        json.dumps({"at": f"{day}T01:00:00.000Z", "path": "/mcp", "door": "oauth:Seeded"}) + "\n")
+    (tmp_path / "logs" / "queries.jsonl").write_text(json.dumps({"at": f"{day}T02:00:00Z", "door": "token:seeded", "tool": "relic_search"}) + "\n")
+    seen.seed(str(tmp_path))
+    assert seen.of("oauth:Seeded")["last_used"] == f"{day}T01:00:00Z" and seen.of("oauth:Seeded")["last_path"] == "/mcp"
+    assert seen.of("token:seeded")["last_path"] == "/mcp relic_search"
+
+
+def test_icon_needs_no_token(root):
+    c = TestClient(make_app(root, {"m5": "tok-m5"}, Doors({"m5": "tok-m5"}, enabled=False)))
+    for p, mime in (("/favicon.ico", "image/x-icon"), ("/favicon.svg", "image/svg+xml"), ("/icon-512.png", "image/png")):
+        r = c.get(p)
+        assert r.status_code == 200 and r.headers["content-type"].startswith(mime) and len(r.content) > 100
+    assert c.get("/").status_code == 401                                   # the rest still needs a door
+
+
 def test_big_answers_are_gzipped(client):
     import glob, os
     import relic5
@@ -169,3 +202,55 @@ def test_big_answers_are_gzipped(client):
     assert r.status_code == 200 and r.headers.get("content-encoding") == "gzip"     # the page's JS: gzipped
     small = client.get("/health", headers={**H, "Accept-Encoding": "gzip"})
     assert small.headers.get("content-encoding") is None                            # under 1 KB: as it is
+
+
+def test_every_request_is_timed_and_written(client, root):
+    from relic5 import perf
+    perf.RING.clear(); perf._PENDING.clear()
+    client.get("/api/status", headers=H)
+    client.get("/api/search", params={"q": "hub", "t": "secret"}, headers=H)
+    assert client.get("/api/status").status_code == 401                       # refused before timing: not logged
+    p = client.get("/api/perf", headers=H).json()
+    routes = {r["route"]: r for r in p["routes"]}
+    assert routes["/api/status"]["count"] == 1 and routes["/api/search"]["p50"] is not None
+    assert "secret" not in json.dumps(p) and p["recent"][0]["route"] == "/api/search" and p["rss_mb"] > 0
+    assert perf.flush(root) == 2 and len(open(os.path.join(root, "logs", "requests", sorted(os.listdir(os.path.join(root, "logs", "requests")))[-1])).read().splitlines()) == 2
+
+
+def test_heavy_answers_are_served_stale_while_they_refresh(monkeypatch):
+    import threading, time
+    from relic5 import swr
+    monkeypatch.setenv("RELIC5_SWR", "1")
+    swr.clear()
+    calls, gate = [], threading.Event()
+    def slow():
+        calls.append(1)
+        if len(calls) > 1:
+            gate.wait(5)
+        return len(calls)
+    assert swr.get("k", 0.05, slow) == 1 and swr.get("k", 0.05, slow) == 1 and len(calls) == 1   # fresh: memory
+    time.sleep(0.06)
+    t = time.time()
+    assert swr.get("k", 0.05, slow) == 1 and time.time() - t < 0.5                           # stale: at once
+    gate.set()
+    for _ in range(50):
+        if swr.get("k", 60, slow) == 2:
+            break
+        time.sleep(0.02)
+    assert swr.get("k", 60, slow) == 2 and len(calls) == 2                                    # refreshed behind
+
+
+def test_each_query_is_timed_under_its_name_and_route(client):
+    from relic5 import perf
+    perf.QRING.clear()
+    client.get("/api/search", params={"q": "hub"}, headers=H)
+    client.get("/api/tail", headers=H)
+    qs = {q["name"]: q for q in client.get("/api/perf", headers=H).json()["queries"]}
+    assert any(n.startswith(("Index.query", "Relic5.")) for n in qs if n != "Relic5.tail") and "Relic5.tail" in qs
+    assert "/api/tail" in qs["Relic5.tail"]["routes"] and qs["Relic5.tail"]["sql"].startswith("SELECT")
+
+
+def test_status_counts_sessions_once_indexed(client, root):
+    from relic5.cli import main
+    main(["index", "--root", root])
+    assert client.get("/api/status", headers=H).json()["rows"]["sessions"] > 0

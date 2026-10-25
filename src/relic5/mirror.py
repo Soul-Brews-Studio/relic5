@@ -108,24 +108,30 @@ def copy(src: str, dst: str, dirs: tuple[str, ...] = DIRS, log: Any = None) -> J
     # an index's pointers last: current.json names tables in generation folders, so it may only arrive after them
     # (2026-10-25: a mirror copied a new current.json before its generation, and the S3 hub could not open a table)
     LAST = ("index/_search/current.json", "index/_search/state.json", "index/_search/vectors.json")
-    later = [k for k in todo if k in LAST]
+    # the pointers are sent every run: a new current.json is most often the same size as the one it replaces
+    # (generation names have one length), so the size test would keep the old one on the mirror
+    later = [k for k in LAST if k in a]
     todo = [k for k in todo if k not in LAST]
     sent, errors, done = 0, [], 0
     # 8 files at a time: one stream is bound by the round trips (5.6 MB/s from white to black's RustFS, one at a time,
     # measured 2026-10-25), and RustFS takes parallel uploads at 60-100 MB/s (neo's benchmark)
     from concurrent.futures import ThreadPoolExecutor, as_completed
+    # the data first, then the index built from it: a month's manifest sent before its parts would arrive older than
+    # them, and the mirror would read every month as stale (2026-10-25: names sort index/ before parts/)
+    phases = [[k for k in todo if not k.startswith("index/")], [k for k in todo if k.startswith("index/")]]
     with ThreadPoolExecutor(max_workers=int(os.environ.get("RELIC5_MIRROR_THREADS", "8"))) as pool:
-        futs = {pool.submit(_copy_one, os.path.join(src, rel), os.path.join(dst, rel)): rel for rel in todo}
-        for f in as_completed(futs):
-            rel = futs[f]
-            try:
-                f.result()
-                sent += a[rel]
-            except Exception as ex:   # one file failing leaves the rest to copy; the next run tries it again
-                errors.append(f"{rel}: {type(ex).__name__}: {str(ex)[:120]}")
-            done += 1
-            if log and (done % 50 == 0 or done == len(todo)):
-                log(done, len(todo), sent)
+        for phase in phases:
+            futs = {pool.submit(_copy_one, os.path.join(src, rel), os.path.join(dst, rel)): rel for rel in phase}
+            for f in as_completed(futs):
+                rel = futs[f]
+                try:
+                    f.result()
+                    sent += a[rel]
+                except Exception as ex:   # one file failing leaves the rest to copy; the next run tries it again
+                    errors.append(f"{rel}: {type(ex).__name__}: {str(ex)[:120]}")
+                done += 1
+                if log and (done % 50 == 0 or done == len(todo)):
+                    log(done, len(todo), sent)
     # then the pointers, and only when everything they may name arrived; else the next run sends them
     for rel in later if not errors else []:
         try:
@@ -133,7 +139,7 @@ def copy(src: str, dst: str, dirs: tuple[str, ...] = DIRS, log: Any = None) -> J
             sent += a[rel]
         except Exception as ex:
             errors.append(f"{rel}: {type(ex).__name__}: {str(ex)[:120]}")
-    todo += later
+    todo += [k for k in later if b.get(k) != a[k]]   # counted as sent only when they changed size (stays 0 when idle)
     return {"src": src, "dst": dst, "files": len(todo) - len(errors), "bytes": sent, "skipped": len(a) - len(todo),
             "seconds": round(time.time() - t0, 1), "errors": errors[:20]}
 

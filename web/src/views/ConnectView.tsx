@@ -28,7 +28,20 @@ function Cmd({ title, why, cmd }: { title: string; why: string; cmd: string }) {
   );
 }
 
-interface TokenRow { name: string; created?: string; expires?: string | null; rotating_until?: string | null; store: string }
+export interface LastUsed { last_used?: string; last_ip?: string | null; last_via?: "tunnel" | "direct" | null; last_path?: string | null }
+interface TokenRow extends LastUsed { name: string; created?: string; expires?: string | null; rotating_until?: string | null; store: string }
+
+/** When a token or connector was last used, and from where: "4 min ago" over "via the tunnel · 203.0.113.9". */
+export function LastUsedCell({ r }: { r: LastUsed }) {
+  if (!r.last_used) return <span className="text-faint">never</span>;
+  const where = [r.last_via === "tunnel" ? "via the tunnel" : null, r.last_ip, r.last_path].filter(Boolean).join(" · ");
+  return (
+    <span className="flex flex-col">
+      <span title={bkk(r.last_used)}>{ago(r.last_used)}</span>
+      {where && <span className="font-mono text-xs text-faint">{where}</span>}
+    </span>
+  );
+}
 
 async function tokenCall(body: object): Promise<{ token?: string; error?: string }> {
   const r = await fetch("/api/tokens", { method: "POST", credentials: "same-origin",
@@ -37,7 +50,7 @@ async function tokenCall(body: object): Promise<{ token?: string; error?: string
 }
 
 /** Issue, rotate and revoke tokens for clients outside the tailnet. The secret is shown once, here, and never again. */
-function Tokens({ url }: { url: string }) {
+export function Tokens({ url }: { url: string }) {
   const p = usePoll<TokenRow[] | { error: string }>("/api/tokens", 0);
   const [name, setName] = useState("");
   const [expires, setExpires] = useState("90d");
@@ -85,6 +98,7 @@ function Tokens({ url }: { url: string }) {
       <DataTable rows={rows} rowKey={r => r.name} empty="no tokens yet" cols={[
         { key: "n", head: "name", cell: r => <b>{r.name}</b> },
         { key: "c", head: "created", cell: r => (r.created ? ago(r.created) : r.store) },
+        { key: "l", head: "last used", cell: r => <LastUsedCell r={r} /> },
         { key: "e", head: "expires", cell: r => (r.expires ? bkk(r.expires) : r.store === "hashed" ? "never" : "") },
         { key: "r", head: "rotating", cell: r => (r.rotating_until ? `old one valid until ${bkk(r.rotating_until)}` : "") },
         { key: "a", head: "", cell: r => r.store === "hashed" ? (

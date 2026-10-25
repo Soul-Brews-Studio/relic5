@@ -13,7 +13,7 @@
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://relic5.buildwithoracle.com/">
 <meta name="theme-color" content="#0a0a0f">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Ccircle cx='20' cy='20' r='18' fill='%2364b5f6'/%3E%3Ctext x='19' y='27.5' text-anchor='middle' font-size='22' font-family='Georgia,serif' fill='%2306121f'%3E%CE%A8%3C/text%3E%3C/svg%3E">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="icon" href="/favicon.ico" sizes="any"><link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <style>
   @font-face { font-family: "Bricolage"; src: url("fonts/BricolageGrotesque.woff2") format("woff2"); font-weight: 200 800; font-display: swap; }
   @font-face { font-family: "JBM"; src: url("fonts/JetBrainsMono.woff2") format("woff2"); font-weight: 100 800; font-display: swap; }
@@ -66,7 +66,7 @@
   figure.shot figcaption { border-top: 1px solid var(--line); padding: 10px 16px; font: 12px var(--mono); color: var(--faint); }
 
   section.band { padding: 72px 0; border-top: 1px solid var(--line); }
-  section.band h2 { font-size: clamp(30px, 3.6vw, 42px); line-height: 1.1; font-weight: 700; max-width: 20em; }
+  section.band h2 { font-size: clamp(30px, 3.6vw, 42px); line-height: 1.1; font-weight: 700; max-width: 20em; text-wrap: balance; }
   section.band p.sub { font-size: 18px; max-width: 40em; margin: 14px 0 0; color: var(--muted); }
 
   .flow { margin-top: 40px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; counter-reset: s; }
@@ -105,6 +105,25 @@
   .status p { margin: 8px 0 0; color: var(--muted); }
   @media (max-width: 720px) { .status { grid-template-columns: minmax(0, 1fr); } }
 
+  .steps { margin-top: 40px; display: grid; gap: 18px; counter-reset: u; }
+  .step { display: grid; grid-template-columns: minmax(0, 300px) minmax(0, 1fr); gap: 28px; align-items: start; border: 1px solid var(--line); border-radius: 18px; background: var(--panel); padding: 24px; }
+  .step h3 { font-size: 21px; font-weight: 700; }
+  .step h3::before { counter-increment: u; content: counter(u) " "; font: 600 14px var(--mono); color: var(--accent); margin-right: 6px; }
+  .step p { margin: 8px 0 0; font-size: 15.5px; color: var(--muted); }
+  .step pre.call { font-size: 13.5px; }
+  @media (max-width: 900px) { .step { grid-template-columns: minmax(0, 1fr); gap: 14px; } }
+  .twin { margin-top: 40px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+  .twin div { border: 1px solid var(--line); border-radius: 16px; background: var(--panel); padding: 22px; }
+  .twin h3 { font-size: 20px; margin-bottom: 8px; }
+  .twin p { margin: 0; font-size: 15.5px; color: var(--muted); }
+  @media (max-width: 900px) { .twin { grid-template-columns: minmax(0, 1fr); } }
+  .stack { margin-top: 40px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+  .stack div { border: 1px solid var(--line); border-radius: 16px; background: var(--panel); padding: 22px; }
+  .stack b { display: block; font: 700 20px var(--display); color: var(--text); }
+  .stack i { display: block; font: normal 12px var(--mono); color: var(--accent); margin: 4px 0 10px; }
+  .stack p { margin: 0; font-size: 15px; color: var(--muted); }
+  @media (max-width: 1000px) { .stack { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+  @media (max-width: 560px) { .stack { grid-template-columns: minmax(0, 1fr); } }
   footer { border-top: 1px solid var(--line); padding: 36px 0 48px; font-size: 14px; color: var(--faint); }
   footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: space-between; }
   footer a { color: var(--muted); }
@@ -116,10 +135,10 @@
   <div class="wrap">
     <a class="brand" href="#top" aria-label="relic5, top of the page">
       <svg width="30" height="30" viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="18" fill="#64b5f6"/><text x="19" y="27.5" text-anchor="middle" font-size="22" font-family="Georgia, serif" fill="#06121f">Ψ</text><text x="29.5" y="31" text-anchor="middle" font-size="9" font-weight="700" font-family="system-ui, sans-serif" fill="#06121f">5</text></svg>
-      <b>relic5</b><span class="v">26.10.24-alpha.2308</span>
+      <b>relic5</b><span class="v">26.10.25-alpha.1203</span>
     </a>
     <nav class="links" aria-label="On this page">
-      <a href="#how">How it works</a><a href="#search">Search</a><a href="#map">Map</a><a href="#agents">For agents</a><a href="#private">Private</a>
+      <a href="#how">How it works</a><a href="#search">Search</a><a href="#map">Map</a><a href="#agents">For agents</a><a href="#use">Use it</a><a href="#stack">Stack</a><a href="#private">Private</a>
     </nav>
   </div>
 </header>
@@ -129,9 +148,10 @@
     <div class="wrap grid">
       <div>
         <h1>Every agent session, from every machine, <span class="accent">in one place you can ask.</span></h1>
-        <p class="lede">relic5 is a small hub you run yourself. Each machine sends it the Claude Code and Codex history it holds. You, and your agents, search it by the words or by the meaning, see it as a map, and read the notes your agents keep.</p>
+        <p class="lede">relic5 is a small hub you run yourself. Each machine sends it the Claude Code and Codex history it holds. You, and your agents in Claude Code or claude.ai, search it by the words or by the meaning, see it as a map, and read the notes your agents keep.</p>
         <div class="cta">
-          <a class="btn primary" href="#how">How it works</a>
+          <a class="btn primary" href="#use">Use it</a>
+          <a class="btn" href="#how">How it works</a>
           <a class="btn" href="https://github.com/Soul-Brews-Studio/relic5">Get relic5 on GitHub</a>
         </div>
         <p class="note">Open source (AGPL-3.0) · alpha · self-hosted · one server, your private network</p>
@@ -257,11 +277,23 @@
     </div>
   </section>
 
+  <section class="band" id="where">
+    <div class="wrap">
+      <h2>Kept where you want it, sorted by whose it is.</h2>
+      <p class="sub">The hub's data is plain Parquet and Lance files. Put them on a disk or in a bucket, keep a second copy, and know which home every message came from.</p>
+      <div class="twin">
+        <div><h3>A disk or S3</h3><p>One folder, or an <code>s3://</code> prefix on any S3-compatible store you run. Searches stay fast on S3: the search index is copied to the hub's own disk.</p></div>
+        <div><h3>A mirror and a switch</h3><p>Keep a second copy in step on a schedule, check it file by file, and move the hub onto it at the next start.</p></div>
+        <div><h3>Whose <code>.claude</code></h3><p>Every message knows the home it was written in: a person's own, a second home, a project's, a backup or a mirror. Filter search and sessions by home.</p></div>
+      </div>
+    </div>
+  </section>
+
   <section class="band" id="agents">
     <div class="wrap">
       <h2>Your agents can ask it too.</h2>
-      <p class="sub">relic5 speaks MCP. Register it once on a machine, and an agent can look up what was decided last week before it starts again.</p>
-      <div class="feat">
+      <p class="sub">relic5 speaks MCP. Register it once in Claude Code, or add it to claude.ai as a connector, and an agent can look up what was decided last week before it starts again.</p>
+      <div class="feat" style="align-items: start">
         <pre class="call" aria-label="An example MCP call"><span class="c"># what an agent sends</span>
 <span class="k">relic_search</span> {
   <span class="s">"query"</span>: "why did the backup move",
@@ -269,14 +301,81 @@
   <span class="s">"horizon"</span>: "1m"
 }
 <span class="c"># → hits with the session, time, repo and a link</span>
-<span class="k">relic_show</span> { <span class="s">"id"</span>: "relic5://2026-10/…", <span class="s">"before"</span>: 3 }</pre>
+<span class="k">relic_show</span> { <span class="s">"id"</span>: "relic5://2026-10/…", <span class="s">"before"</span>: 3 }
+<span class="c"># → done: say what was found</span>
+<span class="k">relic_found</span> { <span class="s">"goal"</span>: "…", <span class="s">"found"</span>: "…" }</pre>
         <div class="tools">
           <div><b>relic_search</b><span>words or meaning, with filters</span></div>
           <div><b>relic_show</b><span>one message and its neighbours</span></div>
           <div><b>relic_sessions</b><span>sessions by repo and time</span></div>
           <div><b>relic_session</b><span>one session's turns</span></div>
           <div><b>relic_status</b><span>what the hub holds, how fresh</span></div>
+          <div><b>relic_homes</b><span>every .claude and .codex, by owner</span></div>
+          <div><b>relic_trace</b><span>a question's chain of searches</span></div>
+          <div><b>relic_asked</b><span>what was looked into, by day</span></div>
+          <div><b>relic_tag</b><span>label what was found</span></div>
         </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band" id="use">
+    <div class="wrap">
+      <h2>Use it, step by step.</h2>
+      <p class="sub">One server runs the hub; every machine with agent history pushes to it; you and your agents ask it. Names below are examples: put your own server in.</p>
+      <div class="steps">
+        <div class="step">
+          <div><h3>Run the hub</h3><p>On one Linux server you own. Docker, host networking, data in <code>~/relic5</code> (or set an <code>s3://</code> root). It answers on port 8795.</p></div>
+          <pre class="call"><span class="c"># on the server</span>
+git clone https://github.com/Soul-Brews-Studio/relic5 ~/relic5/app
+cd ~/relic5/app && <span class="k">just up</span>
+docker exec app-serve-1 relic5 token new laptop   <span class="c"># once per machine</span></pre>
+        </div>
+        <div class="step">
+          <div><h3>Push from each machine</h3><p>Relic Scan finds the transcripts; <code>relic5-push</code> sends what changed, a file per month. Run it on a timer.</p></div>
+          <pre class="call"><span class="c"># on a laptop, with the token in ~/.config/relic5/token</span>
+export RELIC5_HUB=<span class="s">you@my-server</span>   <span class="c"> # ssh target</span>
+bin/relic5-push
+ssh my-server 'cd ~/relic5/app && just index'</pre>
+        </div>
+        <div class="step">
+          <div><h3>Search in the page</h3><p>Open the hub in a browser on your private network: no token from the hub itself or your own tailnet devices. Search, the map, Live, Knowledge, Asked, Performance and Settings.</p></div>
+          <pre class="call"><span class="c"># any browser on your private network</span>
+http://<span class="s">my-server</span>:8795/
+
+<span class="c"># or from a terminal</span>
+uv run relic5 search "why did the backup move" --limit 5</pre>
+        </div>
+        <div class="step">
+          <div><h3>Give it to Claude Code</h3><p>One command per machine. On your private network no token is needed; from anywhere else send a hub token.</p></div>
+          <pre class="call"><span class="c"># on your private network</span>
+claude mcp add --transport http relic5 http://<span class="s">my-server</span>:8795/mcp
+
+<span class="c"># from outside, through your tunnel, with a hub token</span>
+claude mcp add --transport http relic5 https://<span class="s">relic5.example.com</span>/mcp \
+  --header "Authorization: Bearer $RELIC5_TOKEN"</pre>
+        </div>
+        <div class="step">
+          <div><h3>Add it to claude.ai</h3><p>Point a tunnel (Cloudflare Tunnel, for one) at the hub and set <code>RELIC5_PUBLIC_URL</code>. That address shows only <code>/mcp</code> and sign-in. claude.ai signs in with OAuth; you approve it on the hub's page with one of your hub tokens.</p></div>
+          <pre class="call"><span class="c"># claude.ai › Customize › Connectors › Add custom connector</span>
+Name   relic5
+URL    https://<span class="s">relic5.example.com</span>/mcp
+<span class="c"># Continue › Add › Connect › paste a hub token › Approve</span>
+<span class="c"># revoke it later in the hub's Settings › Connectors</span></pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band" id="stack">
+    <div class="wrap">
+      <h2>Under the hood: open formats, one small server.</h2>
+      <p class="sub">No database server to run. Files you can read with any tool, two embedded engines, and a standard protocol for agents.</p>
+      <div class="stack">
+        <div><b>LanceDB</b><i>search tables</i><p>The keyword index (BM25, with Thai split inside words) and the vector tables, one typed schema per table, checked at every build. Vector search runs as one in-memory matrix.</p></div>
+        <div><b>DuckDB + Parquet</b><i>the history itself</i><p>Each machine's messages, tool calls and thinking as Parquet, one file per month. DuckDB folds copies from two machines into one and answers the sessions, Live and the map.</p></div>
+        <div><b>S3 or a disk</b><i>where it lives</i><p>A folder, or any S3-compatible bucket you run. On S3 the search index is copied to the hub's own disk, so searching stays as fast. A mirror keeps a second copy in step.</p></div>
+        <div><b>MCP</b><i>for agents</i><p>Fourteen tools over streamable HTTP: search, read, sessions, homes, chains of searches, tags. Claude Code with no token on your network; claude.ai through OAuth or a hub token.</p></div>
       </div>
     </div>
   </section>
@@ -286,8 +385,8 @@
       <h2>Private by how it is built.</h2>
       <div class="priv">
         <div><b>On your server</b><span>The hub runs on one machine you own. There is no hosted version and no account.</span></div>
-        <div><b>On your network</b><span>Machines reach it over your own private network. A token is asked on every request from anywhere else.</span></div>
-        <div><b>Nothing leaves</b><span>No analytics, no third-party calls. Vectors are made on your own machines.</span></div>
+        <div><b>On your network</b><span>Machines reach it over your own private network. Anywhere else needs a hub token, or an OAuth sign-in you approve, and sees only the MCP door.</span></div>
+        <div><b>Nothing leaves on its own</b><span>No analytics, no third-party calls. Vectors are made on your own machines. Only a connector you add and approve can read it.</span></div>
       </div>
       <div class="status">
         <div>
@@ -302,7 +401,7 @@
 
 <footer>
   <div class="wrap">
-    <span>relic5 · Soul Brews Studio · 26.10.24-alpha.2308 · AGPL-3.0</span>
+    <span>relic5 · Soul Brews Studio · 26.10.25-alpha.1203 · AGPL-3.0</span>
     <span>The pictures on this page are illustrations with made-up data, not a real hub.</span>
     <span><a href="https://github.com/Soul-Brews-Studio/relic5">GitHub</a> · <a href="https://relic.buildwithoracle.com/scan/">Relic Scan</a></span>
   </div>

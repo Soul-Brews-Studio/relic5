@@ -22,6 +22,9 @@ const LiveView = lazy(() => import("./views/LiveView").then(m => ({ default: m.L
 const JobsView = lazy(() => import("./views/JobsView").then(m => ({ default: m.JobsView })));
 const QueriesView = lazy(() => import("./views/QueriesView").then(m => ({ default: m.QueriesView })));
 const CompareView = lazy(() => import("./views/CompareView").then(m => ({ default: m.CompareView })));
+const IncidentsView = lazy(() => import("./views/IncidentsView").then(m => ({ default: m.IncidentsView })));
+const PerfView = lazy(() => import("./views/PerfView").then(m => ({ default: m.PerfView })));
+const SettingsView = lazy(() => import("./views/SettingsView").then(m => ({ default: m.SettingsView })));
 const StoreView = lazy(() => import("./views/StoreView").then(m => ({ default: m.StoreView })));
 
 const TABS = VIEWS.map(v => v.id).filter(v => v !== "home");
@@ -141,11 +144,14 @@ export function App() {
           {st.view === "queries" && <QueriesView on />}
           {st.view === "compare" && <CompareView on />}
           {st.view === "store" && (s ? <StoreView s={s} /> : <p className="text-muted">Reading the hub…</p>)}
+          {st.view === "incidents" && <IncidentsView s={s ?? null} error={status.error} />}
+          {st.view === "perf" && <PerfView on />}
+          {st.view === "settings" && <SettingsView theme={theme} setTheme={setTheme} layout={layout} setLayout={setLayout} />}
           </Suspense>
         </main>
       </div>
       <TabBar view={st.view} go={go} onMore={() => setPalette(true)} />
-      <Incidents s={s ?? null} error={status.error} />
+      <Incidents s={s ?? null} error={status.error} open={() => go("incidents")} hidden={st.view === "incidents"} />
       <NavDrawer open={drawer} onClose={() => setDrawer(false)} view={st.view} go={go} state={hub} foot={foot} badges={{ jobs: s?.jobs.running.length }} onPalette={() => setPalette(true)} />
       <Palette open={palette} onClose={() => setPalette(false)} go={go} search={search} recent={recent} sessions={palSessions} openSession={openSession} />
       <Drawer open={!!reading} onClose={() => setReading(null)} title={reading ? <>{reading.x.repo} · {reading.x.name}</> : ""}

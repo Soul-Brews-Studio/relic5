@@ -12,9 +12,10 @@ no loopback exemption. A hub serves many machines, and a proxy on the same box w
 Parts arrive over ssh (bin/relic5-push), never over HTTP. The routes that write are the hub's own records: tokens
 (Connect), artifacts, and saved searches (trace.py); a POST that changes settings needs X-Relic5-Request: 1.
 """
-import hmac, json, os
+import functools, hmac, json, os, threading, time
+from urllib.parse import parse_qs, urlparse
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import duckdb
 from fastapi import FastAPI, Request
@@ -25,6 +26,9 @@ from . import mcp
 from .query import Relic5
 from .types_ import JobEvent, Json
 from . import store as rfs
+from . import swr
+from . import oauth
+from . import seen
 
 if TYPE_CHECKING:
     from .doors import Doors
@@ -56,9 +60,23 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
     if not tokens and doors is None:
         raise SystemExit("no tokens: run `relic5 token new <name>` first")
     doors = doors if doors is not None else Doors(tokens)
-    con = duckdb.connect(":memory:", config={"threads": min(os.cpu_count() or 4, 16)})
+    # a memory limit: DuckDB takes up to 80% of the machine by default, and white's hub was OOM-killed (2026-10-25, 46 GB
+    # box, serve at 24 GB beside an index); RELIC5_DUCK_MEM overrides
+    con = duckdb.connect(":memory:", config={"threads": min(os.cpu_count() or 4, 16), "memory_limit": os.environ.get("RELIC5_DUCK_MEM", "6GB")})
+    from . import perf
+    perf.keep(root)
+    threading.Thread(target=seen.seed, args=(root,), name="seen-seed", daemon=True).start()   # last used, from the logs
     relic = Relic5(root, con)
     app = FastAPI(title="relic5", docs_url=None, redoc_url=None, openapi_url=None)
+
+    def cached(ttl: float) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+        """A GET answer kept ttl seconds and refreshed behind the reader (swr.py); the key is the route and its args."""
+        def deco(fn: Callable[..., Any]) -> Callable[..., Any]:
+            @functools.wraps(fn)
+            def wrapped(*a: Any, **kw: Any) -> Any:
+                return swr.get(f"{fn.__name__}?{sorted(kw.items())}", ttl, lambda: fn(*a, **kw))
+            return wrapped
+        return deco
     # gzip what is worth it (the page's JS and CSS went out as 142 KB raw over tailscale, measured 2026-10-25; gz
     # they are about 42 KB), and API answers over 1 KB. Small replies stay as they are.
     from starlette.middleware.gzip import GZipMiddleware
@@ -95,7 +113,7 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
         t, bad = token_admin(request)
         if t is None:
             return bad or JSONResponse({"error": "refused"}, status_code=403)
-        return t.list()
+        return [r | seen.of("token:" + r["name"]) for r in t.list()]
 
     @app.post("/api/tokens", response_model=None)
     async def tokens_change(request: Request) -> Response | Json:
@@ -127,6 +145,7 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
         return {"name": name, "action": action, **({"token": secret} if secret else {})}
 
     @app.get("/api/clients", response_model=None)
+    @cached(60)
     def clients_route() -> Json:
         from . import selfknow
         return selfknow.clients(relic.parts.root)
@@ -155,12 +174,11 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
         ok, r = logged(relic, tool, args | ({"parent": parent} if parent else {}), "saved-search", client)
         return ok, r, (r.get("trace") or {}).get("id") if ok and isinstance(r, dict) else None
 
-    if rfs.is_s3(relic.parts.root):   # the search index is local (fts.search_dir): seed it from the bucket once
-        from .fts import seed_local
-        try:
-            seed_local(relic.parts.root)
-        except Exception as ex:   # no seed: the auto-index below builds one
-            print(f"relic5: could not seed the local index: {ex}", flush=True)
+    if rfs.is_s3(relic.parts.root):
+        # the search index is local (fts.search_dir): seed it from the bucket once, in the background, so the hub answers
+        # at once (a whole index is GBs: 7.5 GB for white's, 2026-10-25); Index opens it when current.json lands
+        from .fts import seed_in_background
+        seed_in_background(relic.parts.root, every=float(os.environ.get("RELIC5_SEED_EVERY", "300")))
     if rfs.is_s3(relic.parts.root) and os.environ.get("RELIC5_WARM", "1") != "0":
         # S3 has no append: each log line is an object (store.append_line). Roll lines older than 10 minutes into one
         # chunk object per log every 10 minutes, so a listing stays short.
@@ -201,6 +219,7 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
         _mirror.keep_mirrored(relic.parts.root)
 
     @app.get("/api/homes", response_model=None)
+    @cached(60)
     def homes_route() -> Json:
         """Every .claude (or .codex) the history came from, per machine (query.homes)."""
         return relic.homes()
@@ -352,24 +371,137 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
 
     WEB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web", "index.html")
 
+    # the public address a tunnel gives the hub (RELIC5_PUBLIC_URL, e.g. https://relic5.example.com): on that host only
+    # /mcp and the OAuth endpoints answer; the page and the rest of the API stay on the tailnet
+    # the tunnel's https address(es), comma-separated, the first the one to show; more than one while a connector
+    # moves from one name to another (2026-10-25: relic5-mcp.buildwithoracle.com -> mcp.oraclenet.org)
+    PUBLICS = {(urlparse(u).hostname or "").lower(): u.strip().rstrip("/")
+               for u in os.environ.get("RELIC5_PUBLIC_URL", "").split(",") if u.strip()}
+    PUBLIC = next(iter(PUBLICS.values()), "")
+    OPEN = ("/.well-known/oauth-protected-resource", "/.well-known/oauth-authorization-server", "/oauth/")
+    # the hub's icon, open to anyone and on the public host too: claude.ai shows it beside the connector
+    ICONS = {"/favicon.ico": ("favicon.ico", "image/x-icon"), "/favicon.svg": ("favicon.svg", "image/svg+xml"),
+             "/apple-touch-icon.png": ("icon-180.png", "image/png"), "/icon-192.png": ("icon-192.png", "image/png"),
+             "/icon-512.png": ("icon-512.png", "image/png")}
+
+    def base_of(request: Request) -> str:
+        return PUBLICS.get((request.url.hostname or "").lower()) or PUBLIC or f"{request.url.scheme}://{request.url.netloc}"
+
+    def where(request: Request) -> tuple[str, str]:
+        """The caller's address: through the tunnel, cloudflared connects from loopback and names the real one."""
+        client = request.client.host if request.client else ""
+        cf = request.headers.get("cf-connecting-ip")
+        return (cf, "tunnel") if cf and client in ("127.0.0.1", "::1") else (client, "direct")
+
     def who(request: Request) -> str | None:
         """The door this request came through (doors.py), from the socket's addresses only."""
         h = request.headers.get("authorization", "")
         # a browser shows the token once at /login?t=..., then sends it as an HttpOnly, SameSite=Strict cookie
         got = h[7:] if h.startswith("Bearer ") else request.cookies.get("relic5_t", "")
+        if got.startswith("r5o_"):   # an OAuth access token (oauth.py): claude.ai's connector, /mcp only
+            name = oauth.check(got)
+            return f"oauth:{name}" if name and request.url.path == "/mcp" else None
         server = (request.scope.get("server") or ("",))[0]
         client = request.client.host if request.client else ""
         return doors.door(server, client, request.url.hostname, got)
 
     @app.middleware("http")
     async def auth(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
-        if request.url.path == "/login":
-            return await call_next(request)   # it checks the token itself
+        path = request.url.path
+        if path in ICONS:
+            name, mime = ICONS[path]
+            return Response(open(os.path.join(os.path.dirname(__file__), "icons", name), "rb").read(), media_type=mime,
+                            headers={"cache-control": "public, max-age=86400"})
+        if (request.url.hostname or "").lower() in PUBLICS and not (path == "/mcp" or path.startswith(OPEN)):
+            return JSONResponse({"error": "not found"}, status_code=404)   # the tunnel shows only the MCP door
+        if path == "/login" or path.startswith(OPEN):
+            return await call_next(request)   # they check the token themselves, or need none
         d = who(request)
         if d is None:
-            return JSONResponse({"error": "missing or bad Authorization: Bearer token"}, status_code=401)
+            hdr = {"WWW-Authenticate": f'Bearer resource_metadata="{base_of(request)}/.well-known/oauth-protected-resource"'} if path == "/mcp" else {}
+            return JSONResponse({"error": "missing or bad Authorization: Bearer token"}, status_code=401, headers=hdr)
         request.state.door = d
-        return await call_next(request)
+        seen.touch(d, *where(request), path)
+        t0 = time.perf_counter()
+        perf.ROUTE.set(request.url.path)   # the queries this request runs are filed under it (perf.query)
+        resp = await call_next(request)
+        if request.url.path.startswith(("/api/", "/mcp")) and request.url.path != "/api/perf":
+            route = request.scope.get("route")
+            perf.record(request.method, request.url.path, getattr(route, "path", None), resp.status_code,
+                        (time.perf_counter() - t0) * 1000, int(resp.headers.get("content-length") or 0) or None, d, request.url.query)
+        return resp
+
+    @app.get("/api/perf", response_model=None)
+    def perf_route(minutes: int = 60, route: str = "") -> Json:
+        """The request log (perf.py): per route p50/p95/max, the slowest and newest requests, memory and load."""
+        return perf.summary(max(1, min(minutes, 24 * 60)), route or None)
+
+    # ---- OAuth for claude.ai (oauth.py) ----
+    @app.get("/.well-known/oauth-protected-resource")
+    @app.get("/.well-known/oauth-protected-resource/mcp")
+    def oauth_resource(request: Request) -> Json:
+        return oauth.resource(base_of(request))
+
+    @app.get("/.well-known/oauth-authorization-server")
+    @app.get("/.well-known/oauth-authorization-server/mcp")
+    def oauth_meta(request: Request) -> Json:
+        return oauth.metadata(base_of(request))
+
+    @app.post("/oauth/register")
+    async def oauth_register(request: Request) -> Response:
+        try:
+            return JSONResponse(oauth.register(json.loads(await request.body() or b"{}")), status_code=201)
+        except ValueError:
+            return JSONResponse({"error": "invalid_client_metadata", "error_description": "a JSON body"}, status_code=400)
+        except oauth.OAuthError as ex:
+            return JSONResponse(ex.body(), status_code=ex.status)
+
+    def _form(raw: bytes) -> dict[str, str]:
+        return {k: v[0] for k, v in parse_qs(raw.decode(errors="replace"), keep_blank_values=True).items()}
+
+    @app.get("/oauth/authorize")
+    def oauth_authorize(request: Request) -> Response:
+        q = dict(request.query_params)
+        try:
+            c = oauth.check_authorize(q)
+        except oauth.OAuthError as ex:
+            return JSONResponse(ex.body(), status_code=ex.status)
+        return HTMLResponse(oauth.page(q, c), headers={"cache-control": "no-store", "x-frame-options": "DENY"})
+
+    @app.post("/oauth/authorize")
+    async def oauth_approve(request: Request) -> Response:
+        q = _form(await request.body())
+        try:
+            c = oauth.check_authorize(q)
+        except oauth.OAuthError as ex:
+            return JSONResponse(ex.body(), status_code=ex.status)
+        d = doors.door("", "", "", q.get("token", "")) if q.get("token") and not q["token"].startswith("r5o_") else None
+        if not d:
+            time.sleep(1)   # a wrong token costs a second
+            return HTMLResponse(oauth.page({k: v for k, v in q.items() if k != "token"}, c, "That is not one of this hub's tokens."),
+                                status_code=401, headers={"cache-control": "no-store", "x-frame-options": "DENY"})
+        seen.touch(d, *where(request), "/oauth/authorize")
+        return RedirectResponse(oauth.approve({k: v for k, v in q.items() if k != "token"}, d), status_code=302)
+
+    @app.post("/oauth/token")
+    async def oauth_token(request: Request) -> Response:
+        try:
+            return JSONResponse(oauth.token(_form(await request.body())), headers={"cache-control": "no-store"})
+        except oauth.OAuthError as ex:
+            return JSONResponse(ex.body(), status_code=ex.status)
+
+    @app.get("/api/oauth", response_model=None)
+    def oauth_clients(request: Request) -> Response:
+        if not str(request.state.door).startswith(("loopback", "tailnet:")):
+            return JSONResponse({"error": "connectors are managed from the tailnet"}, status_code=403)
+        return JSONResponse({"clients": [c | seen.of("oauth:" + c["name"]) for c in oauth.clients()], "public": PUBLIC or None})
+
+    @app.post("/api/oauth", response_model=None)
+    async def oauth_revoke(request: Request) -> Response:
+        if not str(request.state.door).startswith(("loopback", "tailnet:")) or request.headers.get("x-relic5-request") != "1":
+            return JSONResponse({"error": "connectors are managed from the tailnet, with X-Relic5-Request: 1"}, status_code=403)
+        body = json.loads(await request.body() or b"{}")
+        return JSONResponse({"revoked": oauth.revoke(str(body.get("client_id", "")))})
 
     @app.get("/login")
     def login(t: str = "") -> Response:
@@ -408,6 +540,7 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
         return Response(rfs.read_text(p), media_type="text/markdown; charset=utf-8")
 
     @app.get("/api/artifacts", response_model=None)
+    @cached(60)
     def artifacts_route(oracle: str | None = None, limit: int = 500) -> Json:
         from . import artifacts
         return artifacts.listing(relic.parts.root, oracle, max(1, min(limit, 2000)))
@@ -444,6 +577,7 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
         return JSONResponse(rec)
 
     @app.get("/api/lineage", response_model=None)
+    @cached(120)
     def lineage_route() -> Json:
         from . import family
         return family.lineage(relic.parts.root)
@@ -454,6 +588,7 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
         return family.team(relic, max(7, min(days, 400)))
 
     @app.get("/api/oracles", response_model=None)
+    @cached(60)
     def oracles_route() -> Json:
         from . import oracles
         return oracles.listing(relic)
@@ -467,6 +602,7 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
         return JSONResponse(out, status_code=404) if "error" in out else out   # type: ignore[return-value]
 
     @app.get("/api/map", response_model=None)
+    @cached(120)
     def map_route(model: str | None = None, limit: int = 3000) -> Json:
         """The sessions as points: per-session mean vector, PCA to 3D (universe.py), for the Map view."""
         from . import universe
@@ -494,6 +630,7 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
             return JSONResponse({"error": str(ex)}, status_code=400)
 
     @app.get("/api/memory", response_model=None)
+    @cached(60)
     def memory_route() -> "Listing":
         from . import memory
         return memory.listing(relic.parts.root)
@@ -527,10 +664,12 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
         return read(root)[0][:min(max(n, 1), 1000)]
 
     @app.get("/api/tail", response_model=None)
+    @cached(5)
     def tail(n: int = 50, session: str = "", machine: str = "", since: str = "") -> Json:
         return relic.tail(min(max(n, 1), 500), session or None, machine or None, since or None)
 
     @app.get("/api/queries", response_model=None)
+    @cached(15)
     def queries_route() -> Json:
         return selfknow.queries(relic.parts.root)
 
@@ -605,11 +744,19 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
     def mcp_get() -> Response:
         return Response(status_code=405)       # no server-initiated stream
 
+    SWR_TOOLS = {"relic_status": 10, "relic_sessions": 30}   # seconds an answer stays fresh (swr.py)
+
     def make_route(tool: str) -> Callable[[Request], Response]:
         """The tool is bound by the closure, never a parameter: FastAPI would read a defaulted `tool` argument as a
         query parameter, and ?tool=... could pick which tool runs (found by the mypy pass, 2026-10-24)."""
+        ttl = SWR_TOOLS.get(tool)
+
         def route(request: Request) -> Response:
-            ok, r = logged(relic, tool, args_of(request.query_params), request.state.door, client_of(request, "http"))
+            if ttl and not request.query_params.get("parent"):   # the page's polls, not a traced call
+                ok, r = swr.get(f"{tool}?{sorted(request.query_params.multi_items())}", ttl, lambda: logged(
+                    relic, tool, args_of(request.query_params), request.state.door, client_of(request, "http")))
+            else:
+                ok, r = logged(relic, tool, args_of(request.query_params), request.state.door, client_of(request, "http"))
             if ok:
                 return Response(dumps(r), media_type="application/json")
             return JSONResponse({"error": r[1]}, status_code=STATUS_OF[r[0]])
@@ -617,5 +764,27 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
 
     for path, tool in ROUTES.items():
         app.add_api_route(path, make_route(tool), methods=["GET"])
+
+
+    if os.environ.get("RELIC5_WARM", "1") != "0":
+        # the first page after a start asked every heavy route cold (Home 1.1 s, Knowledge 2.2 s, measured in a browser
+        # 2026-10-25): ask them once here, through the app itself on the loopback door, so swr.py holds the answers
+        WARM = ["/api/status", "/api/sessions?limit=500", "/api/sessions?limit=0", "/api/memory", "/api/oracles", "/api/homes",
+                "/api/queries", "/api/map?limit=3000", "/api/clients", "/api/tail?n=50"]
+
+        def _warm() -> None:
+            import asyncio
+            import httpx
+            async def go() -> None:
+                t = httpx.ASGITransport(app=app, client=("127.0.0.1", 0))
+                async with httpx.AsyncClient(transport=t, base_url="http://127.0.0.1", timeout=300) as c:
+                    for u in WARM:
+                        try:
+                            await c.get(u)
+                        except Exception:
+                            pass
+            time.sleep(3)
+            asyncio.run(go())
+        threading.Thread(target=_warm, name="relic5-warm-pages", daemon=True).start()
 
     return app

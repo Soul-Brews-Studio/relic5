@@ -9,7 +9,7 @@ reads relic5 the same way. What differs, by design:
   score      keyword hits: how many times the query's words occur (no BM25 until the embed milestone)
 Search is keyword: every word of the query must occur (ILIKE, so a Thai substring matches).
 """
-import base64, hashlib, json, os, re
+import base64, hashlib, json, os, re, time
 from collections.abc import Callable, Collection, Sequence
 from typing import TYPE_CHECKING, TypedDict
 
@@ -71,22 +71,22 @@ def folded(src: str, where: str = "TRUE") -> str:
 
 def home_kind(home: str | None, agent: str | None = None) -> Json:
     """Whose a home is and what kind: the owner from the path (the last /Users/<u>/ or /home/<u>/, so a mirror of nat's
-    ~/.claude under beta's folder is nat's), else relic-scan's user@host; the kind: user (~/.claude, ~/.codex), extra
+    ~/.claude under beta's folder is nat's), else relic-scan's user@host; the kind: user (~/.claude, ~/.codex, ~/.omp/agent, ~/.thclaws), extra
     (another home of the same user: ~/.claude1, ~/.claude-lean), mirror (a copy: .relic3-mirror, .relic-mirrors), backup (a backup or attic
     folder inside a home: .codex/path-migration-backup-*, .codex-team-attic/slot-3-dead),
     export (/Users/Shared/<u>-export), project (a .claude inside a project or an archive), unknown (no src_path)."""
     if not home:
-        return {"user": (agent or "").split("@")[0] or None, "kind": "unknown", "label": "unknown (parts before src_path)"}
+        return {"user": (agent or "").split("@")[0] or None, "kind": "unknown", "label": "unknown (no home in its path)"}
     owners = re.findall(r"/(?:Users|home)/([^/]+)/", home + "/")
     exp = re.search(r"/Users/Shared/([^/]+?)-export/", home + "/")
     user = (exp.group(1) if exp else None) or next((u for u in reversed(owners) if u != "Shared"), None) or (agent or "").split("@")[0] or None
-    if "/.relic3-mirror/" in home or "/.relic-mirrors/" in home:
+    if "/.relic3-mirror/" in home or "/.relic-mirrors/" in home or re.search(r"/\.(?:claude|codex)[^/]*/from-", home):
         kind = "mirror"
-    elif re.search(r"/\.(?:claude|codex)[^/]*(?:-attic/|/.*(?:backup|attic|rescued|-dead))", home):
+    elif re.search(r"/\.[^/]+.*(?:backup|attic|rescued|-dead|-removed)|/\.tmp$|-backup(?:/|$)", home):
         kind = "backup"
     elif exp:
         kind = "export"
-    elif re.fullmatch(r"/(?:Users|home)/[^/]+/\.(?:claude|codex)", home):
+    elif re.fullmatch(r"/(?:Users|home)/[^/]+/\.(?:claude|codex|thclaws|omp/agent)", home):   # other agents' own homes too
         kind = "user"
     elif re.fullmatch(r"/(?:Users|home)/[^/]+/\.(?:claude|codex)(?:[^/]+|[^/]*/[^/]+)", home):   # ~/.claude1, ~/.codex-team/1
         kind = "extra"
@@ -107,10 +107,16 @@ class Relic5:
         self.index = Index(root)
 
     def _rows(self, sql: str, params: Sequence[object] = ()) -> list[Json]:
+        """Every hub read in SQL comes through here, and is timed under the name of the method that asked (perf.query):
+        the Performance page lists them by cost."""
+        from . import perf
+        t0 = time.perf_counter()
         cur = self.con.cursor()   # a cursor per call: the HTTP handlers run in threads
         res = cur.execute(sql, list(params))
         names = [d[0] for d in res.description]
-        return [dict(zip(names, r)) for r in res.fetchall()]
+        out = [dict(zip(names, r)) for r in res.fetchall()]
+        perf.query("sql", (time.perf_counter() - t0) * 1000, len(out), sql)
+        return out
 
     def _meta(self) -> str | None:
         fs = self.parts.meta()
@@ -424,8 +430,17 @@ class Relic5:
         if machine:
             where.append("machine = ?")
             params.append(machine)
-        rows = self._rows(f"""SELECT msgkey, month, sid, ts, ts_th, role, engine, cat, machines, substr(text, 1, 600) AS text
-                              FROM {folded(src, ' AND '.join(where))} ORDER BY ts DESC LIMIT ?""", params + [int(n)])
+        def run(w: list[str], p: list[object]) -> list[Json]:
+            return self._rows(f"""SELECT msgkey, month, sid, ts, ts_th, role, engine, cat, machines, substr(text, 1, 600) AS text
+                                  FROM {folded(src, ' AND '.join(w))} ORDER BY ts DESC LIMIT ?""", p + [int(n)])
+        rows: list[Json] = []
+        if not since and not session:
+            # the newest rows are almost always in the last 3 days: a bound on ts lets the parquet scan skip the rest of the
+            # month (2.7 s for two whole months on white, 2026-10-25); fewer than n there, and the whole months are read
+            cut = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(time.time() - 3 * 86400))
+            rows = run(where + ["ts > ?"], params + [cut])
+        if len(rows) < n:
+            rows = run(where, params)
         names = self._names({r["sid"] for r in rows if r["sid"]})
         for r in rows:
             r["session_name"] = names.get(r["sid"])

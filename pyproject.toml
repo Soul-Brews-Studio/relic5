@@ -1,12 +1,13 @@
 [project]
 license = "AGPL-3.0-or-later"
 name = "relic5"
-version = "26.10.25a835"
+version = "26.10.25a1203"
 description = "One hub on white for every machine's extracted history and vectors: push, import, embed, serve"
 requires-python = ">=3.12"
 dependencies = [
     "duckdb==1.5.5",
     "fastapi>=0.115",
+    "httpx>=0.27",   # serve's start-up warm-up calls its own pages through httpx's ASGI transport (api.py _warm)
     "lancedb==0.40.0",
     "pylance==13.0.0", "numpy>=2",
     "uvicorn>=0.30",
@@ -18,7 +19,6 @@ embed = ["sentence-transformers==6.2.0", "torch==2.14.1", "transformers==5.20.2"
 [dependency-groups]
 dev = [
     "pytest>=8",
-    "httpx>=0.27",
     "pyarrow>=17",
     "mypy>=2.4.0",
 ]
@@ -32,7 +32,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/relic5"]
-artifacts = ["src/relic5/web/*.html", "src/relic5/web/assets/*"]
+artifacts = ["src/relic5/web/*.html", "src/relic5/web/assets/*", "src/relic5/icons/*"]
 
 [tool.mypy]
 # Strict typing for src/relic5, enforced by tests/test_types.py (Nat, 2026-10-24: "can python have a strong type?").
