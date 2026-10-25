@@ -68,7 +68,7 @@ function HitSpace({ hits, active, pick }: { hits: Hit[]; active: number; pick: (
 }
 
 export function SearchExplain({ e, hits, active, pick }: { e: Explain; hits: Hit[]; active: number; pick: (i: number) => void }) {
-  const [open3d, setOpen3d] = useState(() => localStorage.getItem("relic5-3d") === "1");
+  const [open3d, setOpen3d] = useState(() => localStorage.getItem("relic5-3d") !== "0");
   const toggle = () => { localStorage.setItem("relic5-3d", open3d ? "0" : "1"); setOpen3d(!open3d); };
   const top = Math.max(0.001, ...e.terms.map(t => t.idf ?? 0));
   return (
