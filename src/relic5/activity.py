@@ -160,8 +160,13 @@ def usage(relic: Any, by: str = "month", group: str = "engine", since: str | Non
 
     def s(c: str) -> str:
         return f"sum(coalesce({c}, 0))" if c in cols else "0"
-    rows = relic._rows(f"""SELECT {b} AS period, {groups[group]} AS g, count(*) FILTER (WHERE parent_sid IS NULL) AS sessions,
-                                  count(*) FILTER (WHERE parent_sid IS NOT NULL) AS subagents, {s('user_text')} AS typed,
+    # a session with no message and no tool call is a placeholder, not work: 44,732 of July 2026's "sessions" were
+    # jsonl-truth-import shells with every counter at 0 (ChatGPT caught the 18.7x jump, 2026-10-26). Count them apart.
+    act = " + ".join(f"coalesce({c}, 0)" for c in ("user_text", "assistant_text", "tool_calls") if c in cols) or "1"
+    rows = relic._rows(f"""SELECT {b} AS period, {groups[group]} AS g,
+                                  count(*) FILTER (WHERE parent_sid IS NULL AND ({act}) > 0) AS sessions,
+                                  count(*) FILTER (WHERE parent_sid IS NOT NULL AND ({act}) > 0) AS subagents,
+                                  count(*) FILTER (WHERE ({act}) = 0) AS empty_sessions, {s('user_text')} AS typed,
                                   {s('assistant_text')} AS written, {s('thinking')} AS thinking, {s('tool_calls')} AS tool_calls,
                                   {s('tool_results')} AS tool_results, {s('tool_errors')} AS tool_errors
                            FROM {meta} WHERE {' AND '.join(where)} GROUP BY 1, 2 HAVING period IS NOT NULL ORDER BY 1, 2""", params)
@@ -170,8 +175,10 @@ def usage(relic: Any, by: str = "month", group: str = "engine", since: str | Non
         r[group] = r.pop("g")
     totals: dict[str, int] = {}
     for r in out:
-        for k in ("sessions", "subagents", "typed", "written", "thinking", "tool_calls", "tool_errors"):
+        for k in ("sessions", "subagents", "empty_sessions", "typed", "written", "thinking", "tool_calls", "tool_errors"):
             totals[k] = totals.get(k, 0) + r[k]
     return {"by": by, "group": group, "rows": out, "totals": totals, "first": out[0]["period"] if out else None,
-            "note": "sessions counted in the period they started (Bangkok); typed = the human's messages; model names and "
-                    "token counts are not extracted yet"}
+            "note": "sessions counted in the period they started (Bangkok), only those with a message or a tool call; "
+                    "empty_sessions = placeholders with every counter 0 (e.g. jsonl-truth-import shells); typed = the human's "
+                    "messages; tool_errors = tool results flagged as errors (is_error: a failed command, a refused edit); "
+                    "model names and token counts are not extracted yet"}
