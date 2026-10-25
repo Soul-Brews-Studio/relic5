@@ -161,6 +161,18 @@ def test_tokens_from_the_ui(hub_with_tokens):
     assert t.check(new) is None and c.get("/api/tokens", headers={"Host": "127.0.0.1"}).json() == []
 
 
+def test_tokens_show_when_last_used(hub_with_tokens):
+    c, t = hub_with_tokens
+    J = {"X-Relic5-Request": "1", "Host": "127.0.0.1"}
+    secret = c.post("/api/tokens", json={"action": "new", "name": "laptop"}, headers=J).json()["token"]
+    row = lambda: next(x for x in c.get("/api/tokens", headers={"Host": "127.0.0.1"}).json() if x["name"] == "laptop")
+    assert "last_used" not in row()                                                   # never used yet
+    assert c.get("/api/status", headers={"Authorization": f"Bearer {secret}", "cf-connecting-ip": "203.0.113.9"}).status_code == 200
+    r = row()
+    assert r["last_used"] and r["last_path"] == "/api/status" and r["last_via"] == "direct"   # cf header only trusted from loopback
+    assert r["last_ip"] != "203.0.113.9"
+
+
 def test_big_answers_are_gzipped(client):
     import glob, os
     import relic5
