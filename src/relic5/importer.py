@@ -31,6 +31,60 @@ SCHEMA = ("s VARCHAR, h BIGINT, idx BIGINT, engine VARCHAR, role VARCHAR, type V
           "sources VARCHAR[], model VARCHAR, msg_id VARCHAR, out_tokens BIGINT")
 
 
+# relic-scan's per-session counters over its month schema (s, role, kind, err): what meta/sessions.parquet carries
+COUNTERS = ("count(*) FILTER (WHERE s = 'text')::BIGINT AS text_rows, count(*) FILTER (WHERE s = 'text')::BIGINT AS text_msgs, "
+            "count(*) FILTER (WHERE s = 'text' AND role = 'user')::BIGINT AS user_text, "
+            "count(*) FILTER (WHERE s = 'text' AND role = 'assistant')::BIGINT AS assistant_text, "
+            "count(*) FILTER (WHERE s = 'thinking')::BIGINT AS thinking, "
+            "count(*) FILTER (WHERE s = 'tools' AND kind = 'call')::BIGINT AS tool_calls, "
+            "count(*) FILTER (WHERE s = 'tools' AND kind = 'result')::BIGINT AS tool_results, "
+            "count(*) FILTER (WHERE s = 'tools' AND kind = 'result' AND err)::BIGINT AS tool_errors")
+
+
+def repair_meta(root: str, machine: str, con: "duckdb.DuckDBPyConnection", log: Callable[[str], object] = print) -> Json:
+    """Fill the activity counters of an import machine's meta/sessions.parquet from what the hub holds for it (its text,
+    thinking and tools parts, each message once by msgkey). Tool results are not on the hub, so tool_results and
+    tool_errors stay NULL. The old file is kept as sessions.parquet.bak-<stamp> beside the new one (nothing deleted)."""
+    base = os.path.join(root, "parts", machine)
+    mp = os.path.join(base, "meta", "sessions.parquet")
+    if not os.path.exists(mp):
+        raise FileNotFoundError(mp)
+    def src(stream: str) -> str | None:
+        fs = sorted(rfs.glob(os.path.join(base, stream, "*.parquet")))
+        return f"read_parquet({_lst(fs)}, union_by_name = true)" if fs else None
+    text, think, tools = src("text"), src("thinking"), src("tools")
+    empty = "(SELECT NULL::VARCHAR AS sid, NULL::VARCHAR AS msgkey, NULL::VARCHAR AS role, NULL::VARCHAR AS kind WHERE false)"
+    con.execute(f"""CREATE OR REPLACE TEMP TABLE cnt AS
+        WITH t AS (SELECT sid, count(DISTINCT msgkey) FILTER (WHERE role = 'user') AS user_text,
+                          count(DISTINCT msgkey) FILTER (WHERE role = 'assistant') AS assistant_text,
+                          count(DISTINCT msgkey) AS text_msgs, count(*) AS text_rows FROM {text or empty} GROUP BY sid),
+             k AS (SELECT sid, count(DISTINCT msgkey) AS thinking FROM {think or empty} GROUP BY sid),
+             c AS (SELECT sid, count(DISTINCT msgkey) FILTER (WHERE kind = 'call') AS tool_calls FROM {tools or empty} GROUP BY sid)
+        SELECT m.sid, coalesce(t.text_rows, 0)::BIGINT AS text_rows, coalesce(t.text_msgs, 0)::BIGINT AS text_msgs,
+               coalesce(t.user_text, 0)::BIGINT AS user_text, coalesce(t.assistant_text, 0)::BIGINT AS assistant_text,
+               coalesce(k.thinking, 0)::BIGINT AS thinking, coalesce(c.tool_calls, 0)::BIGINT AS tool_calls,
+               NULL::BIGINT AS tool_results, NULL::BIGINT AS tool_errors
+          FROM (SELECT DISTINCT sid FROM read_parquet('{mp}')) m LEFT JOIN t USING (sid) LEFT JOIN k USING (sid) LEFT JOIN c USING (sid)""")
+    cols = [r[0] for r in con.execute(f"DESCRIBE SELECT * FROM read_parquet('{mp}')").fetchall()]
+    keep = [c for c in cols if c not in ("text_rows", "text_msgs", "user_text", "assistant_text", "thinking", "tool_calls",
+                                          "tool_results", "tool_errors")]
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    bak = f"{mp}.bak-{stamp}"
+    con.execute(f"""COPY (SELECT {', '.join('m.' + c for c in keep)}, cnt.* EXCLUDE (sid)
+                          FROM read_parquet('{mp}') m LEFT JOIN cnt USING (sid)) TO '{mp}.tmp' (FORMAT parquet, COMPRESSION zstd)""")
+    os.replace(mp, bak)
+    os.replace(mp + ".tmp", mp)
+    os.chmod(mp, 0o600)
+    got = con.execute(f"""SELECT count(*), count(*) FILTER (WHERE user_text + assistant_text + tool_calls = 0),
+                                 sum(user_text), sum(assistant_text), sum(thinking), sum(tool_calls) FROM read_parquet('{mp}')""").fetchone()
+    out = tuple(int(x or 0) for x in (got or (0, 0, 0, 0, 0, 0)))
+    res: Json = {"machine": machine, "sessions": out[0], "still_empty": out[1], "user_text": out[2], "assistant_text": out[3],
+                 "thinking": out[4], "tool_calls": out[5], "backup": bak}
+    log(f"repair-meta {machine}: {out[0]:,} sessions, {out[1]:,} still empty; typed {out[2]:,}, written {out[3]:,}, "
+        f"thinking {out[4]:,}, tool calls {out[5]:,}; old file kept as {os.path.basename(bak)}")
+    return res
+
+
 def live_files(index_dir: str) -> tuple[str, Json, dict[str, list[str]]]:
     """{"events": [...], "tools": [...]}: the parquet files of relic3's current generation."""
     run = open(os.path.join(index_dir, "_manifest", "current")).read().strip()
@@ -151,9 +205,12 @@ def convert_truth(con: "duckdb.DuckDBPyConnection", truth_dir: str, out_dir: str
         os.replace(p + ".tmp", p)
     os.makedirs(os.path.join(out_dir, "meta"), exist_ok=True)
     mp = os.path.join(out_dir, "meta", "sessions.parquet")
+    # the activity counters too, as relic-scan counts them (relic4-scan, 2026-10-26: "those shells come from relic5's
+    # importer ... user_text, assistant_text, tool_calls etc. are never filled, so they read 0"; relic_usage counted 20,237
+    # imported sessions as empty)
     con.execute(f"""COPY (SELECT sid, 'main' AS tier, NULL::VARCHAR AS parent_sid, any_value(engine) AS engine, NULL::VARCHAR AS proj,
                     'jsonl-truth-import' AS cat, false AS probe, min(ts) AS first_ts, max(ts) AS last_ts, count(*)::BIGINT AS n_rows,
-                    list(DISTINCT month) AS months FROM imp GROUP BY sid) TO '{mp}.tmp' (FORMAT parquet, COMPRESSION zstd)""")
+                    list(DISTINCT month) AS months, {COUNTERS} FROM imp GROUP BY sid) TO '{mp}.tmp' (FORMAT parquet, COMPRESSION zstd)""")
     os.replace(mp + ".tmp", mp)
     n_s = con.execute("SELECT count(DISTINCT sid) FROM imp").fetchone()[0]   # type: ignore[index]  # count() always returns a row
     log(f"import jsonl-truth: {sum(rows.values()):,} rows, {n_s:,} sessions, {len(rows)} months -> {out_dir} ({time.time() - t:.0f}s)")

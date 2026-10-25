@@ -7,6 +7,8 @@
   relic5 seals [--verify]                    on the hub: each machine's sealed months as the hub holds them (exit 1: a seal broke)
   relic5 seals --retire <machine> --succeeded-by S [--why W]   on the hub: a machine moved to the attic (docs/RETIRED.md)
   relic5 seal-day [YYYY-MM]                  on the hub: reconcile closed months end to end (exit 1: one is blocked)
+  relic5 import repair-meta <machine> [--root ~/relic5]   on the hub: fill an import machine's session counters
+                                  from its parts (the old meta kept as sessions.parquet.bak-<stamp>)
   relic5 import relic3 [--weeks 2026W40-2026-09-28,...] [--all] [--out ~/.relic-import/relic3]
                                   old relic3 weeks -> relic-scan month files of the sessions no machine holds
   relic5 tui [--token]            the hub in a terminal: status, live, search (+ show), jobs, queries
@@ -256,6 +258,11 @@ def _main(argv: list[str] | None = None) -> None:
     elif cmd == "mcp":
         from .shim import serve as shim
         shim(URL)
+    elif cmd == "import" and rest[:1] == ["repair-meta"] and rest[1:2]:   # on the hub: an import machine's counters
+        import duckdb
+        from . import importer
+        root = os.path.abspath(os.path.expanduser(_opt(rest, "--root", ROOT)))
+        importer.repair_meta(root, rest[1], duckdb.connect())
     elif cmd == "import" and rest[:1] == ["relic3-links"]:
         import duckdb
         from . import importer

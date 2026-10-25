@@ -101,3 +101,28 @@ def test_a_real_machine_beats_a_one_time_import(root):
     assert rows["only-imp"]["machine"] == "jsonl-truth-import"            # nobody else has it: the import's copy stays
     u = usage(r)
     assert u["totals"]["empty_sessions"] == 1
+
+
+def test_repair_meta_fills_an_imports_counters(root):
+    """relic4-scan, 2026-10-26: the import's meta carried n_rows and times only, so every counter read 0. repair_meta
+    counts them from the import's own parts, keeps the old file, and the sessions stop being empty."""
+    import duckdb, os
+    from conftest import COLS, row, write_parquet
+    from relic5 import importer
+    from relic5.activity import usage
+    from relic5.query import Relic5
+    m = f"{root}/parts/jsonl-truth-import"
+    write_parquet(f"{m}/meta/sessions.parquet", ["sid", "tier", "parent_sid", "engine", "proj", "cat", "probe", "first_ts", "last_ts", "n_rows", "months"],
+                  [{"sid": "imp-1", "tier": "main", "parent_sid": None, "engine": "claude", "proj": None, "cat": "jsonl-truth-import",
+                    "probe": False, "first_ts": "2026-07-01T10:00:00.000Z", "last_ts": "2026-07-01T11:00:00.000Z", "n_rows": 4,
+                    "months": ["2026-07"]}], types={"n_rows": "BIGINT", "months": "VARCHAR[]", "probe": "BOOLEAN"})
+    write_parquet(f"{m}/text/2026-07.parquet", COLS, [row("hi", "2026-07-01T10:00:00.000Z", sid="imp-1"),
+                                                      row("hello", "2026-07-01T10:01:00.000Z", sid="imp-1", role="assistant")])
+    write_parquet(f"{m}/tools/2026-07.parquet", COLS, [dict(row('{"command": "ls"}', "2026-07-01T10:02:00.000Z", sid="imp-1", role=""), kind="call", name="Bash")])
+    before = usage(Relic5(root, duckdb.connect()), since="2026-07-01", until="2026-07")
+    assert before["totals"]["empty_sessions"] == 1
+    r = importer.repair_meta(root, "jsonl-truth-import", duckdb.connect(), log=lambda s: None)
+    assert (r["user_text"], r["assistant_text"], r["tool_calls"], r["still_empty"]) == (1, 1, 1, 0)
+    assert os.path.exists(r["backup"])
+    after = usage(Relic5(root, duckdb.connect()), since="2026-07-01", until="2026-07")
+    assert after["totals"]["sessions"] == 1 and after["totals"]["empty_sessions"] == 0 and after["totals"]["typed"] == 1
