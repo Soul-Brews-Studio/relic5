@@ -155,12 +155,11 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
         ok, r = logged(relic, tool, args | ({"parent": parent} if parent else {}), "saved-search", client)
         return ok, r, (r.get("trace") or {}).get("id") if ok and isinstance(r, dict) else None
 
-    if rfs.is_s3(relic.parts.root):   # the search index is local (fts.search_dir): seed it from the bucket once
-        from .fts import seed_local
-        try:
-            seed_local(relic.parts.root)
-        except Exception as ex:   # no seed: the auto-index below builds one
-            print(f"relic5: could not seed the local index: {ex}", flush=True)
+    if rfs.is_s3(relic.parts.root):
+        # the search index is local (fts.search_dir): seed it from the bucket once, in the background, so the hub answers
+        # at once (a whole index is GBs: 7.5 GB for white's, 2026-10-25); Index opens it when current.json lands
+        from .fts import seed_in_background
+        seed_in_background(relic.parts.root, every=float(os.environ.get("RELIC5_SEED_EVERY", "300")))
     if rfs.is_s3(relic.parts.root) and os.environ.get("RELIC5_WARM", "1") != "0":
         # S3 has no append: each log line is an object (store.append_line). Roll lines older than 10 minutes into one
         # chunk object per log every 10 minutes, so a listing stays short.
