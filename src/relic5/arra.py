@@ -29,6 +29,7 @@ from .types_ import Json
 ORIGINS = ("https://studio.buildwithoracle.com",)
 LOCAL_ORIGIN = re.compile(r"^http://(localhost|127\.0\.0\.1)(:\d+)?$")   # Studio's own dev server
 SAMPLE = 3000
+GRAPH = 300
 _RETRO = re.compile(r"\b(retro|retrospective|/rrr)\b", re.I)
 
 
@@ -105,13 +106,16 @@ class Sample:
             _, sv, vt = np.linalg.svd(Xc, full_matrices=False)
             P = Xc @ vt[:3].T
             P = P / (np.abs(P).max(axis=0) + 1e-9)
-            S = X @ X.T
+            docs = [doc(r) | {"x": float(p[0]), "y": float(p[1]), "z": float(p[2]), "chunk_ids": [r["uid"]]} for r, p in zip(rows, P)]
+            # the graph is the first GRAPH documents only: Studio's Graph page runs its force layout in the browser and
+            # looks every link's ends up by a linear scan, so 3,000 nodes froze the tab
+            g = min(GRAPH, len(docs))
+            S = X[:g] @ X[:g].T
             np.fill_diagonal(S, -1)
             nn = np.argsort(-S, axis=1)[:, :2]
-            docs = [doc(r) | {"x": float(p[0]), "y": float(p[1]), "z": float(p[2]), "chunk_ids": [r["uid"]]} for r, p in zip(rows, P)]
-            links = {tuple(sorted((docs[a]["id"], docs[int(b)]["id"]))) for a in range(len(docs)) for b in nn[a]}
+            links = {tuple(sorted((docs[a]["id"], docs[int(b)]["id"]))) for a in range(g) for b in nn[a]}
             var = (sv[:3] ** 2) / float((sv ** 2).sum() or 1)
-            out: Json = {"docs": docs, "links": [{"source": s, "target": t} for s, t in links],
+            out: Json = {"docs": docs, "graph": docs[:g], "links": [{"source": s, "target": t} for s, t in links],
                          "pca": {"components": 3, "explained_variance": [round(float(v), 4) for v in var], "sample": len(docs),
                                  "model": V.DEFAULT, "of": total}}
             self.data, self.seen = out, getattr(idx, "seen", None)
@@ -273,7 +277,7 @@ def router(relic: Any, status: Any, oracles: Any, version: str) -> APIRouter:
     def graph() -> Json:
         d = sample.get(relic)
         return {"nodes": [{"id": x["id"], "type": x["type"], "label": (x["content"] or "")[:80], "concepts": x["concepts"]}
-                          for x in d["docs"]], "links": d["links"]}
+                          for x in d.get("graph", [])], "links": d["links"]}
 
     @r.get("/oracles")
     def oracles_() -> Json:
