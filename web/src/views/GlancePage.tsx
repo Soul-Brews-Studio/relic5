@@ -329,6 +329,12 @@ export function GlancePage({ s, error, at, openHub, search }: { s: Status | null
           <Resources s={s} />
         </Section>
 
+        {(s.seal_days?.length ?? 0) > 0 && (
+          <Section title="Months" sub="Each Bangkok month seals when it ends. On seal day the hub checks every machine's copy byte for byte, then writes the month down with a fingerprint; a late row adds an amendment, never a rewrite.">
+            <MonthLedger days={s.seal_days!} months={s.months.list} openRecap={openRecap} />
+          </Section>
+        )}
+
         <Section title="Machines" sub="Who feeds the hub: what each one sent, when it last pushed, and what its own chain says about the sync.">
           <MachineRows s={s} machines={machines} />
         </Section>
@@ -354,11 +360,6 @@ export function GlancePage({ s, error, at, openHub, search }: { s: Status | null
           </ul>
         </Section>
 
-        {(s.seal_days?.length ?? 0) > 0 && (
-          <Section title="Months" sub="Each Bangkok month seals when it ends. On seal day the hub checks every machine's copy byte for byte, then writes the month down with a fingerprint; a late row adds an amendment, never a rewrite.">
-            <MonthLedger days={s.seal_days!} months={s.months.list} openRecap={openRecap} />
-          </Section>
-        )}
 
         <details className="group mt-12 rounded-2xl border border-line bg-panel">
           <summary className="flex min-h-14 cursor-pointer list-none items-center gap-3 px-6 text-base font-bold text-text">
