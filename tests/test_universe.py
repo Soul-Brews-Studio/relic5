@@ -58,3 +58,23 @@ def test_sessions_map_groups_projects_and_orders(tmp_path):
     again = universe.sessions_map(FakeRelic([], tmp_path))   # no matrices: only a cached map can answer
     assert [p["sid"] for p in again["points"]] == ["s2", "s1"]
     assert len(list((tmp_path / "index" / "_maps").glob("*.json"))) == 1
+
+
+
+def test_a_message_is_placed_in_the_maps_own_space(tmp_path):
+    """search_space(): a message's vector through the Map's PCA lands on its session's point; the centre is where
+    the hits sit; a uid with no vector is reported, not invented."""
+    universe._CACHE.clear()
+    universe._BASIS.clear()
+    rng = np.random.default_rng(2)
+    base = {f"s{k}": rng.normal(size=8) for k in range(1, 7)}   # six sessions: three real PCA axes
+    rows = [(s, f"2026-10-{k:02d}", v + 0.001 * i, f"{s}-{i}") for k, (s, v) in enumerate(base.items(), 1) for i in range(4)]
+    m = FakeMatrix([r[0] for r in rows], [r[1] for r in rows], [r[2] / np.linalg.norm(r[2]) for r in rows], [["m5"]] * len(rows))
+    m.cols["uid"] = np.asarray([r[3] for r in rows], dtype=object)
+    relic = FakeRelic([m], tmp_path)
+    out = universe.search_space(relic, ["s2-1", "nope"], [1.0, 1.0])
+    s2 = next(p for p in out["cloud"] if p["sid"] == "s2")
+    hit = out["points"][0]
+    assert hit["uid"] == "s2-1" and out["missing"] == ["nope"] and len(out["cloud"]) == 6
+    assert all(abs(hit[k] - s2[k]) < 0.05 for k in "xyz")      # a session's own message sits on the session
+    assert all(abs(out["centre"][k] - hit[k]) < 1e-3 for k in "xyz")

@@ -409,8 +409,7 @@ export function SearchView({ st, setSt, machine, setMachine, machines, recent, t
                 {res.trace && <> · <a href={`#tab=queries&pane=chains&trace=${res.trace.id}`} className="text-accent hover:underline" title="This search, the hits opened from it and the searches after it (Asked · Chains)">trace #{res.trace.root}</a></>}</span>
             </p>
           )}
-          {ex && res && <SearchExplain e={ex} hits={rows.map(r => r.h)} active={active} pick={n => { setActive(n); if (!wide()) setDrawer(true); }}
-            mapHref={rows.length ? `#tab=map&sessions=${[...new Set(rows.map(r => r.h.session_uuid.slice(0, 8)).filter(x => x && !x.includes(":")))].join(",")}` : null} />}
+          {ex && res && <SearchExplain e={ex} hits={rows.map(r => r.h)} active={active} pick={n => { setActive(n); if (!wide()) setDrawer(true); }} />}
           {err && <State error>{err}</State>}
           {res && !hits.length && (machine && res.hits.length
             ? <State>None of these {res.hits.length} hits are on {machine}. The machine choice narrows the hits already found; it does not search {machine} on its own.
