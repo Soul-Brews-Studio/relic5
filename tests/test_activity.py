@@ -126,3 +126,31 @@ def test_repair_meta_fills_an_imports_counters(root):
     assert os.path.exists(r["backup"])
     after = usage(Relic5(root, duckdb.connect()), since="2026-07-01", until="2026-07")
     assert after["totals"]["sessions"] == 1 and after["totals"]["empty_sessions"] == 0 and after["totals"]["typed"] == 1
+
+
+def test_usage_models_and_tokens_when_relic_scan_has_them(root):
+    """relic4-scan #74 (PR #76) adds models / tokens to sessions.parquet. relic_usage sums tokens over the sessions that
+    carry them, groups by the main model past '<synthetic>', and says when the table has no models yet."""
+    import duckdb
+    from conftest import META_COLS, meta, write_parquet
+    from relic5.activity import usage
+    from relic5.query import Relic5
+    cols = META_COLS + ["models", "in_tokens", "out_tokens", "cache_read_tokens", "cache_write_tokens"]
+    types = {"n_rows": "BIGINT", "months": "VARCHAR[]", "models": "VARCHAR[]", **{k: "BIGINT" for k in META_COLS[11:]},
+             **{k: "BIGINT" for k in cols[-4:]}}
+    rows = [{**meta("s1-aaaa"), "models": ["<synthetic>", "claude-opus-5-5"], "in_tokens": 10, "out_tokens": 100, "cache_read_tokens": 1000, "cache_write_tokens": 5},
+            {**meta("s2-bbbb"), "models": ["claude-sonnet-5-5"], "in_tokens": 1, "out_tokens": 20, "cache_read_tokens": 0, "cache_write_tokens": 0},
+            {**meta("s3-old"), "models": None, "in_tokens": None, "out_tokens": None, "cache_read_tokens": None, "cache_write_tokens": None}]
+    write_parquet(f"{root}/parts/m5/meta/sessions.parquet", cols, rows, types=types)
+    r = Relic5(root, duckdb.connect())
+    u = usage(r, by="year", group="model")
+    by = {x["model"]: x for x in u["rows"]}
+    assert set(by) == {"claude-opus-5-5", "claude-sonnet-5-5", "(unknown)"}
+    assert u["totals"]["out_tokens"] == 120 and u["totals"]["cache_read_tokens"] == 1000 and u["totals"]["tokens_known"] == 2
+
+
+def test_usage_without_models_says_why(relic):
+    import pytest
+    from relic5.activity import usage
+    with pytest.raises(ValueError, match="relic4-scan #74"):
+        usage(relic, group="model")
