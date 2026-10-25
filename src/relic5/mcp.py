@@ -107,9 +107,11 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {"by": STR, "group": STR, "since": STR, "until": STR, "role": STR,
                      "project": STR, "machine": STR, "top": INT, "stream": STR}, "additionalProperties": False}},
     {"name": "relic_usage", "description": "AI usage over time from the session table: per period (day | week | month | "
-     "year) and group (engine: claude / codex / omp / thclaws | tier | project | via | version | none) the sessions, "
-     "subagent sessions, messages typed by the human and written by the agent, thinking blocks, tool calls, tool results "
-     "and tool errors, back to the first month (Sep 2025). No model names or tokens (not extracted).",
+     "year) and group (engine: claude / codex / omp / thclaws | tier | project | via | version | none) the sessions and "
+     "subagent sessions with any activity, empty_sessions (placeholders with no message or tool call, kept apart), "
+     "messages typed by the human and written by the agent, thinking blocks, tool calls, tool results and tool_errors "
+     "(results flagged is_error: a failed command, a refused edit), back to the first month (Sep 2025). No model names "
+     "or tokens (not extracted).",
      "inputSchema": {"type": "object", "properties": {"by": STR, "group": STR, "since": STR, "until": STR}, "additionalProperties": False}},
     {"name": "relic_files", "description": "The files the agents changed most: Edit / Write / MultiEdit / NotebookEdit "
      "calls by file path, with calls, sessions, days, first and last time (Bangkok), the tools and the projects. Filters "

@@ -68,3 +68,17 @@ def test_usage_by_month_and_engine(relic):
     assert u["totals"]["sessions"] == 2 and u["totals"]["subagents"] == 1
     with pytest.raises(ValueError):
         usage(relic, group="model")
+
+
+def test_usage_keeps_empty_placeholders_apart(root):
+    """2026-10-26: 44,732 of July's sessions were jsonl-truth-import shells with every counter 0; ChatGPT read them as an
+    18.7x jump in work. A session with no message and no tool call is counted as empty_sessions, not as a session."""
+    import duckdb
+    from conftest import META_COLS, meta, write_parquet
+    from relic5.activity import usage
+    from relic5.query import Relic5
+    shell = {**meta("imp-1"), **{k: 0 for k in META_COLS[11:]}}
+    write_parquet(f"{root}/parts/m5/meta/sessions.parquet", META_COLS, [meta("s1-aaaa"), shell, {**shell, "sid": "imp-2", "base": "imp-2.jsonl"}],
+                  types={"n_rows": "BIGINT", "months": "VARCHAR[]", **{k: "BIGINT" for k in META_COLS[11:]}})
+    u = usage(Relic5(root, duckdb.connect()))
+    assert u["totals"]["sessions"] == 1 and u["totals"]["empty_sessions"] == 2
