@@ -27,3 +27,8 @@ def test_other_streams(relic):
     with pytest.raises(ValueError):
         activity(relic, stream="video")
     assert activity(relic, stream="git")["total"] == 0          # no commits pushed in the fixture
+
+
+def test_weekday_hour_heatmap(relic):
+    b = activity(relic, by="weekday_hour", role="assistant")["buckets"]
+    assert b == ["5-11"]                       # 2026-10-23 is a Friday, the assistant row is at 11:00

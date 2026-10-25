@@ -4,7 +4,7 @@ extract all stuff and visualize all stuff ... if we missed method we add more!")
 Counts messages of the text stream (each message once: chunk 0, one msgkey however many machines hold it) by a time
 bucket and, optionally, one dimension. Bangkok time throughout (ts_th), as every other page of the hub.
 
-  by     day | week | month | hour (YYYY-MM-DDTHH) | hour_of_day (00..23) | weekday (1 Mon .. 7 Sun)
+  by     day | week | month | hour (YYYY-MM-DDTHH) | hour_of_day (00..23) | weekday (1 Mon .. 7 Sun) | weekday_hour (1-00 .. 7-23)
   group  none | role | project (relic-scan's cat: the repo's short name) | machine | engine | tool (tools stream)
   stream text (messages) | tools (tool calls) | thinking | git (commits: role commit-claude / commit-codex / commit)
 """
@@ -19,6 +19,8 @@ BY = {
     "hour_of_day": "substr(ts_th, 12, 2)",
     "week": "strftime(date_trunc('week', TRY_CAST(substr(ts_th, 1, 10) AS DATE)), '%Y-%m-%d')",
     "weekday": "CAST(isodow(TRY_CAST(substr(ts_th, 1, 10) AS DATE)) AS VARCHAR)",
+    # a heatmap in one call: '1-09' = Monday 09:00-09:59 (ChatGPT fetched every hour and folded them itself, 2026-10-26)
+    "weekday_hour": "CAST(isodow(TRY_CAST(substr(ts_th, 1, 10) AS DATE)) AS VARCHAR) || '-' || substr(ts_th, 12, 2)",
 }
 GROUP = {"none": "'all'", "role": "coalesce(role, '(none)')", "project": "coalesce(nullif(cat, ''), '(none)')", "machine": "machine",
          "engine": "engine", "tool": "coalesce(name, '(none)')"}
