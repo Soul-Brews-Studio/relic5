@@ -4,7 +4,8 @@ registers itself (RFC 7591), sends the person to /oauth/authorize, and trades a 
 
   /.well-known/oauth-protected-resource      the resource (/mcp) and its authorization server (RFC 9728)
   /.well-known/oauth-authorization-server    the endpoints (RFC 8414)
-  POST /oauth/register                       a client, only with redirect URIs on claude.ai / claude.com
+  POST /oauth/register                       a client, only with redirect URIs on claude.ai / claude.com, or ChatGPT's
+                                             (chatgpt.com / openai.com: Nat, 2026-10-25 "connect relic5 to chatgpt too")
   GET|POST /oauth/authorize                  the approve page: approving needs one of the hub's own tokens
                                              (Settings > Access tokens), so only the hub's owner can let a client in
   POST /oauth/token                          authorization_code (PKCE) and refresh_token grants
@@ -19,7 +20,7 @@ from .types_ import Json
 
 PATH = os.path.expanduser(os.environ.get("RELIC5_OAUTH_JSON") or os.path.join(
     os.path.dirname(os.path.expanduser(os.environ.get("RELIC5_TOKENS_JSON", "~/.config/relic5/tokens.json"))), "oauth.json"))
-REDIRECT_HOSTS = {"claude.ai", "claude.com"}
+REDIRECT_HOSTS = {"claude.ai", "claude.com", "chatgpt.com", "openai.com"}
 ACCESS_S, REFRESH_S, CODE_S = 7 * 86400, 90 * 86400, 600
 _LOCK = threading.Lock()
 
@@ -81,7 +82,7 @@ class OAuthError(Exception):
 def register(body: Json) -> Json:
     uris = body.get("redirect_uris") or []
     if not isinstance(uris, list) or not uris or not all(isinstance(u, str) and redirect_ok(u) for u in uris):
-        raise OAuthError("invalid_redirect_uri", "redirect_uris must be https URIs on claude.ai or claude.com")
+        raise OAuthError("invalid_redirect_uri", "redirect_uris must be https URIs on claude.ai, claude.com, chatgpt.com or openai.com")
     name = str(body.get("client_name") or "claude.ai")[:80]
     cid = "c_" + secrets.token_urlsafe(16)
     with _LOCK:
