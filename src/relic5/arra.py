@@ -5,10 +5,11 @@ can we make like adaptor").
 Studio speaks the arra-oracle API (ui-oracle apps/studio/src/api/oracle.ts): a knowledge base of documents typed
 principle | learning | retro, with concepts. This router answers that API under /arra/api from relic5's history:
 
-  document      a message (uid), its text, its session as source_file, its repo as project
-  type          principle = an agent's memory note (role memory-*), retro = text mentioning a retrospective/rrr,
-                learning = every other message
-  concepts      [role, cat (the oracle / repo), machine]
+  document      a ψ note, as arra-oracle indexes them (Nat: "my md should more than 5k"): every machine's vault notes
+                (parts/*/vault/notes.parquet, relic-extract), one document per note, its oracle as project
+  type          principle = the soul (memory/resonance, identity), retro = memory/retrospectives, learning = the rest
+  concepts      [section, oracle, vault]
+  /feed         the live message stream (sessions, not notes)
   /map /map3d   a fixed sample of the vector index projected to 2D / 3D (PCA over the real embeddings)
   /graph        the same sample, each document linked to its two nearest neighbours by cosine
   /similar      nearest neighbours of a document's own vector
@@ -117,9 +118,88 @@ class Sample:
             return out
 
 
+class Notes:
+    """The ψ notes every machine pushed (relic-extract: parts/<machine>/vault/notes.parquet), one row per note (its
+    chunks joined, the same msgkey in two machines' files once)."""
+
+    TYPE = ("CASE WHEN section IN ('memory/resonance','resonance','soul','identity','memory/soul') OR section LIKE 'memory/resonance/%' "
+            "OR section LIKE 'soul/%' THEN 'principle' WHEN section IN ('memory/retrospectives','retrospectives','retros') "
+            "OR section LIKE 'memory/retrospectives/%' OR section LIKE 'retrospectives/%' THEN 'retro' ELSE 'learning' END")
+
+    HEAD = 600   # characters of each note kept in memory for lists and search; the whole note is read on open
+
+    def __init__(self, relic: Any) -> None:
+        self.relic, self.lock = relic, threading.Lock()
+        self.sig: Any = None
+
+    def files(self) -> list[str]:
+        import os
+        from . import store as rfs
+        return sorted(rfs.glob(os.path.join(self.relic.parts.root, "parts", "*", "vault", "notes.parquet")))
+
+    def src(self) -> str | None:
+        files = self.files()
+        if not files:
+            return None
+        lst = ", ".join("'" + f.replace("'", "''") + "'" for f in files)
+        return f"""(SELECT msgkey, any_value(title) AS title, any_value(path) AS path, any_value(section) AS section,
+                          any_value(cat) AS cat, any_value(vault) AS vault, max(ts) AS ts,
+                          string_agg(text, '' ORDER BY chunk) AS text
+                   FROM (SELECT DISTINCT msgkey, chunk, title, path, section, cat, vault, ts, text
+                         FROM read_parquet([{lst}], union_by_name = true))
+                   GROUP BY msgkey)"""
+
+    def table(self) -> bool:
+        """arra_notes in the hub's DuckDB: each note's fields and its first HEAD characters, remade when a machine
+        pushes a new notes.parquet (3 s on white for 175 k notes; reading the parquet every call cost 2-5 s)."""
+        from . import store as rfs
+        files = self.files()
+        if not files:
+            return False
+        sig = tuple((f, rfs.getsize(f), rfs.getmtime(f)) for f in files)
+        with self.lock:
+            if sig != self.sig:
+                self.relic.con.cursor().execute(f"""CREATE OR REPLACE TABLE arra_notes AS SELECT msgkey, title, path, section, cat,
+                    vault, ts, {self.TYPE} AS type, left(text, {self.HEAD}) AS text FROM {self.src()}""")
+                self.sig = sig
+        return True
+
+    def rows(self, where: str = "TRUE", params: list[Any] | None = None, order: str = "ts DESC", limit: int = 20, offset: int = 0) -> list[Json]:
+        if not self.table():
+            return []
+        out: list[Json] = self.relic._rows(f"SELECT * FROM arra_notes WHERE {where} ORDER BY {order} LIMIT ? OFFSET ?",
+                                           (params or []) + [limit, offset])
+        return out
+
+    def full(self, where: str, params: list[Any]) -> Json | None:
+        """One note whole (its chunks joined), from the parquet."""
+        s = self.src()
+        got: list[Json] = self.relic._rows(f"SELECT *, {self.TYPE} AS type FROM {s} WHERE {where} LIMIT 1", params) if s else []
+        return got[0] if got else None
+
+    def counts(self) -> dict[str, int]:
+        if not self.table():
+            return {}
+        return {str(r["type"]): int(r["n"]) for r in self.relic._rows("SELECT type, count(*) AS n FROM arra_notes GROUP BY 1")}
+
+
+def note(r: Json) -> Json:
+    """A ψ note as Studio's Document."""
+    return {"id": r["msgkey"], "type": r.get("type") or "learning", "content": r.get("text") or "",
+            "source_file": r.get("path") or "", "project": r.get("cat"), "created_at": r.get("ts"),
+            "concepts": [c for c in (r.get("section"), r.get("cat"), r.get("vault")) if c],
+            **({"score": r["score"], "source": "fts"} if r.get("score") is not None else {})}
+
+
 def router(relic: Any, status: Any, oracles: Any, version: str) -> APIRouter:
     r = APIRouter(prefix="/arra/api")
     sample = Sample()
+    notes = Notes(relic)
+    from . import swr
+
+    def counts() -> dict[str, int]:
+        c: dict[str, int] = swr.get("arra-note-counts", 300, notes.counts)
+        return c
     readonly = {"success": False, "error": "relic5 is read-only here: it records sessions, it does not take notes"}
 
     @r.get("/health")
@@ -128,13 +208,11 @@ def router(relic: Any, status: Any, oracles: Any, version: str) -> APIRouter:
 
     @r.get("/stats")
     def stats() -> Json:
-        s, o = status(), oracles()
+        s = status()
         rows = s.get("rows") or {}
-        ors = o.get("oracles") or []
+        c = counts()
         built = (s.get("freshness") or {}).get("index_built")
-        return {"total": rows.get("text", 0), "by_type": {"learning": rows.get("text", 0),
-                                                           "principle": sum(x.get("soul", 0) for x in ors),
-                                                           "retro": sum(x.get("retros", 0) for x in ors)},
+        return {"total": sum(c.values()), "by_type": c,
                 "last_indexed": built, "is_stale": bool(s.get("warnings")), "vault_repo": "relic5",
                 "vector": {"enabled": True, "count": (s.get("rows") or {}).get("text", 0), "collection": "relic5"},
                 "sessions": rows.get("sessions", 0)}
@@ -143,25 +221,30 @@ def router(relic: Any, status: Any, oracles: Any, version: str) -> APIRouter:
     def search(q: str = "", type: str = "all", limit: int = 20, mode: str = "hybrid", model: str = "") -> Json:
         if not q.strip():
             return {"results": [], "total": 0, "query": q}
-        hits = relic.search(q, limit=max(1, min(limit, 100)), with_="memory" if type == "principle" else None)["hits"]
-        docs = [doc(h) for h in hits]
-        if type in ("learning", "retro"):
-            docs = [d for d in docs if d["type"] == type]
+        words = [w for w in q.split() if w][:6]
+        cond = " AND ".join("(title ILIKE ? OR text ILIKE ?)" for _ in words)
+        params: list[Any] = [x for w in words for x in (f"%{w}%", f"%{w}%")]
+        if type != "all":
+            cond += " AND type = ?"
+            params.append(type)
+        got = notes.rows(cond, params, limit=max(1, min(limit, 100)))   # newest first: no ranking over ILIKE
+        docs = [note(x) for x in got]
         return {"results": docs, "total": len(docs), "query": q, "mode": "fts",
                 **({"warning": "relic5 searches by keyword here; semantic search needs the query embedded by a client"}
                    if mode != "fts" else {})}
 
     @r.get("/list")
     def list_(type: str = "all", limit: int = 20, offset: int = 0) -> Json:
-        n = max(1, min(limit, 200)) + max(0, offset)
-        rows = relic.tail(min(n, 500))["rows"][max(0, offset):]
-        docs = [doc(x) for x in rows]
-        if type != "all":
-            docs = [d for d in docs if d["type"] == type]
-        return {"results": docs[:limit], "total": len(docs)}
+        c = counts()
+        where, params = ("TRUE", []) if type == "all" else ("type = ?", [type])
+        got = notes.rows(where, params, limit=max(1, min(limit, 200)), offset=max(0, offset))
+        return {"results": [note(x) for x in got], "total": sum(c.values()) if type == "all" else c.get(type, 0)}
 
     @r.get("/doc/{ident}")
     def get_doc(ident: str) -> Json:
+        whole = notes.full("msgkey = ?", [ident])
+        if whole:
+            return note(whole)
         t = relic.show(ident.split(":")[0])["target"]
         return doc(t | {"uid": ident})
 
@@ -236,7 +319,10 @@ def router(relic: Any, status: Any, oracles: Any, version: str) -> APIRouter:
 
     @r.get("/file", response_model=None)
     def file(path: str, project: str = "") -> PlainTextResponse:
-        """A session (source_file is its id) as plain text: its messages in order."""
+        """A note (source_file is its path) as its markdown; else a session (by id) as plain text, its messages in order."""
+        whole = notes.full("path = ?", [path])
+        if whole:
+            return PlainTextResponse(whole.get("text") or "", media_type="text/markdown; charset=utf-8")
         rows = relic.tail(500, session=path)["rows"]
         rows.sort(key=lambda x: x.get("ts") or "")
         return PlainTextResponse("\n\n".join(f"[{(x.get('ts') or '')[:19]}] {x.get('role')}: {x.get('text') or ''}" for x in rows)
