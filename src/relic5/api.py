@@ -9,7 +9,8 @@ the bearer check with hmac.compare_digest, the 0600 token file. Changed on purpo
 no loopback exemption. A hub serves many machines, and a proxy on the same box would make every client look like
 127.0.0.1, so every request shows a token, /health too (an open /health would confirm the service exists; v3 http.ts).
 
-Read-only: no route writes. Parts arrive over ssh (bin/relic5-push), never over HTTP.
+Parts arrive over ssh (bin/relic5-push), never over HTTP. The routes that write are the hub's own records: tokens
+(Connect), artifacts, and saved searches (trace.py); a POST that changes settings needs X-Relic5-Request: 1.
 """
 import hmac, json, os
 from collections.abc import Awaitable, Callable
@@ -129,15 +130,89 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
         from . import selfknow
         return selfknow.clients(relic.parts.root)
 
+    TRACED = {"relic_search", "relic_show", "relic_session", "relic_sessions"}
+
     def logged(relic_: Relic5, tool: str, args: Json, door: str | None, client: str | None = None) -> mcp.ToolReply:
-        """Every tool call, MCP or GET, goes through here: one line in logs/queries.jsonl (selfknow.py)."""
-        qid, t0 = selfknow.start(tool, door, args.get("query") or args.get("id") or "", client)
+        """Every tool call, MCP or GET, goes through here: one line in logs/queries.jsonl (selfknow.py), with its trace
+        record (trace.py). A search, show or session result carries trace {id, root, parent} to pass on as parent."""
+        from . import trace
+        parent = args.get("parent") if isinstance(args, dict) and isinstance(args.get("parent"), str) else None
+        rid = trace.new_id()
+        qid, t0 = selfknow.start(tool, door, (args.get("query") or args.get("id") or "") if isinstance(args, dict) else "", client)
         ok, r = mcp.call_tool(relic_, tool, args, door)
+        top = None
         try:
-            selfknow.finish(relic_.parts.root, qid, t0, r if ok else None, args, None if ok else r[1])
+            top = selfknow.finish(relic_.parts.root, qid, t0, r if ok else None, args if isinstance(args, dict) else {},
+                                  None if ok else r[1], rid, parent)
         except OSError:
             pass
+        if ok and tool in TRACED and isinstance(r, dict):
+            r = r | {"trace": {"id": rid, "root": top or rid, "parent": parent}}
         return ok, r
+
+    def saved_call(tool: str, args: Json, parent: str | None, client: str) -> tuple[bool, object, str | None]:
+        ok, r = logged(relic, tool, args | ({"parent": parent} if parent else {}), "saved-search", client)
+        return ok, r, (r.get("trace") or {}).get("id") if ok and isinstance(r, dict) else None
+
+    if os.environ.get("RELIC5_WARM", "1") != "0":   # saved searches run as jobs (trace.py)
+        from . import trace as _trace
+        _trace.keep_running(relic.parts.root, saved_call)
+
+    @app.get("/api/trace", response_model=None)
+    def trace_route(id: str = "", limit: int = 30) -> Response | Json:
+        """One record's whole chain (id), or the newest chains."""
+        from . import trace
+        if id:
+            out = trace.chain(relic.parts.root, id)
+            return JSONResponse(out, status_code=404) if "error" in out else out
+        return {"chains": trace.chains(relic.parts.root, max(1, min(limit, 200)))}
+
+    @app.get("/api/access", response_model=None)
+    def access_route(limit: int = 100, before: int | None = None, tool: str = "", client: str = "", door: str = "", q: str = "",
+                     zero: int = 0, errors: int = 0, evals: int = 0) -> Json:
+        """The query log, newest first, filtered; page with before=<next_before>."""
+        from . import trace
+        return trace.access(relic.parts.root, max(1, min(limit, 500)), before, tool or None, client or None, door or None, q or None,
+                            bool(zero), bool(errors), bool(evals))
+
+    @app.get("/api/asked", response_model=None)
+    def asked_route(hours: int = 24) -> Json:
+        """Per-hour counts and latency, zero-hit share, by client and tool: the Asked page's charts."""
+        from . import trace
+        return trace.stats(relic.parts.root, max(1, min(hours, 24 * 14)))
+
+    @app.get("/api/saved", response_model=None)
+    def saved_list() -> Json:
+        from . import trace
+        return {"saved": trace.public(trace.saved(relic.parts.root))}
+
+    @app.post("/api/saved", response_model=None)
+    async def saved_change(request: Request) -> Response | Json:
+        """add {from | query, args, every, name} | remove {id} | run {id}. A JSON POST with X-Relic5-Request: 1, as the
+        token routes: a page on another site cannot send that without a preflight this hub never answers."""
+        from . import trace
+        from .query import NotFound, UsageError
+        if request.headers.get("x-relic5-request") != "1" or not request.headers.get("content-type", "").startswith("application/json"):
+            return JSONResponse({"error": "needs Content-Type: application/json and X-Relic5-Request: 1"}, status_code=400)
+        try:
+            body: Json = await request.json()
+        except ValueError:
+            return JSONResponse({"error": "body is not JSON"}, status_code=400)
+        act = body.get("action")
+        try:
+            if act == "add":
+                every = body.get("every", 60)
+                return trace.save(relic.parts.root, body.get("from") or None, body.get("query") or None, body.get("args") or None,
+                                  every if isinstance(every, int) else -1, body.get("name") or None, request.state.door)
+            if act == "remove":
+                return trace.remove(relic.parts.root, str(body.get("id") or ""))
+            if act == "run":
+                return trace.run_one(relic.parts.root, str(body.get("id") or ""), saved_call)
+        except UsageError as ex:
+            return JSONResponse({"error": str(ex)}, status_code=400)
+        except NotFound as ex:
+            return JSONResponse({"error": str(ex)}, status_code=404)
+        return JSONResponse({"error": "action is add | remove | run"}, status_code=400)
 
     WEB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web", "index.html")
 

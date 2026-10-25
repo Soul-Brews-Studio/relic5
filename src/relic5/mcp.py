@@ -47,22 +47,35 @@ SEARCH_PROPS = {
     "vector": {"type": "array", "items": {"type": "number"}, "description": "with semantic: the query embedded by the client "
                "(same model@hash, unit length); `relic5 mcp` on a Mac adds it. Without it semantic answers by keyword and says so"},
 }
+PARENT = {**STR, "description": "trace.id of the call this one follows from (a search you are narrowing, the search whose hit you "
+          "open): the hub links them into one trace chain, read back with relic_trace. Every result carries trace {id, root, parent}"}
+SEARCH_PROPS["parent"] = PARENT
 TOOLS = [
     {"name": "relic_search", "description": "Search every machine's history on the relic5 hub: BM25 over ICU tokens (Thai-aware), widening "
      "7d → 15d → 1m → 3m → archive until 10 hits; semantic=true is a separate mode (never blended unless hybrid=true). "
      "Hits flag `ephemeral` paths (/tmp, scratchpad, claude-<pid>) that may be gone.",
      "inputSchema": {"type": "object", "properties": SEARCH_PROPS, "required": ["query"], "additionalProperties": False}},
     {"name": "relic_show", "description": "Show one message (msgkey | relic5:// link | session id + seq) with its neighbours in the session.",
-     "inputSchema": {"type": "object", "properties": {"id": STR, "seq": INT, "before": INT, "after": INT}, "required": ["id"],
+     "inputSchema": {"type": "object", "properties": {"id": STR, "seq": INT, "before": INT, "after": INT, "parent": PARENT}, "required": ["id"],
                      "additionalProperties": False}},
     {"name": "relic_sessions", "description": "List top-level sessions, newest first. Subagent and workflow-agent sessions are not listed: each folds "
                     "into its parent's `children` count, so `total` is smaller than relic-scan's session count (it counts every tier).",
      "inputSchema": {"type": "object", "properties": {"repo": STR, "since": STR, "until": STR, "limit": INT,
-                     "via": SEARCH_PROPS["via"], "chat": SEARCH_PROPS["chat"], "from_user": SEARCH_PROPS["from_user"],
+                     "via": SEARCH_PROPS["via"], "chat": SEARCH_PROPS["chat"], "from_user": SEARCH_PROPS["from_user"], "parent": PARENT,
                      "by_repo": {"type": "boolean", "description": "also return repos: sessions and events per repo for the same window and filters, most first (a session with no repo counts as '(no repo) <tenant>')"}},
                      "additionalProperties": False}},
     {"name": "relic_session", "description": "Resolve a session id prefix to its session record and subagent tree.",
-     "inputSchema": {"type": "object", "properties": {"id": STR}, "required": ["id"], "additionalProperties": False}},
+     "inputSchema": {"type": "object", "properties": {"id": STR, "parent": PARENT}, "required": ["id"], "additionalProperties": False}},
+    {"name": "relic_trace", "description": "The trace log. With id (a trace.id from any result): the whole chain it belongs to, oldest "
+     "first: each search with its first 10 hits as links, each message or session opened from it, the narrower searches after "
+     "it and the saved-search runs made from it, with depth by parent. Without id: the newest chains.",
+     "inputSchema": {"type": "object", "properties": {"id": STR, "limit": INT}, "additionalProperties": False}},
+    {"name": "relic_saved", "description": "Saved searches: a search kept as a job that the hub re-runs (default every 60 minutes) and "
+     "links into the chain of the search it came from; each run says how many hits are new (Jobs page, relic_trace). action list "
+     "(default) | add (from: a search's trace.id, or query and the search's filters in args; every: minutes; name) | remove (id).",
+     "inputSchema": {"type": "object", "properties": {"action": {**STR, "enum": ["list", "add", "remove"]}, "id": STR, "from": STR,
+                                                      "query": STR, "args": {"type": "object"}, "every": {"type": "integer", "minimum": 5},
+                                                      "name": STR}, "additionalProperties": False}},
     {"name": "relic_status", "description": "Months, per-machine watermarks, totals, jobs and warnings (StatusReport).",
      "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
     {"name": "relic_artifact_put", "description": "Keep something you made for an oracle on the hub: an image (png jpg webp gif svg), "
@@ -78,7 +91,6 @@ TOOLS = [
 UNAVAILABLE = {
     "relic_chain": "relic_chain is not available in relic5 (as in relic3 v3)",
     "relic_now": "relic_now is not available in relic5; use relic_sessions with since=1h",
-    "relic_trace": "relic_trace is not available in relic5; use relic_search then relic_show",
     "relic_pending": "relic_pending is not available in relic5; relic_status reports pending/warnings",
 }
 # (True, the tool's reply) or (False, (kind, error)); Any because mypy cannot narrow the second item by the first
@@ -109,6 +121,32 @@ def _int(a: Json, k: str, minimum: int = 0) -> int | None:
 
 
 def run_tool(relic: Relic5, name: str, a: Json, door: str | None = None) -> Json:
+    if "parent" in a:   # the trace link is the hub's (api.logged), not the tool's
+        _str(a, "parent")
+        a = {k: v for k, v in a.items() if k != "parent"}
+    if name == "relic_trace":
+        from . import trace
+        _check(a, ["id", "limit"])
+        rid = _str(a, "id")
+        if rid:
+            out = trace.chain(relic.parts.root, rid)
+            if "error" in out:
+                raise NotFound(out["error"])
+            return out
+        return {"chains": trace.chains(relic.parts.root, min(_int(a, "limit", 1) or 30, 200))}
+    if name == "relic_saved":
+        from . import trace
+        _check(a, ["action", "id", "from", "query", "args", "every", "name"])
+        act = _str(a, "action") or "list"
+        if act == "add":
+            if a.get("args") is not None and not isinstance(a["args"], dict):
+                raise UsageError("args must be an object")
+            return trace.save(relic.parts.root, _str(a, "from"), _str(a, "query"), a.get("args"), _int(a, "every", 5) or 60, _str(a, "name"), door)
+        if act == "remove":
+            return trace.remove(relic.parts.root, _str(a, "id") or "")
+        if act != "list":
+            raise UsageError("action is list | add | remove")
+        return {"saved": trace.public(trace.saved(relic.parts.root))}
     if name == "relic_search":
         _check(a, list(SEARCH_PROPS))
         vec = a.get("vector")

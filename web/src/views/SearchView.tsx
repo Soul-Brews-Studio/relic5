@@ -234,7 +234,8 @@ export function SearchView({ st, setSt, machine, setMachine, machines, recent, t
   const [drawer, setDrawer] = useState(false);
   const [show, setShow] = useState<{ link: string; r: ShowResult | null; err?: string } | null>(null);
   const input = useRef<HTMLInputElement>(null);
-  const runId = useRef(0), showId = useRef(0);   // stale-request guards (ARRA Oracle v3 SimpleSearch): a late answer never overwrites a newer one
+  const runId = useRef(0), showId = useRef(0);
+  const prev = useRef<{ q: string; id: string } | null>(null);   // the search before: a narrower one joins its trace chain   // stale-request guards (ARRA Oracle v3 SimpleSearch): a late answer never overwrites a newer one
   const wide = () => window.matchMedia("(min-width: 1536px)").matches;
 
   useEffect(() => { input.current?.focus(); }, [focusKey]);
@@ -244,12 +245,15 @@ export function SearchView({ st, setSt, machine, setMachine, machines, recent, t
     const id = ++runId.current;
     const p = new URLSearchParams({ q: s.q, limit: "40" });
     for (const k of ["horizon", "with", "repo", "role", "session"] as const) if (s[k]) p.set(k, s[k]);
+    const was = prev.current;   // same words with other filters, or words added to the last search: the same line of asking
+    if (was && (s.q === was.q || s.q.includes(was.q))) p.set("parent", was.id);
     setBusy(true); setErr(null);
     const t = performance.now();
     try {
       const r = await get<SearchResult>("/api/search?" + p);
       if (id !== runId.current) return;
       setRes(r); setUnfold(new Set()); setActive(r.hits.length ? 0 : -1);
+      prev.current = r.trace ? { q: s.q, id: r.trace.id } : null;
       if (document.activeElement === input.current && r.hits.length) input.current?.blur();   // j/k move at once (Panel A)
     } catch (e) { if (id === runId.current) setErr(String((e as Error).message)); }
     finally { if (id === runId.current) { setMs(Math.round(performance.now() - t)); setBusy(false); } }
@@ -277,7 +281,7 @@ export function SearchView({ st, setSt, machine, setMachine, machines, recent, t
     if (!selected) { setShow(null); return; }
     const id = ++showId.current;
     setShow({ link: selected.link, r: null });
-    get<ShowResult>(`/api/show?id=${encodeURIComponent(selected.link)}&before=3&after=3`)
+    get<ShowResult>(`/api/show?id=${encodeURIComponent(selected.link)}&before=3&after=3${res?.trace ? `&parent=${res.trace.id}` : ""}`)
       .then(r => { if (id === showId.current) setShow({ link: selected.link, r }); })
       .catch(e => { if (id === showId.current) setShow({ link: selected.link, r: null, err: String((e as Error).message) }); });
   }, [selected?.link]);   // eslint-disable-line
@@ -392,7 +396,8 @@ export function SearchView({ st, setSt, machine, setMachine, machines, recent, t
               <b className="text-base text-text tabular-nums">{hits.length === 40 ? "Top 40" : machine && res.hits.length ? `${hits.length} of ${res.hits.length}` : `${hits.length} hits`}</b>
               <span>{machine ? `on ${machine}, ` : ""}{res.horizon === "archive" ? "from all time" : res.horizon === "window" ? "in the chosen window" : `from the last ${res.horizon}`}</span>
               {!!res.older_hits && res.horizon !== "archive" && <button type="button" onClick={() => narrow({ horizon: "archive" })} className={linkBtn}>show the {res.older_hits} older hits</button>}
-              <span className="ml-auto font-mono text-xs text-faint">{res.searched_months.length} months · {ms} ms</span>
+              <span className="ml-auto font-mono text-xs text-faint">{res.searched_months.length} months · {ms} ms
+                {res.trace && <> · <a href={`#tab=queries&pane=chains&trace=${res.trace.id}`} className="text-accent hover:underline" title="This search, the hits opened from it and the searches after it (Asked · Chains)">trace #{res.trace.root}</a></>}</span>
             </p>
           )}
           {err && <State error>{err}</State>}

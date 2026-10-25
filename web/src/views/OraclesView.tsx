@@ -53,12 +53,12 @@ export function Gallery({ items, empty }: { items: Artifact[]; empty?: string })
   const [open, setOpen] = useState<Artifact | null>(null);
   if (!items.length) return empty ? <p className="m-0 text-sm text-muted">{empty}</p> : null;
   return <>
-    <div className="grid grid-cols-2 gap-3 md:grid-cols-3 2xl:grid-cols-4">
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5">
       {items.map(a => (
         <button key={a.id} type="button" onClick={() => setOpen(a)} className="group overflow-hidden rounded-xl border border-line bg-panel text-left hover:border-line-strong">
           <div className="aspect-square overflow-hidden bg-deep"><Show a={a} /></div>
-          <div className="px-3 py-2"><div className="truncate text-sm font-semibold text-text group-hover:text-accent">{a.title}</div>
-            <div className="truncate text-xs text-muted">{a.kind} · {a.oracle} · {ago(a.at)}</div></div>
+          <div className="px-3 py-2"><div className="line-clamp-2 text-sm font-semibold break-words text-text group-hover:text-accent" title={a.title}>{a.title}</div>
+            <div className="mt-0.5 line-clamp-2 text-xs break-words text-muted">{a.kind} · {a.oracle} · {ago(a.at)}</div></div>
         </button>
       ))}
     </div>
@@ -132,14 +132,14 @@ function OraclePage({ name, onBack }: { name: string; onBack: () => void }) {
       </header>
 
       <section className="mb-6 rounded-2xl border border-accent/40 bg-panel p-5">
-        <div className="flex flex-wrap items-center gap-3">
-          <div role="tablist" aria-label="Prompt" className="flex gap-1">
-            {([["character", "Character and style"], ["enlighten", "Enlightenment"], ["pet", "Pet"]] as const).filter(([k]) => k !== "pet" || p.prompts.pet).map(([k, l]) => (
+        <div className="flex items-center gap-3">
+          <div role="tablist" aria-label="Prompt" className="flex min-w-0 flex-1 gap-1 overflow-x-auto [scrollbar-width:none]">
+            {([["character", "Character"], ["enlighten", "Enlighten"], ["pet", "Pet"]] as const).filter(([k]) => k !== "pet" || p.prompts.pet).map(([k, l]) => (
               <button key={k} type="button" role="tab" aria-selected={tab === k} onClick={() => setTab(k)}
-                className={cx("-mb-px min-h-11 border-b-2 px-3 text-sm font-semibold", tab === k ? "border-accent text-text" : "border-transparent text-muted hover:text-text")}>{l}</button>
+                className={cx("-mb-px min-h-11 flex-none border-b-2 px-3 text-sm font-semibold whitespace-nowrap", tab === k ? "border-accent text-text" : "border-transparent text-muted hover:text-text")}>{l}</button>
             ))}
           </div>
-          <span className="ml-auto"><Copy text={p.prompts[tab] ?? ""} label="Copy the prompt" /></span>
+          <span className="flex-none"><Copy text={p.prompts[tab] ?? ""} label="Copy the prompt" /></span>
         </div>
         <p className="m-0 mt-3 text-sm text-muted">{tab === "pet"
           ? `For Pet Studio (pet-studio/ in relic5, on the Mac that holds the pets): give it to studio_auto_sprite to draw ${p.name}'s desk pet and its seven moods, then keep the GIFs here with relic_artifact_put.`

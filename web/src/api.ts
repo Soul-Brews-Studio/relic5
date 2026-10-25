@@ -34,3 +34,11 @@ export function usePoll<T>(path: string | null, every = 0, on = true): Polled<T>
   }, [load, every, on]);
   return { data, error, at, reload: load };
 }
+
+/** POST a hub route that changes the hub's own records (saved searches): JSON with X-Relic5-Request, as Connect's tokens. */
+export async function post<T>(path: string, body: unknown): Promise<T> {
+  const r = await fetch(path, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json", "X-Relic5-Request": "1" }, body: JSON.stringify(body) });
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error || String(r.status));
+  return j as T;
+}

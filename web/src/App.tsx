@@ -44,6 +44,7 @@ function writeHash(view: View, machine: string, s: SearchState) {
     // shell writes the hash before the view has read it, and a deep link to one oracle fell back to the list
     const was = new URLSearchParams(location.hash.slice(1));
     if (view === "oracles" && was.get("tab") === "oracles" && was.get("oracle")) h.set("oracle", was.get("oracle")!);
+    if (view === "queries" && was.get("tab") === "queries") for (const k of ["pane", "trace"]) if (was.get(k)) h.set(k, was.get(k)!);
     next = "#" + h;
   }
   if (next !== (location.hash || "#")) history.pushState(null, "", next === "#" ? location.pathname : next);

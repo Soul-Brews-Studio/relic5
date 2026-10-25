@@ -37,7 +37,7 @@ def test_mcp_initialize_and_list(client):
     r = rpc(client, "initialize", {"protocolVersion": "2025-06-18"}).json()
     assert r["result"]["protocolVersion"] == "2025-06-18" and r["result"]["serverInfo"]["name"] == "relic5"
     names = [t["name"] for t in rpc(client, "tools/list").json()["result"]["tools"]]
-    assert names == ["relic_search", "relic_show", "relic_sessions", "relic_session", "relic_status", "relic_artifact_put", "relic_artifacts"]
+    assert names == ["relic_search", "relic_show", "relic_sessions", "relic_session", "relic_trace", "relic_saved", "relic_status", "relic_artifact_put", "relic_artifacts"]
     assert rpc(client, "notifications/initialized", i=None).status_code == 202
 
 
@@ -50,7 +50,7 @@ def test_mcp_call(client):
     assert "keyword hits" in json.loads(sem["content"][0]["text"])["note"]          # no vector: keyword, said out loud
     bad = rpc(client, "tools/call", {"name": "relic_search", "arguments": {"query": "x", "vector": [1, 0]}}).json()["result"]
     assert bad["isError"] and "only apply with semantic" in bad["content"][0]["text"]
-    gone = rpc(client, "tools/call", {"name": "relic_trace", "arguments": {}}).json()["result"]
+    gone = rpc(client, "tools/call", {"name": "relic_chain", "arguments": {}}).json()["result"]
     assert gone["isError"]
     assert rpc(client, "tools/call", {"name": "nope"}).json()["error"]["code"] == -32602
     assert rpc(client, "nope/nope").json()["error"]["code"] == -32601
