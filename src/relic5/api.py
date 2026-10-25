@@ -728,6 +728,17 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
         except ValueError as ex:
             return JSONResponse({"error": str(ex)}, status_code=400)
 
+    @app.get("/api/activity", response_model=None)
+    @cached(300)
+    def activity_route(by: str = "day", group: str = "none", since: str = "", until: str = "", role: str = "",
+                       project: str = "", machine: str = "", top: int = 12, stream: str = "text") -> Json | JSONResponse:
+        from . import activity
+        try:
+            return activity.activity(relic, by, group, since or None, until or None, role or None, project or None,
+                                     machine or None, min(max(top, 1), 50), stream)
+        except ValueError as ex:
+            return JSONResponse({"error": str(ex)}, status_code=400)
+
     @app.get("/api/hours/months", response_model=None)
     @cached(300)
     def hours_months(month: str = "") -> Json | JSONResponse:
