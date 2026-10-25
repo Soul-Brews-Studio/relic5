@@ -44,6 +44,21 @@ def copy_of(root: str) -> Json | None:
         return None
 
 
+def _sessions(root: str) -> int | None:
+    """Sessions on the hub: the rows of the index's names.parquet (one per session), from the file's footer; None before
+    the first index (2026-10-25: claude.ai asked relic_status for it and got null)."""
+    import pyarrow.parquet as pq
+    from .fts import search_dir
+    p = os.path.join(search_dir(root), "names.parquet")
+    try:
+        if rfs.is_s3(p):
+            with rfs.open_input(p) as f:
+                return int(pq.ParquetFile(f).metadata.num_rows)
+        return int(pq.ParquetFile(p).metadata.num_rows) if os.path.exists(p) else None
+    except Exception:
+        return None
+
+
 def status(root: str, now: _datetime | None = None) -> Json:
     p = Parts(root)
     mans = p.manifests()
@@ -185,7 +200,7 @@ def status(root: str, now: _datetime | None = None) -> Json:
         "machines": machines,
         "versions": versions,
         "rows": {"events": rows["text"] + rows["thinking"], "text": rows["text"], "thinking": rows["thinking"],
-                 "tools": rows["tools"], "sessions": None, "files": sum(len(p.files(s)) for s in MONTH_STREAMS)},
+                 "tools": rows["tools"], "sessions": _sessions(p.root), "files": sum(len(p.files(s)) for s in MONTH_STREAMS)},
         "jobs": {"running": running, "recent": evs[:10], "last_error": last_error},
         "backup": backup,
         "offsite": offsite,
