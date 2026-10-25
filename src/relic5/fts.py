@@ -273,6 +273,10 @@ def build(root: str, con: "duckdb.DuckDBPyConnection", log: Callable[[str], obje
             i = tab.schema.get_field_index("vector")
             flat = tab.column("vector").combine_chunks().flatten().cast(pa.float32())
             tab = tab.set_column(i, "vector", pa.FixedSizeListArray.from_arrays(flat, dim))
+        from .schema import check as check_schema
+        bad = check_schema(name, tab.schema)   # every table against its class (schema.py) before it is published
+        if bad:
+            raise ValueError("index table does not match its schema: " + "; ".join(bad[:5]))
         tb = db.create_table(name, tab, mode="overwrite")
         if not is_vec:
             tb.create_index("text", config=FTS(**FTS_SETTINGS), replace=True)
