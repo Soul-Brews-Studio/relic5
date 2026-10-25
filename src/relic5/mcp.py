@@ -8,7 +8,7 @@ Unknown arguments are errors (a typo must not silently mean "no filter").
 Accepted but not served yet, each with a clear error: semantic (embed milestone), via / chat / from_user / cwd
 (relic-extract's parts do not carry them).
 """
-import json
+import json, os
 from collections.abc import Callable, Iterable
 from typing import Any
 
@@ -17,7 +17,12 @@ from .query import DEFAULT_LIMIT, NotFound, Relic5, UsageError
 from .status import status
 from .types_ import Json
 
-SERVER_INFO = {"name": "relic5", "version": __version__}
+SERVER_INFO: Json = {"name": "relic5", "title": "relic5", "version": __version__}
+_PUB = os.environ.get("RELIC5_PUBLIC_URL", "").rstrip("/")
+if _PUB:   # the icon a client such as claude.ai shows beside the connector (MCP Implementation.icons)
+    SERVER_INFO |= {"websiteUrl": "https://relic5.buildwithoracle.com", "icons": [
+        {"src": f"{_PUB}/icon-512.png", "mimeType": "image/png", "sizes": ["512x512"]},
+        {"src": f"{_PUB}/favicon.svg", "mimeType": "image/svg+xml", "sizes": ["any"]}]}
 SUPPORTED = ["2025-06-18", "2025-03-26", "2024-11-05"]
 
 STR = {"type": "string"}

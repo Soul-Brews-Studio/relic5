@@ -376,6 +376,10 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
     PUBLIC = os.environ.get("RELIC5_PUBLIC_URL", "").rstrip("/")
     PUBLIC_HOST = (urlparse(PUBLIC).hostname or "").lower() if PUBLIC else ""
     OPEN = ("/.well-known/oauth-protected-resource", "/.well-known/oauth-authorization-server", "/oauth/")
+    # the hub's icon, open to anyone and on the public host too: claude.ai shows it beside the connector
+    ICONS = {"/favicon.ico": ("favicon.ico", "image/x-icon"), "/favicon.svg": ("favicon.svg", "image/svg+xml"),
+             "/apple-touch-icon.png": ("icon-180.png", "image/png"), "/icon-192.png": ("icon-192.png", "image/png"),
+             "/icon-512.png": ("icon-512.png", "image/png")}
 
     def base_of(request: Request) -> str:
         return PUBLIC or f"{request.url.scheme}://{request.url.netloc}"
@@ -401,6 +405,10 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
     @app.middleware("http")
     async def auth(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
         path = request.url.path
+        if path in ICONS:
+            name, mime = ICONS[path]
+            return Response(open(os.path.join(os.path.dirname(__file__), "icons", name), "rb").read(), media_type=mime,
+                            headers={"cache-control": "public, max-age=86400"})
         if PUBLIC_HOST and (request.url.hostname or "").lower() == PUBLIC_HOST and not (path == "/mcp" or path.startswith(OPEN)):
             return JSONResponse({"error": "not found"}, status_code=404)   # the tunnel shows only the MCP door
         if path == "/login" or path.startswith(OPEN):
