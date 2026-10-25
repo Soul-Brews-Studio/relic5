@@ -13,6 +13,7 @@ from collections.abc import Callable
 from typing import TypedDict
 
 from .types_ import Json
+from . import store as rfs
 
 LOCK = threading.Lock()
 RUNNING: dict[str, Json] = {}          # id -> {at, door, tool, query}
@@ -53,27 +54,17 @@ def finish(root: str, qid: str, t0: float, result: object = None, args: Json | N
         line |= {"id": rid, "parent": parent, "root": top, "args": trace.record_args(args)}
         if (t := trace.top_hits(result)) is not None:
             line["top"] = t
-    p = _log(root)
-    os.makedirs(os.path.dirname(p), exist_ok=True)
-    fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-    try:
-        os.write(fd, (json.dumps(line, ensure_ascii=False) + "\n").encode())
-    finally:
-        os.close(fd)
+    rfs.append_line(_log(root), json.dumps(line, ensure_ascii=False))
     return top
 
 
 def _tail(path: str, n: int = 5000) -> list[Json]:
-    if not os.path.exists(path):
-        return []
-    with open(path, "rb") as f:
-        f.seek(max(0, os.path.getsize(path) - 2_000_000))
-        out: list[Json] = []
-        for line in f.read().decode("utf-8", "replace").splitlines()[-n:]:
-            try:
-                out.append(json.loads(line))
-            except ValueError:
-                pass
+    out: list[Json] = []
+    for line in rfs.tail_lines(path, 2_000_000)[-n:]:
+        try:
+            out.append(json.loads(line))
+        except ValueError:
+            pass
     return out
 
 
@@ -117,7 +108,9 @@ def queries(root: str) -> Json:
 
 def _du(path: str) -> int:
     """Bytes under path, each inode once: relic3's generations are hardlinked copies (rsync --link-dest), and counting
-    every link reported ~/.relic3-gens as 254.7 GB where it uses ~80 GB (2026-10-24)."""
+    every link reported ~/.relic3-gens as 254.7 GB where it uses ~80 GB (2026-10-24). On S3: the objects' sizes."""
+    if rfs.is_s3(path):
+        return sum(n for _, n, _ in rfs.files(path))
     total, seen = 0, set[tuple[int, int]]()
     for d, _, fs in os.walk(path):
         for f in fs:
@@ -140,20 +133,25 @@ def store(root: str, ttl: int = 120) -> Json:
         return _sizes[1]
     out: Json = {"parts": {}, "search": {}, "vectors": {}, "manifests": 0, "logs": 0}
     pd = os.path.join(root, "parts")
-    for m in sorted(os.listdir(pd)) if os.path.isdir(pd) else []:
-        out["parts"][m] = {s: _du(os.path.join(pd, m, s)) for s in sorted(os.listdir(os.path.join(pd, m))) if os.path.isdir(os.path.join(pd, m, s))}
+    for m in sorted(rfs.listdir(pd)) if rfs.isdir(pd) else []:
+        out["parts"][m] = {s: _du(os.path.join(pd, m, s)) for s in sorted(rfs.listdir(os.path.join(pd, m))) if rfs.isdir(os.path.join(pd, m, s))}
     from .fts import current, search_dir
     sd = search_dir(root)
     for name, rel in current(root).items():
         out["search"][name] = _du(os.path.join(sd, rel))
     vd = os.path.join(root, "vectors")
-    for m in sorted(os.listdir(vd)) if os.path.isdir(vd) else []:
+    for m in sorted(rfs.listdir(vd)) if rfs.isdir(vd) else []:
         out["vectors"][m] = _du(os.path.join(vd, m))
-    out["manifests"] = sum(_du(os.path.join(root, "index", d)) for d in os.listdir(os.path.join(root, "index")) if d[:4].isdigit() or d == "undated") \
-        if os.path.isdir(os.path.join(root, "index")) else 0
+    out["manifests"] = sum(_du(os.path.join(root, "index", d)) for d in rfs.listdir(os.path.join(root, "index")) if d[:4].isdigit() or d == "undated") \
+        if rfs.isdir(os.path.join(root, "index")) else 0
     out["logs"] = _du(os.path.join(root, "logs"))
-    out["search_total"] = _du(sd) if os.path.isdir(sd) else 0
-    du = shutil.disk_usage(root)
+    out["search_total"] = _du(sd) if rfs.isdir(sd) else 0
+    if rfs.is_s3(root):   # a bucket has no disk of its own to fill; the local cache's disk is what can run out
+        du = shutil.disk_usage(rfs.cache_dir(root))
+        out["backend"] = {"kind": "s3", "root": root, "endpoint": rfs.s3_config()["endpoint"]}
+    else:
+        du = shutil.disk_usage(root)
+        out["backend"] = {"kind": "disk", "root": root}
     out["disk"] = {"total": du.total, "used": du.used, "free": du.free, "free_pct": round(du.free / du.total * 100, 1)}
     out["total"] = sum(sum(v.values()) for v in out["parts"].values()) + out["search_total"] + sum(out["vectors"].values()) + out["logs"]
     out["growth"] = growth(root, out["total"])
@@ -168,11 +166,9 @@ def record_size(root: str) -> None:
     rows = _tail(p, 2000)
     if rows and rows[-1].get("day") == day:
         return
-    os.makedirs(os.path.dirname(p), exist_ok=True)
     s = store(root, ttl=0)
-    with open(p, "a") as f:
-        f.write(json.dumps({"day": day, "total": s["total"], "parts": sum(sum(v.values()) for v in s["parts"].values()),
-                            "disk_free": s["disk"]["free"]}) + "\n")
+    rfs.append_line(p, json.dumps({"day": day, "total": s["total"], "parts": sum(sum(v.values()) for v in s["parts"].values()),
+                                   "disk_free": s["disk"]["free"]}), 0o644)
 
 
 def growth(root: str, total_now: int) -> Json:
@@ -202,7 +198,7 @@ def resources() -> Json:
         out["memory"] = {"total": mem.get("MemTotal"), "available": mem.get("MemAvailable")}
     st = {l.split(":")[0]: l.split(":")[1].strip() for l in _read("/proc/self/status").splitlines() if ":" in l}
     out["process"] = {"rss": int(st["VmRSS"].split()[0]) * 1024 if "VmRSS" in st else None, "threads": int(st.get("Threads", 0)) or None,
-                      "open_files": len(os.listdir("/proc/self/fd")) if os.path.isdir("/proc/self/fd") else None}
+                      "open_files": len(rfs.listdir("/proc/self/fd")) if rfs.isdir("/proc/self/fd") else None}
     cg = _read("/sys/fs/cgroup/memory.current").strip()
     if cg:
         out["container"] = {"memory": int(cg), "limit": _read("/sys/fs/cgroup/memory.max").strip()}

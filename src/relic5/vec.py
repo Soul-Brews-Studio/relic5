@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any, TypedDict
 
 from .parts import Parts, sql_list
 from .types_ import Json
+from . import store as rfs
 
 if TYPE_CHECKING:   # for annotations only: numpy, duckdb and lancedb are loaded where they are used
     import duckdb
@@ -46,14 +47,14 @@ class VecFilter(TypedDict, total=False):
 
 def models(root: str) -> list[str]:
     d = os.path.join(root, VDIR)
-    if not os.path.isdir(d):
+    if not rfs.isdir(d):
         return []
-    return sorted(m for m in os.listdir(d) if MODEL_DIR.match(m) and shards(root, m))
+    return sorted(m for m in rfs.listdir(d) if MODEL_DIR.match(m) and shards(root, m))
 
 
 def shards(root: str, model: str) -> list[str]:
     d = os.path.join(root, VDIR, model)
-    return sorted(os.path.join(d, f) for f in os.listdir(d) if f.endswith(".parquet") and not f.startswith(".")) if os.path.isdir(d) else []
+    return sorted(os.path.join(d, f) for f in rfs.listdir(d) if f.endswith(".parquet") and not f.startswith(".")) if rfs.isdir(d) else []
 
 
 def shard_months(root: str, model: str, con: "duckdb.DuckDBPyConnection", parts: Parts) -> dict[str, list[str]]:
@@ -64,13 +65,13 @@ def shard_months(root: str, model: str, con: "duckdb.DuckDBPyConnection", parts:
     from .fts import search_dir
     p = os.path.join(search_dir(root), "shard_months.json")
     try:
-        cache: dict[str, Json] = json.load(open(p))
+        cache: dict[str, Json] = rfs.read_json(p)
     except (OSError, ValueError):
         cache = {}
     fs = [p_ for _, _, p_ in parts.files("text")]
     out: dict[str, list[str]] = {}
     for f in shards(root, model):
-        name, size = os.path.basename(f), os.path.getsize(f)
+        name, size = os.path.basename(f), rfs.getsize(f)
         hit = cache.get(name)
         if hit and hit.get("size") == size:
             out[name] = list(hit["months"])
@@ -79,10 +80,7 @@ def shard_months(root: str, model: str, con: "duckdb.DuckDBPyConnection", parts:
                                                 WHERE key IN (SELECT key FROM read_parquet({sql_list([f])})) ORDER BY 1""").fetchall() if m] if fs else []
         cache[name] = {"size": size, "months": months}
         out[name] = months
-    os.makedirs(os.path.dirname(p), exist_ok=True)
-    with open(p + ".tmp", "w") as fh:
-        json.dump({k: v for k, v in cache.items() if k in out}, fh)
-    os.replace(p + ".tmp", p)
+    rfs.write_json(p, {k: v for k, v in cache.items() if k in out})
     return out
 
 
@@ -115,7 +113,7 @@ def missing(root: str, con: "duckdb.DuckDBPyConnection", model: str = DEFAULT, l
     # the memory notes too (index/_memory/notes.parquet, key = the note's msgkey): each note gets its own vector, so the
     # Knowledge page can place notes by meaning (Nat, 2026-10-24: "vectorized (individual) vector visualize")
     mem = os.path.join(root, "index", "_memory", "notes.parquet")
-    if os.path.exists(mem):
+    if rfs.exists(mem):
         notes = f"(SELECT key, ts, text FROM read_parquet('{mem.replace(chr(39), chr(39) * 2)}') WHERE text IS NOT NULL AND text <> '')"
         src = f"(SELECT key, ts, text FROM {src} UNION ALL SELECT * FROM {notes})" if src else notes
     if src is None:
@@ -164,14 +162,12 @@ def write_marks(root: str, con: "duckdb.DuckDBPyConnection", published: bool) ->
     from .fts import search_dir
     p = os.path.join(search_dir(root), "vectors.json")
     try:
-        old = json.load(open(p)).get("at")
+        old = rfs.read_json(p).get("at")
     except (OSError, ValueError, AttributeError):
         old = None
     marks = {m: watermarks(root, con, m) for m in models(root)}
     now = time.strftime("%FT%T%z")
-    with open(p + ".tmp", "w") as f:
-        json.dump({"at": now if published else old, "counted_at": now, "models": marks}, f, indent=1)
-    os.replace(p + ".tmp", p)
+    rfs.write_json(p, {"at": now if published else old, "counted_at": now, "models": marks}, indent=1)
     return marks
 
 

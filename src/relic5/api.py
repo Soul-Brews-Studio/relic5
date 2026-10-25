@@ -24,6 +24,7 @@ from starlette.datastructures import QueryParams
 from . import mcp
 from .query import Relic5
 from .types_ import JobEvent, Json
+from . import store as rfs
 
 if TYPE_CHECKING:
     from .doors import Doors
@@ -154,9 +155,101 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
         ok, r = logged(relic, tool, args | ({"parent": parent} if parent else {}), "saved-search", client)
         return ok, r, (r.get("trace") or {}).get("id") if ok and isinstance(r, dict) else None
 
+    if rfs.is_s3(relic.parts.root) and os.environ.get("RELIC5_WARM", "1") != "0":
+        # S3 has no append: each log line is an object (store.append_line). Roll lines older than 10 minutes into one
+        # chunk object per log every 10 minutes, so a listing stays short.
+        import threading as _th, time as _time
+
+        def _compact_loop() -> None:
+            while True:
+                _time.sleep(600)
+                for rel in ("logs/queries.jsonl", "logs/jobs.jsonl", "logs/tags.jsonl", "logs/sizes.jsonl", "artifacts/index.jsonl"):
+                    try:
+                        rfs.compact(os.path.join(relic.parts.root, rel), older_than=600)
+                    except Exception:
+                        pass
+        _th.Thread(target=_compact_loop, name="relic5-compact", daemon=True).start()
+
+        # nothing on an S3 hub's machine sees a push land (on a disk hub, relic-extract's after hook runs the index):
+        # look every 2 minutes, and when a part changed, run `relic5 index` as its own process (it locks itself)
+        def _index_loop() -> None:
+            import subprocess, sys as _sys
+            while True:
+                _time.sleep(120)
+                try:
+                    stale = relic.parts.stale()
+                except Exception:
+                    continue
+                if stale:
+                    subprocess.run([_sys.executable, "-m", "relic5.cli", "index", "--root", relic.parts.root, "--wait"],
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+        if os.environ.get("RELIC5_AUTO_INDEX", "1") != "0":
+            _th.Thread(target=_index_loop, name="relic5-auto-index", daemon=True).start()
+
     if os.environ.get("RELIC5_WARM", "1") != "0":   # saved searches run as jobs (trace.py)
         from . import trace as _trace
         _trace.keep_running(relic.parts.root, saved_call)
+
+    if os.environ.get("RELIC5_WARM", "1") != "0":   # a mirror, when one is set (mirror.py): copies on its own clock
+        from . import mirror as _mirror
+        _mirror.keep_mirrored(relic.parts.root)
+
+    @app.get("/api/storage", response_model=None)
+    def storage_route() -> Json:
+        """Where the hub keeps its data, the mirror and its last run, and a switch waiting for the next start."""
+        from . import mirror
+        from .jobs import read
+        c = mirror.config()
+        last = next((e for e in read(relic.parts.root)[0] if e.get("verb") == "mirror"), None)
+        kind = "s3" if rfs.is_s3(relic.parts.root) else "disk"
+        return {"root": relic.parts.root, "kind": kind, "endpoint": rfs.s3_config()["endpoint"] if kind == "s3" else None,
+                "cache": rfs.cache_dir(relic.parts.root) if kind == "s3" else None, "mirror": c.get("mirror"),
+                "every_min": c.get("every_min") or 60, "switch_to": c.get("switch_to"), "switched_from": c.get("switched_from"),
+                "state": mirror.state(), "last_job": last, "verify": c.get("verify")}
+
+    @app.post("/api/storage", response_model=None)
+    async def storage_change(request: Request) -> Response | Json:
+        """set-mirror {target, every_min} | mirror-now | verify | switch | cancel-switch. Only from the hub itself or
+        Nat's tailnet (never with a token: this points the hub's data somewhere else), as a JSON POST with
+        X-Relic5-Request: 1."""
+        from . import mirror
+        if (request.state.door or "").startswith("token:"):
+            return JSONResponse({"error": "storage is managed from the hub itself or Nat's tailnet, not with a token"}, status_code=403)
+        if request.headers.get("x-relic5-request") != "1" or not request.headers.get("content-type", "").startswith("application/json"):
+            return JSONResponse({"error": "needs Content-Type: application/json and X-Relic5-Request: 1"}, status_code=400)
+        try:
+            body: Json = await request.json()
+        except ValueError:
+            return JSONResponse({"error": "body is not JSON"}, status_code=400)
+        act, c = body.get("action"), mirror.config()
+        try:
+            if act == "set-mirror":
+                t = str(body.get("target") or "").strip()
+                if t and not (t.startswith("s3://") or t.startswith("/") or t.startswith("~")):
+                    return JSONResponse({"error": "a mirror is a folder (/path) or s3://bucket/prefix"}, status_code=400)
+                if t and rfs.root_of(t) == relic.parts.root:
+                    return JSONResponse({"error": "that is where the hub already lives"}, status_code=400)
+                return mirror.set_config(mirror=t or None, every_min=int(body.get("every_min") or c.get("every_min") or 60), verify=None)
+            if act == "mirror-now":
+                import threading as _t2
+                _t2.Thread(target=lambda: mirror.run(relic.parts.root), daemon=True).start()
+                return {"started": True, "mirror": c.get("mirror")}
+            if act == "verify":
+                if not c.get("mirror"):
+                    return JSONResponse({"error": "no mirror set"}, status_code=400)
+                v = mirror.verify(relic.parts.root, c["mirror"])
+                mirror.set_config(verify=v)
+                return v
+            if act == "switch":
+                v = c.get("verify") or {}
+                if not c.get("mirror") or not v.get("ok") or v.get("dst") != rfs.root_of(c["mirror"]):
+                    return JSONResponse({"error": "verify the mirror first: a switch needs a verify with nothing missing"}, status_code=400)
+                return mirror.set_config(switch_to=c["mirror"])
+            if act == "cancel-switch":
+                return mirror.set_config(switch_to=None)
+        except ValueError as ex:
+            return JSONResponse({"error": str(ex)}, status_code=400)
+        return JSONResponse({"error": "action is set-mirror | mirror-now | verify | switch | cancel-switch"}, status_code=400)
 
     @app.get("/api/trace", response_model=None)
     def trace_route(id: str = "", limit: int = 30) -> Response | Json:
@@ -288,7 +381,7 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
         path in it, or of a type not listed, is refused."""
         ext = os.path.splitext(name)[1]
         path = os.path.join(ASSETS, name)
-        if os.path.basename(name) != name or ext not in TYPES or not os.path.isfile(path):
+        if os.path.basename(name) != name or ext not in TYPES or not rfs.isfile(path):
             return JSONResponse({"error": "not found"}, status_code=404)
         return Response(open(path, "rb").read(), media_type=TYPES[ext], headers={"cache-control": "public, max-age=31536000, immutable"})
 
@@ -299,9 +392,9 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
         if len(month) != 7 or month[4] != "-" or not (month[:4] + month[5:]).isdigit():
             return JSONResponse({"error": "month is YYYY-MM"}, status_code=400)
         p = sealday.recap_path(relic.parts.root, month)
-        if not os.path.isfile(p):
+        if not rfs.isfile(p):
             return JSONResponse({"error": f"no recap for {month} yet"}, status_code=404)
-        return Response(open(p, encoding="utf-8").read(), media_type="text/markdown; charset=utf-8")
+        return Response(rfs.read_text(p), media_type="text/markdown; charset=utf-8")
 
     @app.get("/api/artifacts", response_model=None)
     def artifacts_route(oracle: str | None = None, limit: int = 500) -> Json:
@@ -322,6 +415,8 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
         h = {"X-Content-Type-Options": "nosniff", "Cache-Control": "private, max-age=31536000, immutable"}
         if kind == "web" or mime.startswith("image/svg"):
             h["Content-Security-Policy"] = "sandbox allow-scripts; default-src 'self' data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'none'"
+        if rfs.is_s3(path):
+            return Response(rfs.read_bytes(path), media_type=mime, headers=h)
         return FileResponse(path, media_type=mime, headers=h)
 
     @app.post("/api/artifact", response_model=None)
@@ -402,12 +497,18 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
     def memory_file(path: str) -> Response:
         """One memory note as its file holds it (frontmatter and all), for the Knowledge page's raw view. Only a .md under
         parts/<machine>/memory/: anything else, or a path that resolves outside, is refused."""
-        base = os.path.realpath(os.path.join(relic.parts.root, "parts"))
-        full = os.path.realpath(os.path.join(relic.parts.root, path))
-        rel = os.path.relpath(full, base)
-        if rel.startswith("..") or "/memory/" not in "/" + rel or not full.endswith(".md") or not os.path.isfile(full):
+        import posixpath
+        if rfs.is_s3(relic.parts.root):   # no links in a bucket: normalise the path and keep it under parts/
+            base = relic.parts.root + "/parts"
+            full = relic.parts.root + "/" + posixpath.normpath("/" + path).lstrip("/")
+            rel = full[len(base) + 1:] if full.startswith(base + "/") else "../"
+        else:
+            base = os.path.realpath(os.path.join(relic.parts.root, "parts"))
+            full = os.path.realpath(os.path.join(relic.parts.root, path))
+            rel = os.path.relpath(full, base)
+        if rel.startswith("..") or "/memory/" not in "/" + rel or not full.endswith(".md") or not rfs.isfile(full):
             return JSONResponse({"error": "not a memory note on this hub"}, status_code=404)
-        return Response(open(full, encoding="utf-8", errors="replace").read(), media_type="text/markdown; charset=utf-8")
+        return Response(rfs.read_text(full), media_type="text/markdown; charset=utf-8")
 
     @app.get("/api/log", response_model=None)
     def log(n: int = 100) -> list[JobEvent]:
@@ -444,10 +545,10 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
     def eval_log(n: int = 200) -> list[Json]:
         """The eval runs (tests/eval/compare.py appends them): newest last."""
         p = os.path.join(relic.parts.root, "logs", "eval.jsonl")
-        if not os.path.exists(p):
+        if not rfs.exists(p):
             return []
         out: list[Json] = []
-        for line in open(p, encoding="utf-8").readlines()[-min(max(n, 1), 2000):]:
+        for line in rfs.read_lines(p)[-min(max(n, 1), 2000):]:
             try:
                 out.append(json.loads(line))
             except ValueError:

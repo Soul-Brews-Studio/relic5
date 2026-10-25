@@ -12,6 +12,7 @@ reads like every other hit's) and its session_name (the oracle's name), looked u
 """
 import json, os, re
 from typing import TypedDict
+from . import store as rfs
 
 
 class Vault(TypedDict):
@@ -30,10 +31,10 @@ def load(root: str) -> dict[tuple[str, str], Vault]:
     """{(machine, "vault:<id>"): Vault} over every machine's pushed vaults.json. A missing or broken file is no vaults."""
     out: dict[tuple[str, str], Vault] = {}
     pdir = os.path.join(root, "parts")
-    for machine in sorted(os.listdir(pdir)) if os.path.isdir(pdir) else []:
+    for machine in sorted(rfs.listdir(pdir)) if rfs.isdir(pdir) else []:
         f = os.path.join(pdir, machine, "meta", "vaults.json")
         try:
-            vs = json.load(open(f)).get("vaults", [])
+            vs = rfs.read_json(f).get("vaults", [])
         except (OSError, ValueError, AttributeError):
             continue
         for v in vs:

@@ -13,6 +13,7 @@ import threading
 from typing import TYPE_CHECKING, Any
 
 from .types_ import Json
+from . import store as rfs
 
 if TYPE_CHECKING:
     from .query import Relic5
@@ -24,7 +25,7 @@ KEEP = 8          # maps kept in memory and on disk (sessions maps of a few limi
 
 def _file(relic: "Relic5", key: tuple[object, ...]) -> str:
     import hashlib, os
-    d = os.path.join(relic.parts.root, "index", "_maps")
+    d = rfs.cache_dir(relic.parts.root, "index", "_maps")
     os.makedirs(d, exist_ok=True)
     return os.path.join(d, hashlib.sha1(repr(key).encode()).hexdigest()[:16] + ".json")
 
@@ -37,9 +38,9 @@ def _get(relic: "Relic5", key: tuple[object, ...]) -> Json | None:
         if key in _CACHE:
             return _CACHE[key]
     f = _file(relic, key)
-    if os.path.exists(f):
+    if rfs.exists(f):
         try:
-            out: Json = json.load(open(f))
+            out: Json = rfs.read_json(f)
         except (OSError, ValueError):
             return None
         with _LOCK:
@@ -58,10 +59,10 @@ def _put(relic: "Relic5", key: tuple[object, ...], out: Json) -> None:
     with open(f + ".tmp", "w") as fh:
         json.dump(out, fh)
     os.replace(f + ".tmp", f)
-    old = sorted(glob.glob(os.path.join(os.path.dirname(f), "*.json")), key=os.path.getmtime)[:-KEEP]
+    old = sorted(rfs.glob(os.path.join(os.path.dirname(f), "*.json")), key=rfs.getmtime)[:-KEEP]
     for x in old:
         os.remove(x)
-        if os.path.exists(x[:-5] + ".npz"):   # the map's projection goes with it
+        if rfs.exists(x[:-5] + ".npz"):   # the map's projection goes with it
             os.remove(x[:-5] + ".npz")
 
 
@@ -200,7 +201,7 @@ _BASIS: dict[tuple[object, ...], dict[str, "Any"]] = {}   # a sessions map's key
 
 def _save_basis(relic: "Relic5", map_id: str, basis: dict[str, "Any"]) -> None:
     import numpy as np
-    d = os.path.join(relic.parts.root, "index", "_maps")
+    d = rfs.cache_dir(relic.parts.root, "index", "_maps")
     f = os.path.join(d, map_id + ".npz")
     np.savez(f + ".tmp.npz", **basis)
     os.replace(f + ".tmp.npz", f)
@@ -217,8 +218,8 @@ def _basis_by_id(relic: "Relic5", map_id: object) -> "dict[str, Any] | None":
     with _LOCK:
         if (map_id,) in _BASIS:
             return _BASIS[(map_id,)]
-    f = os.path.join(relic.parts.root, "index", "_maps", f"{map_id}.npz")
-    if not os.path.exists(f):
+    f = os.path.join(rfs.cache_dir(relic.parts.root, "index", "_maps"), f"{map_id}.npz")
+    if not rfs.exists(f):
         return None
     with np.load(f) as z:
         b = {k: z[k] for k in z.files}
@@ -229,14 +230,14 @@ def _basis_by_id(relic: "Relic5", map_id: object) -> "dict[str, Any] | None":
 
 
 def _latest_file(relic: "Relic5") -> str:
-    return os.path.join(relic.parts.root, "index", "_maps", "latest.ptr")   # not *.json: the cache keeps its newest *.json files only
+    return os.path.join(rfs.cache_dir(relic.parts.root, "index", "_maps"), "latest.ptr")   # not *.json: the cache keeps its newest *.json files only
 
 
 def _set_latest(relic: "Relic5", which: tuple[object, ...], map_id: str) -> None:
     import json
     p = _latest_file(relic)
     try:
-        cur = json.load(open(p))
+        cur = rfs.read_json(p)
     except (OSError, ValueError):
         cur = {}
     cur[repr(which)] = map_id
@@ -249,14 +250,14 @@ def _latest(relic: "Relic5", which: tuple[object, ...]) -> Json | None:
     """The newest map already made for (model, limit, min chunks), whatever index generation it was made on."""
     import json
     try:
-        map_id = json.load(open(_latest_file(relic))).get(repr(which))
+        map_id = rfs.read_json(_latest_file(relic)).get(repr(which))
         if not map_id:
             return None
         with _LOCK:
             for v in _CACHE.values():
                 if v.get("map_id") == map_id:
                     return v
-        out: Json = json.load(open(os.path.join(relic.parts.root, "index", "_maps", f"{map_id}.json")))
+        out: Json = rfs.read_json(os.path.join(rfs.cache_dir(relic.parts.root, "index", "_maps"), f"{map_id}.json"))
         return out
     except (OSError, ValueError):
         return None
@@ -344,11 +345,11 @@ def memory_map(relic: "Relic5", model: str | None = None) -> Json:
     root = relic.parts.root
     mem = os.path.join(root, "index", "_memory", "notes.parquet")
     have = V.vectors_sql(root, model or V.DEFAULT)
-    if not os.path.exists(mem):
+    if not rfs.exists(mem):
         return {"model": model or V.DEFAULT, "notes": 0, "embedded": 0, "explained": [], "points": []}
     m = mem.replace("'", "''")
     total = relic._rows(f"SELECT count(*) AS n FROM read_parquet('{m}')")[0]["n"]
-    key = ("memory", os.path.getmtime(mem), model or "", total, os.path.getmtime(vd) if os.path.isdir(vd := os.path.join(root, V.VDIR, model or V.DEFAULT)) else 0)
+    key = ("memory", rfs.getmtime(mem), model or "", total, rfs.getmtime(vd) if rfs.isdir(vd := os.path.join(root, V.VDIR, model or V.DEFAULT)) else 0)
     hit = _get(relic, key)
     if hit is not None:
         return hit

@@ -12,6 +12,7 @@ from datetime import datetime as _datetime
 from . import __version__
 from .parts import MONTH_STREAMS, Parts, this_month
 from .types_ import JobEvent, Json
+from . import store as rfs
 
 
 BACKUP_STALE_S = 36 * 3600   # nightly, plus a day of slack (relic4-scan, 2026-10-24)
@@ -37,7 +38,7 @@ def copy_of(root: str) -> Json | None:
     at). It is not live: nothing pushes to it, so freshness, backup and seal-day checks are off and the UI says so."""
     p = os.path.join(root, "COPY.json")
     try:
-        c: Json = json.load(open(p))
+        c: Json = rfs.read_json(p)
         return c
     except (OSError, ValueError):
         return None
@@ -62,14 +63,14 @@ def status(root: str, now: _datetime | None = None) -> Json:
                     at = time.strftime("%FT%T%z", time.localtime(mv["mtime"]))
                     e["pushed_at"] = max(e["pushed_at"] or "", at)
     for m in p.machines():
-        if not os.path.isfile(os.path.join(p.dir, m, "meta", "sessions.parquet")):
+        if not rfs.isfile(os.path.join(p.dir, m, "meta", "sessions.parquet")):
             warnings.append(f"machine {m}: no meta/sessions.parquet (sessions and repo filters miss it)")
     versions: dict[str, Json] = {}
     for m in p.machines():
         vp = os.path.join(p.dir, m, "_versions.json")
-        if os.path.isfile(vp):
+        if rfs.isfile(vp):
             try:
-                versions[m] = __import__("json").load(open(vp))
+                versions[m] = rfs.read_json(vp)
             except ValueError:
                 warnings.append(f"machine {m}: unreadable _versions.json")
     chained = {m: v for m, v in versions.items() if not m.endswith("-import")}   # an import is a one-off push, not a machine with a chain
@@ -86,7 +87,7 @@ def status(root: str, now: _datetime | None = None) -> Json:
     from .fts import current, search_dir
     import json as _json
     sp = os.path.join(search_dir(p.root), "state.json")
-    fst = _json.load(open(sp)) if os.path.exists(sp) else {}
+    fst = rfs.read_json(sp) if rfs.exists(sp) else {}
     live = current(p.root)
     fts = {"at": max((v["built"] for k, v in fst.items() if k in live), default=None),
            "rows": {k: v["rows"] for k, v in fst.items() if k in live}}
@@ -122,7 +123,7 @@ def status(root: str, now: _datetime | None = None) -> Json:
     elif backup["age_s"] is not None and backup["age_s"] > BACKUP_STALE_S:
         warnings.append(f"last backup {backup['age_s'] // 3600} h ago, at {backup['at']} (should run nightly)")
     vp = os.path.join(search_dir(p.root), "vectors.json")
-    vs = _json.load(open(vp)) if os.path.exists(vp) else {"at": None, "models": {}}
+    vs = rfs.read_json(vp) if rfs.exists(vp) else {"at": None, "models": {}}
     vectors = {"at": vs["at"], "pending": sum(v["pending"] for w in vs["models"].values() for v in w.values()) if vs["models"] else rows["text"],
                "models": vs["models"], "tables": {k: v["rows"] for k, v in fst.items() if k in live and k.startswith("vec_")}}
     # freshness: how far behind each machine and each index is (relic-chain runs every 10 min on m5, 2026-10-23)
@@ -146,16 +147,16 @@ def status(root: str, now: _datetime | None = None) -> Json:
             warnings.append(f"machine {m}: last push {age // 60} min ago (relic-chain should push every 10 min)")
     for m in p.machines():   # the chain's own verdict (relic-chain SYNC OK / MISMATCH), as last pushed
         sp_ = os.path.join(p.dir, m, "_sync.json")
-        if os.path.isfile(sp_):
+        if rfs.isfile(sp_):
             try:
-                line = __import__("json").load(open(sp_)).get("line", "")
+                line = rfs.read_json(sp_).get("line", "")
             except ValueError:
                 continue
             fresh["machines"].setdefault(m, {})["sync"] = line
             if "MISMATCH" in line:
                 warnings.append(f"machine {m}: {line}")
     ip = os.path.join(p.root, "index", "_search", "current.json")
-    fresh["fts"]["age_s"] = round(t_now - os.path.getmtime(ip)) if os.path.exists(ip) else None
+    fresh["fts"]["age_s"] = round(t_now - rfs.getmtime(ip)) if rfs.exists(ip) else None
     from . import selfknow
     store, res = selfknow.store(p.root), selfknow.resources()
     warnings += [w.replace("on the hub", "on this machine (a copy of the hub)") if copy else w for w in selfknow.warnings(store, res)]
