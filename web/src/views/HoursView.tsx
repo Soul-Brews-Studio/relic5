@@ -17,6 +17,77 @@ interface Day { date: string; daily: Note | null; day: Reading[]; munin: Note[];
   notes_newest: string | null; readings_files: string[] }
 interface Days { days: { date: string; huginn: number; readings: number }[] }
 
+interface MonthRow { month: string; days_read: number; huginn_daily: number; day_types: Record<string, number>; recap: boolean }
+interface MonthDay { date: string; huginn: string | null; models: { model: string; type?: string; focus?: string }[] }
+
+/** Day types in a fixed order and colour (never cycled): what the models called each day. */
+const TYPES: [string, string][] = [["build", "var(--accent)"], ["mixed", "var(--amber)"], ["research", "var(--tool)"], ["ops", "var(--ok)"],
+  ["fix", "var(--danger)"], ["writing", "var(--code)"]];
+const typeColor = (t?: string) => TYPES.find(x => x[0] === t)?.[1] ?? "var(--muted)";
+
+/** Every month as one stacked bar (day readings by type), oldest left; a month opens as a strip of its days, a day
+ *  opens the hour-by-hour view below (GET /api/hours/months). */
+function Overall({ on, pick }: { on: boolean; pick: (d: string) => void }) {
+  const all = usePoll<{ months: MonthRow[] }>("/api/hours/months", 0, on);
+  const [month, setMonth] = useState<string | null>(null);
+  const one = usePoll<{ month: string; recap: string | null; days: MonthDay[] }>(month ? `/api/hours/months?month=${month}` : null, 0, on);
+  const ms = [...(all.data?.months ?? [])].reverse();
+  if (!ms.length) return null;
+  const max = Math.max(...ms.map(m => Object.values(m.day_types).reduce((a, b) => a + b, 0)), 1);
+  const H = 120, W = 34, G = 10;
+  return (
+    <section className="mb-10">
+      <SectionHead sub="Each bar is a month: the day readings of gb300 and z.ai, by what kind of day they called it. Click a month for its days.">Overall</SectionHead>
+      <div className="mb-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
+        {TYPES.map(([t, c]) => <span key={t} className="inline-flex items-center gap-1.5"><span className="size-2.5 rounded-sm" style={{ background: c }} />{t}</span>)}
+        <span className="inline-flex items-center gap-1.5"><span className="size-2.5 rounded-sm bg-muted" />other</span>
+      </div>
+      <div className="overflow-x-auto">
+        <svg width={ms.length * (W + G)} height={H + 40} role="img" aria-label="Day readings per month by type">
+          {ms.map((m, i) => {
+            let y = H;
+            const x = i * (W + G), on = m.month === month;
+            const segs = [...TYPES.map(t => t[0]), ...Object.keys(m.day_types).filter(t => !TYPES.some(x => x[0] === t))];
+            const total = Object.values(m.day_types).reduce((a, b) => a + b, 0);
+            return (
+              <g key={m.month} onClick={() => setMonth(on ? null : m.month)} className="cursor-pointer">
+                <title>{`${m.month}: ${m.days_read} days read, ${m.huginn_daily} Huginn daily, ${Object.entries(m.day_types).map(([k, v]) => `${k} ${v}`).join(", ")}`}</title>
+                <rect x={x - 3} y={0} width={W + 6} height={H + 36} rx={6} fill={on ? "var(--accent-wash)" : "transparent"} />
+                {segs.map(t => {
+                  const v = m.day_types[t] ?? 0;
+                  if (!v) return null;
+                  const h = (v / max) * H; y -= h;
+                  return <rect key={t} x={x} y={y + 1} width={W} height={Math.max(h - 2, 1)} rx={2} fill={typeColor(t)} />;
+                })}
+                <text x={x + W / 2} y={H + 14} textAnchor="middle" className="fill-[var(--muted)] font-mono" fontSize={10}>{m.month.slice(2)}</text>
+                <text x={x + W / 2} y={H + 28} textAnchor="middle" className="fill-[var(--faint)] font-mono" fontSize={9}>{m.huginn_daily ? `H${m.huginn_daily}` : total ? "" : "·"}</text>
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+      {month && one.data && (
+        <div className="mt-4 rounded-2xl border border-line bg-panel p-5">
+          <div className="mb-3 flex items-baseline gap-3"><b className="font-mono text-lg text-text">{month}</b>
+            <span className="text-xs text-muted">{one.data.days.length} days · {one.data.recap ? "sealed recap below" : "no sealed recap yet"} · square = the day's type, dot = Huginn wrote a daily</span></div>
+          <div className="flex flex-wrap gap-1.5">
+            {one.data.days.map(d => {
+              const z = d.models.find(m => m.model.startsWith("zai")) ?? d.models[0];
+              return (
+                <button key={d.date} type="button" onClick={() => pick(d.date)} title={`${d.date} · ${z?.type ?? "not read"} · ${z?.focus ?? ""}`}
+                  className="relative grid size-9 place-items-center rounded-md font-mono text-xs font-bold text-[var(--deep)] hover:outline hover:outline-2 hover:outline-[var(--text)]"
+                  style={{ background: z ? typeColor(z.type) : "var(--raised)" }}>
+                  {d.date.slice(8)}{d.huginn && <span className="absolute -top-0.5 -right-0.5 size-2 rounded-full border border-[var(--panel)] bg-[var(--text)]" />}
+                </button>);
+            })}
+          </div>
+          {one.data.recap && <details className="mt-4"><summary className="cursor-pointer text-sm font-semibold text-accent">The month's sealed recap</summary>
+            <div className="mt-3 max-w-[80ch] text-sm"><Markdown text={one.data.recap} /></div></details>}
+        </div>)}
+    </section>
+  );
+}
+
 const today = () => new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10);
 const shift = (d: string, n: number) => new Date(Date.parse(d + "T00:00:00Z") + n * 86400e3).toISOString().slice(0, 10);
 const said = (s?: string) => !!s && s.trim().toLowerCase() !== "none";
@@ -79,6 +150,8 @@ export function HoursView({ on }: { on: boolean }) {
               {c.date.slice(5)}<span className="ml-1.5 text-faint">{c.huginn || "·"}/{c.readings ? num(c.readings) : "·"}</span>
             </button>))}
         </div>)}
+      <Overall on={on} pick={x => { setDate(x); requestAnimationFrame(() => document.getElementById("hours-day")?.scrollIntoView({ behavior: "smooth" })); }} />
+      <div id="hours-day" />
       {d.error && <State error>{d.error}</State>}
       {!x && !d.error && <Loading label="Reading the day" />}
       {x && <>

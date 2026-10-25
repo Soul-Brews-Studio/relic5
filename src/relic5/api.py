@@ -728,6 +728,15 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
         except ValueError as ex:
             return JSONResponse({"error": str(ex)}, status_code=400)
 
+    @app.get("/api/hours/months", response_model=None)
+    @cached(300)
+    def hours_months(month: str = "") -> Json | JSONResponse:
+        from . import ravens
+        try:
+            return ravens.months(relic, month or None)
+        except ValueError as ex:
+            return JSONResponse({"error": str(ex)}, status_code=400)
+
     @app.get("/api/hours/days", response_model=None)
     @cached(300)
     def hours_days(limit: int = 60) -> Json:
