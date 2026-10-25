@@ -68,3 +68,18 @@ def test_a_home_with_folders_before_its_sessions():
     assert home("/Users/Shared/nat-export/.claude/rescued-from-white/full-backup-2026-02-06/-Users-nat-x/s.jsonl") == \
         "/Users/Shared/nat-export/.claude/rescued-from-white/full-backup-2026-02-06"
     assert home("/Users/beta/notes/s.jsonl") is None
+    assert home("/Users/beta/.omp/agent/sessions/--opt-x--/2026-10-14T09_01a1/s.jsonl") == "/Users/beta/.omp/agent"
+    assert home("/opt/Code/github.com/x/thClaws/.thclaws/state/sessions/s.jsonl") == "/opt/Code/github.com/x/thClaws/.thclaws"
+    assert home("/Users/beta/.relic-mirrors/white-ampere-codex/2026/09/19/r.jsonl") == "/Users/beta/.relic-mirrors/white-ampere-codex"
+    assert home("/home/nat/.tmp/projects-bak/-home-nat-x/s.jsonl") == "/home/nat/.tmp"
+
+
+def test_other_agents_homes_and_copies():
+    from relic5.query import home_kind
+    assert home_kind("/Users/beta/.omp/agent")["kind"] == "user"
+    assert home_kind("/opt/Code/github.com/x/thClaws/.thclaws")["kind"] == "project"
+    assert home_kind("/Users/beta/.relic-mirrors/white-ampere-codex")["kind"] == "mirror"
+    assert home_kind("/Users/beta/.codex/from-white")["kind"] == "mirror"
+    assert home_kind("/home/nat/.tmp")["kind"] == "backup"
+    assert home_kind("/Users/nat/.claude-backup-2026-02-06/.claude")["kind"] == "backup"
+    assert home_kind("/Users/nat/.codex-team-removed/7_20260706_1914")["kind"] == "backup"
