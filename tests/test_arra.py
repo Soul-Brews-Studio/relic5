@@ -10,8 +10,21 @@ H = {"Authorization": "Bearer tok-m5"}
 STUDIO = "https://studio.buildwithoracle.com"
 
 
+NOTE_COLS = ["key", "msgkey", "chunk", "ts", "cat", "vault", "path", "section", "title", "text"]
+
+
 @pytest.fixture
 def client(root):
+    from conftest import write_parquet
+    import os
+    write_parquet(os.path.join(root, "parts/m5/vault/notes.parquet"), NOTE_COLS, [
+        {"key": "k1", "msgkey": "n1", "chunk": 0, "ts": "2026-10-20T00:00:00Z", "cat": "neo-oracle", "vault": "neo", "section": "memory/learnings",
+         "path": "memory/learnings/hub.md", "title": "hub", "text": "the hub keeps every session"},
+        {"key": "k2", "msgkey": "n2", "chunk": 0, "ts": "2026-10-21T00:00:00Z", "cat": "neo-oracle", "vault": "neo", "section": "memory/retrospectives",
+         "path": "memory/retrospectives/day.md", "title": "day", "text": "what went well on the hub"},
+        {"key": "k3", "msgkey": "n3", "chunk": 0, "ts": "2026-10-22T00:00:00Z", "cat": "neo-oracle", "vault": "neo", "section": "memory/resonance",
+         "path": "memory/resonance/soul.md", "title": "soul", "text": "I am neo"},
+    ])
     tokens = {"m5": "tok-m5"}
     return TestClient(make_app(root, tokens, Doors(tokens, enabled=False)))
 
@@ -19,14 +32,16 @@ def client(root):
 def test_studio_reads_the_shapes_it_expects(client):
     assert client.get("/arra/api/health", headers=H).json()["server"] == "relic5"
     st = client.get("/arra/api/stats", headers=H).json()
-    assert {"total", "by_type", "vector"} <= st.keys()
+    assert st["total"] == 3 and st["by_type"] == {"learning": 1, "retro": 1, "principle": 1}   # the ψ notes
+    assert client.get("/arra/api/list?type=retro", headers=H).json()["results"][0]["source_file"] == "memory/retrospectives/day.md"
+    assert client.get("/arra/api/file?path=memory/learnings/hub.md", headers=H).text == "the hub keeps every session"
     feed = client.get("/arra/api/feed?limit=10", headers=H).json()
     assert {"events", "total", "active_oracles"} <= feed.keys()
     lst = client.get("/arra/api/list?limit=5", headers=H).json()
     assert lst["results"] and {"id", "type", "content", "source_file", "concepts"} <= lst["results"][0].keys()
     assert lst["results"][0]["type"] in ("principle", "learning", "retro")
     s = client.get("/arra/api/search?q=hub&limit=5", headers=H).json()
-    assert s["query"] == "hub" and isinstance(s["results"], list)
+    assert {d["id"] for d in s["results"]} == {"n1", "n2"}
     m = client.get("/arra/api/map3d", headers=H).json()
     assert {"documents", "total"} <= m.keys()                       # empty without a vector index, never an error
     g = client.get("/arra/api/graph", headers=H).json()
