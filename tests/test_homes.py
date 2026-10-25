@@ -50,3 +50,21 @@ def test_home_kinds_and_owners():
     assert home_kind("/opt/Code/_archive/oracle-world/neo-2026-06-10/.claude", "beta@m5") == {"user": "beta", "kind": "project", "label": "/opt/Code/_archive/oracle-world/neo-2026-06-10/.claude"}
     assert home_kind("/Users/nat/Code/exp/.claude-hello/.claude")["kind"] == "project"
     assert home_kind(None, "nat@m5")["kind"] == "unknown"
+    assert home_kind("/Users/nat/.codex-team/1")["kind"] == "extra"
+    assert home_kind("/Users/nat/.codex-team-attic/slot-3-dead-20260726-130229")["kind"] == "backup"
+    assert home_kind("/opt/Code/_archive/oracle-world/nat-2026-06-10/.codex/path-migration-backup-20260530-134816")["kind"] == "backup"
+    assert home_kind("/Users/Shared/nat-export/.claude/rescued-from-white-20260726/full-backup-2026-02-06")["kind"] == "backup"
+    assert home_kind("/Users/Shared/nat-export/.claude/rescued-from-white-20260726/full-backup-2026-02-06")["user"] == "nat"
+
+
+def test_a_home_with_folders_before_its_sessions():
+    import duckdb
+    from relic5.fts import HOME_SQL
+    def home(p):
+        return duckdb.sql(f"SELECT {HOME_SQL} FROM (SELECT '{p}' AS src_path)").fetchone()[0]
+    assert home("/Users/nat/.claude/projects/-Users-nat-x/sid/subagents/a.jsonl") == "/Users/nat/.claude"
+    assert home("/Users/beta/.codex/sessions/2026/05/18/r.jsonl") == "/Users/beta/.codex"
+    assert home("/Users/nat/.codex-team/1/sessions/2026/06/18/r.jsonl") == "/Users/nat/.codex-team/1"
+    assert home("/Users/Shared/nat-export/.claude/rescued-from-white/full-backup-2026-02-06/-Users-nat-x/s.jsonl") == \
+        "/Users/Shared/nat-export/.claude/rescued-from-white/full-backup-2026-02-06"
+    assert home("/Users/beta/notes/s.jsonl") is None
