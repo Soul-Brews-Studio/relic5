@@ -106,7 +106,9 @@ def chain(root: str, rid: str) -> Json:
     for s in steps:
         depth[s["id"]] = depth.get(s["parent"] or "", -1) + 1 if s["parent"] else 0
         s["depth"] = depth[s["id"]]
-    return {"root": top, "id": rid, "steps": steps, "searches": sum(1 for s in steps if s["tool"] == "relic_search"),
+    found = [{"at": s["at"], "client": s["client"], **{k: (s.get("args") or {}).get(k) for k in ("goal", "how", "found", "links")}}
+             for s in steps if s["tool"] == "relic_found"]
+    return {"root": top, "id": rid, "steps": steps, "found": found, "searches": sum(1 for s in steps if s["tool"] == "relic_search"),
             "opened": sum(1 for s in steps if s["tool"] in ("relic_show", "relic_session")),
             "first": steps[0]["at"] if steps else None, "last": steps[-1]["at"] if steps else None}
 
@@ -119,7 +121,7 @@ def chains(root: str, limit: int = 30) -> list[Json]:
             continue
         k = str(r.get("root") or r["id"])
         c = by.setdefault(k, {"root": k, "steps": 0, "searches": 0, "opened": 0, "query": None, "first": r.get("at"), "last": None,
-                              "clients": []})
+                              "clients": [], "goal": None, "found": None})
         c["steps"] += 1
         c["last"], c["_n"] = r.get("at"), n
         if r.get("tool") == "relic_search":
@@ -127,6 +129,9 @@ def chains(root: str, limit: int = 30) -> list[Json]:
             c["query"] = c["query"] or r.get("query")
         elif r.get("tool") in ("relic_show", "relic_session"):
             c["opened"] += 1
+        elif r.get("tool") == "relic_found":
+            a = r.get("args") or {}
+            c["goal"], c["found"] = a.get("goal"), a.get("found")
         cl = r.get("client")
         if cl and cl not in c["clients"]:
             c["clients"].append(cl)

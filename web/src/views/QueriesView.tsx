@@ -8,6 +8,7 @@ import { post, usePoll } from "../api";
 import { bkk, num, shortRepo } from "../format";
 import { DataTable, type Col } from "../components/DataTable";
 import { Btn, Chip, cx, Hint, inputCls, Lbl, Loading, PageHead, SectionHead, Seg, Stat, State, Stats } from "../components/ui";
+import { HourBars, Latency } from "../components/AskedCharts";
 import type { AccessPage, AskedStats, ChainRow, Queries, QueryRow, SavedSearch, TraceChain, TraceStep } from "../types";
 
 type Pane = "overview" | "log" | "chains" | "saved";
@@ -27,69 +28,7 @@ function openSearch(args: Record<string, unknown>) {
 }
 
 const short = (c?: string | null) => (c ?? "").replace(/ \((mcp|http)\)$/, "");
-const TOOL: Record<string, string> = { relic_search: "search", relic_show: "opened", relic_session: "session", relic_sessions: "sessions", relic_trace: "trace", relic_saved: "saved", relic_status: "status" };
-
-// ---- charts: inline SVG, one axis each, thin marks, a readout line for hover ----------------------------------
-
-function HourBars({ s }: { s: AskedStats }) {
-  const [hov, setHov] = useState(-1);
-  const H = 120, max = Math.max(1, ...s.hours.map(h => h.n)), n = s.hours.length || 1;
-  const h = s.hours[hov];
-  return (
-    <figure className="m-0 min-w-0">
-      <figcaption className="mb-2 flex flex-wrap items-baseline gap-x-4 gap-y-1 text-sm">
-        <span className="font-bold text-text">Calls per hour</span>
-        <span className="inline-flex items-center gap-1.5 text-muted"><i className="inline-block size-2.5 rounded-sm bg-accent" />answered</span>
-        <span className="inline-flex items-center gap-1.5 text-muted"><i className="inline-block size-2.5 rounded-sm bg-amber" />search with zero hits</span>
-        <span className="ml-auto font-mono text-xs text-muted tabular-nums" aria-live="polite">
-          {h ? `${bkk(h.hour + ":00:00Z")} · ${h.n} calls · ${h.searches} searches · ${h.zero} zero` : `peak ${max} an hour`}</span>
-      </figcaption>
-      <svg viewBox={`0 0 ${n * 10} ${H}`} preserveAspectRatio="none" className="block h-[120px] w-full" role="img"
-        aria-label={`Calls per hour over ${s.window_h} hours, peak ${max}`} onMouseLeave={() => setHov(-1)}>
-        <line x1="0" x2={n * 10} y1={H - 0.5} y2={H - 0.5} stroke="var(--line-strong)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
-        {s.hours.map((x, i) => {
-          const all = (x.n / max) * (H - 4), z = (x.zero / max) * (H - 4);
-          return (
-            <g key={x.hour} onMouseEnter={() => setHov(i)}>
-              <rect x={i * 10} y="0" width="10" height={H} fill="transparent" />
-              <rect x={i * 10 + 1.5} y={H - all} width="7" height={Math.max(0, all - z - (z ? 0.6 : 0))} rx="1" fill="var(--accent)" opacity={hov === -1 || hov === i ? 1 : 0.45} />
-              {z > 0 && <rect x={i * 10 + 1.5} y={H - z} width="7" height={z} fill="var(--amber)" opacity={hov === -1 || hov === i ? 1 : 0.45} />}
-            </g>
-          );
-        })}
-      </svg>
-      <div className="mt-1 flex justify-between font-mono text-xs text-faint"><span>{s.hours[0] ? bkk(s.hours[0].hour + ":00:00Z") : ""}</span><span>now</span></div>
-    </figure>
-  );
-}
-
-function Latency({ s }: { s: AskedStats }) {
-  const [hov, setHov] = useState(-1);
-  const H = 120, pts = s.hours, max = Math.max(1, ...pts.map(h => h.p95_ms ?? 0)), n = pts.length || 1;
-  const y = (v: number | null) => (v == null ? null : H - 4 - (v / max) * (H - 10));
-  const line = (k: "p50_ms" | "p95_ms") => pts.map((h, i) => { const v = y(h[k]); return v == null ? "" : `${i * 10 + 5},${v}`; }).filter(Boolean).join(" ");
-  const h = pts[hov];
-  return (
-    <figure className="m-0 min-w-0">
-      <figcaption className="mb-2 flex flex-wrap items-baseline gap-x-4 gap-y-1 text-sm">
-        <span className="font-bold text-text">Answer time</span>
-        <span className="inline-flex items-center gap-1.5 text-muted"><i className="inline-block h-0.5 w-3 bg-accent" />p50</span>
-        <span className="inline-flex items-center gap-1.5 text-muted"><i className="inline-block h-0.5 w-3 bg-amber" />p95</span>
-        <span className="ml-auto font-mono text-xs text-muted tabular-nums" aria-live="polite">
-          {h ? `${bkk(h.hour + ":00:00Z")} · p50 ${h.p50_ms ?? "–"} ms · p95 ${h.p95_ms ?? "–"} ms` : `top of scale ${num(max)} ms`}</span>
-      </figcaption>
-      <svg viewBox={`0 0 ${n * 10} ${H}`} preserveAspectRatio="none" className="block h-[120px] w-full" role="img"
-        aria-label={`p50 and p95 answer time per hour, highest p95 ${max} ms`} onMouseLeave={() => setHov(-1)}>
-        <line x1="0" x2={n * 10} y1={H - 0.5} y2={H - 0.5} stroke="var(--line-strong)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
-        {hov >= 0 && <line x1={hov * 10 + 5} x2={hov * 10 + 5} y1="0" y2={H} stroke="var(--line-strong)" vectorEffect="non-scaling-stroke" />}
-        <polyline points={line("p95_ms")} fill="none" stroke="var(--amber)" strokeWidth="2" vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
-        <polyline points={line("p50_ms")} fill="none" stroke="var(--accent)" strokeWidth="2" vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
-        {pts.map((x, i) => <rect key={x.hour} x={i * 10} y="0" width="10" height={H} fill="transparent" onMouseEnter={() => setHov(i)} />)}
-      </svg>
-      <div className="mt-1 flex justify-between font-mono text-xs text-faint"><span>{pts[0] ? bkk(pts[0].hour + ":00:00Z") : ""}</span><span>now</span></div>
-    </figure>
-  );
-}
+const TOOL: Record<string, string> = { relic_found: "found", relic_search: "search", relic_show: "opened", relic_session: "session", relic_sessions: "sessions", relic_trace: "trace", relic_saved: "saved", relic_status: "status" };
 
 function Bars({ rows, label }: { rows: { k: string; n: number }[]; label: string }) {
   const max = Math.max(1, ...rows.map(r => r.n));
@@ -184,6 +123,23 @@ function Log({ on, openChain }: { on: boolean; openChain: (id: string) => void }
 
 function Step({ s, onSave }: { s: TraceStep; onSave: (s: TraceStep) => void }) {
   const search = s.tool === "relic_search";
+  if (s.tool === "relic_found") {
+    const a = (s.args ?? {}) as { goal?: string; how?: string; found?: string; links?: string[] };
+    return (
+      <li className="relative pb-5 pl-6" style={{ marginLeft: `${Math.min(s.depth, 6) * 1.5}rem` }}>
+        <span className="absolute top-1.5 left-0 size-2.5 rounded-full bg-ok" aria-hidden />
+        <div className="rounded-xl bg-ok-wash px-4 py-3">
+          <div className="flex flex-wrap items-baseline gap-x-3"><span className="text-xs font-bold tracking-[0.12em] text-ok uppercase">found</span><b className="min-w-0 break-words text-text">{a.found}</b></div>
+          <dl className="m-0 mt-2 grid grid-cols-[5rem_minmax(0,1fr)] gap-x-3 gap-y-1 text-sm">
+            <dt className="text-muted">looked for</dt><dd className="m-0 break-words text-soft">{a.goal}</dd>
+            {a.how && <><dt className="text-muted">how</dt><dd className="m-0 break-words text-soft">{a.how}</dd></>}
+            {!!a.links?.length && <><dt className="text-muted">links</dt><dd className="m-0 flex flex-col font-mono text-xs break-all text-accent">{a.links.map(l => <span key={l}>{l}</span>)}</dd></>}
+          </dl>
+          <div className="mt-2 font-mono text-xs text-faint"><time>{bkk(s.at)}</time> · {short(s.client) || s.door} · #{s.id}</div>
+        </div>
+      </li>
+    );
+  }
   return (
     <li className="relative pb-5 pl-6" style={{ marginLeft: `${Math.min(s.depth, 6) * 1.5}rem` }}>
       <span className={cx("absolute top-1.5 left-0 size-2.5 rounded-full", search ? "bg-accent" : "border-2 border-amber bg-bg")} aria-hidden />
@@ -226,6 +182,7 @@ function Chain({ id, close, onSave }: { id: string; close: () => void; onSave: (
         <button type="button" onClick={close} className="min-h-11 rounded-lg px-2 text-sm font-semibold text-accent">← All chains</button>
         <h2 className="m-0 text-base font-bold text-text">Chain #{c.root}</h2>
         <span className="text-sm text-muted">{c.steps.length} steps · {c.searches} searches · {c.opened} opened · {bkk(c.first)} → {bkk(c.last)}</span>
+        {c.found.length > 0 ? <Chip tone="ok">found</Chip> : <Chip>no answer noted</Chip>}
       </div>
       <ol className="m-0 list-none border-l border-line p-0 pl-1">{c.steps.map(s => <Step key={s.id} s={s} onSave={onSave} />)}</ol>
       <Hint>GET /api/trace?id={c.id} · MCP relic_trace {"{"}"id": "{c.id}"{"}"}</Hint>
@@ -240,7 +197,11 @@ function Chains({ on, open, setOpen, onSave }: { on: boolean; open: string; setO
   if (!p.data) return <Loading label="Reading the chains" />;
   const cols: Col<ChainRow>[] = [
     { key: "l", head: "last (+07)", w: "w-32", cell: r => <time>{bkk(r.last)}</time> },
-    { key: "q", head: "first search", lead: true, cell: r => r.query ?? <span className="font-mono text-muted">#{r.root}</span> },
+    { key: "q", head: "looked for", lead: true, cell: r => (
+      <span className="min-w-0">
+        <span className="block truncate">{r.goal ?? r.query ?? <span className="font-mono text-muted">#{r.root}</span>}</span>
+        {r.found && <span className="block truncate text-xs text-ok">found: {r.found}</span>}
+      </span>) },
     { key: "s", head: "steps", num: true, w: "w-16", cell: r => r.steps },
     { key: "se", head: "searches", num: true, w: "w-20", cell: r => r.searches },
     { key: "o", head: "opened", num: true, w: "w-20", cell: r => r.opened },
@@ -249,7 +210,8 @@ function Chains({ on, open, setOpen, onSave }: { on: boolean; open: string; setO
   return (
     <>
       <p className="m-0 mb-4 max-w-[75ch] text-sm text-muted">A chain is a search and what followed from it: the hits opened, the narrower searches, the saved-search runs.
-        A tool call joins a chain when it passes <code className="font-mono text-code">parent</code> = the <code className="font-mono text-code">trace.id</code> of the call before it; the Search page does that for you.</p>
+        A tool call joins a chain when it passes <code className="font-mono text-code">parent</code> = the <code className="font-mono text-code">trace.id</code> of the call before it; the Search page does that for you.
+        An agent closes a chain with <code className="font-mono text-code">relic_found</code>: what it looked for, how it searched, and what it found (the MCP server asks every agent to).</p>
       <DataTable rows={p.data.chains} rowKey={r => r.root} cols={cols} onRow={r => setOpen(r.root)} empty="no chains yet: search, then open a hit" />
     </>
   );

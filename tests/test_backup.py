@@ -121,3 +121,17 @@ def test_restore_test_rebuilds_a_snapshot_and_matches(root, tmp_path):
     (tmp_path / "bk/latest/hub-status.json").write_text(json.dumps(dict(json.load(open(st)), rows={"text": 999})))
     r = subprocess.run([os.path.join(REPO, "bin/relic5-restore-test"), str(tmp_path / "bk/latest")], capture_output=True, text=True)
     assert r.returncode == 1 and "DIFFERS" in r.stdout                        # a wrong count fails loudly
+
+
+def test_a_backup_older_than_the_log_tail_is_still_the_last_backup(root):
+    """2026-10-25: a good snapshot from the day before had scrolled out of the 512 KB tail behind index events, and
+    the hub said "no backup yet"."""
+    os.makedirs(os.path.join(root, "logs"), exist_ok=True)
+    at = datetime.now(timezone.utc) - timedelta(hours=20)
+    with open(os.path.join(root, "logs/jobs.jsonl"), "a") as f:
+        f.write(json.dumps(ev(at)) + "\n")
+        for i in range(6000):   # about 700 KB of index events after it
+            f.write(json.dumps({"job": f"index-{i}", "verb": "index", "state": "done", "at": at.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                                "rc": 0, "message": "x" * 40}) + "\n")
+    s = status(root)
+    assert s["backup"]["at"] == at.strftime("%Y-%m-%dT%H:%M:%SZ") and not any("no backup yet" in w for w in s["warnings"])
