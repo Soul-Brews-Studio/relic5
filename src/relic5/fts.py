@@ -356,6 +356,13 @@ class Index:
             return out
 
     def vector(self, model: str, vector: Sequence[float], filt: "VecFilter", limit: int) -> list[Json]:
+        from . import perf
+        t0 = time.perf_counter()
+        out = self._vector_untimed(model, vector, filt, limit)
+        perf.query("vector", (time.perf_counter() - t0) * 1000, len(out), f'model {model}', name="Index.vector")
+        return out
+
+    def _vector_untimed(self, model: str, vector: Sequence[float], filt: "VecFilter", limit: int) -> list[Json]:
         """Nearest prose rows to a unit query vector: exact, in memory (vec.Matrix), best first; _score = cosine."""
         out: list[Json] = []
         for mx in self.matrices(model):
@@ -394,6 +401,13 @@ class Index:
         return sum(tb.count_rows() for part in ("open", "history") if (tb := self._load().get(f"{layer}_{part}")) is not None)
 
     def query(self, layer: str, q: str, where: str | None, limit: int) -> list[Json]:
+        from . import perf
+        t0 = time.perf_counter()
+        out = self._query_untimed(layer, q, where, limit)
+        perf.query("bm25", (time.perf_counter() - t0) * 1000, len(out), f'{layer}: {q}', name=f"Index.query {layer}")
+        return out
+
+    def _query_untimed(self, layer: str, q: str, where: str | None, limit: int) -> list[Json]:
         """BM25 hits of one layer (history + open), best first. A query of two or more words also runs as an exact
         phrase, and those hits come first: with any-term ranking, common words ("to use ego browser to") let longer
         texts outrank the one that says it (12 of 22 known-item misses, eval 2026-10-23). A quoted query is a phrase

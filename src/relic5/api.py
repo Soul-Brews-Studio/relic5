@@ -385,6 +385,7 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
             return JSONResponse({"error": "missing or bad Authorization: Bearer token"}, status_code=401)
         request.state.door = d
         t0 = time.perf_counter()
+        perf.ROUTE.set(request.url.path)   # the queries this request runs are filed under it (perf.query)
         resp = await call_next(request)
         if request.url.path.startswith(("/api/", "/mcp")) and request.url.path != "/api/perf":
             route = request.scope.get("route")

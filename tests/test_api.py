@@ -205,3 +205,13 @@ def test_heavy_answers_are_served_stale_while_they_refresh(monkeypatch):
             break
         time.sleep(0.02)
     assert swr.get("k", 60, slow) == 2 and len(calls) == 2                                    # refreshed behind
+
+
+def test_each_query_is_timed_under_its_name_and_route(client):
+    from relic5 import perf
+    perf.QRING.clear()
+    client.get("/api/search", params={"q": "hub"}, headers=H)
+    client.get("/api/tail", headers=H)
+    qs = {q["name"]: q for q in client.get("/api/perf", headers=H).json()["queries"]}
+    assert any(n.startswith(("Index.query", "Relic5.")) for n in qs if n != "Relic5.tail") and "Relic5.tail" in qs
+    assert "/api/tail" in qs["Relic5.tail"]["routes"] and qs["Relic5.tail"]["sql"].startswith("SELECT")

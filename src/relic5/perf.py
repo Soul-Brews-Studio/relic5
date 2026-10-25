@@ -8,7 +8,7 @@ display each like request?"), and the process's memory and the machine's load ev
 A line: {at, method, path, route, status, ms, bytes, door, q}. route is FastAPI's path template (/api/artifact/{id}),
 so a page groups by it; q is the query string, cut at 200 characters, with any token removed.
 """
-import json, os, re, resource, threading, time
+import contextvars, json, os, re, resource, sys, threading, time
 from collections import deque
 
 
@@ -16,6 +16,8 @@ from . import store as rfs
 from .types_ import Json
 
 RING: deque[Json] = deque(maxlen=5000)
+QRING: deque[Json] = deque(maxlen=20000)   # every query the hub ran: {at, name, kind, ms, rows, route, sql}
+ROUTE: "contextvars.ContextVar[str | None]" = contextvars.ContextVar("relic5_route", default=None)
 SAMPLES: deque[Json] = deque(maxlen=6 * 360)
 _PENDING: list[str] = []
 _LOCK = threading.Lock()
@@ -39,6 +41,32 @@ def record(method: str, path: str, route: str | None, status: int, ms: float, si
     with _LOCK:
         RING.append(line)
         _PENDING.append(json.dumps(line, ensure_ascii=False))
+
+
+def query(kind: str, ms: float, rows: int | None, sql: str = "", name: str | None = None, depth: int = 2) -> None:
+    """One query: its name is the function that ran it (Relic5.tail, Index._fts), unless given."""
+    if name is None:
+        f = sys._getframe(depth)
+        name = f.f_code.co_qualname.split(".<locals>")[0]   # a helper inside a method is filed under the method
+    QRING.append({"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "name": name, "kind": kind, "ms": round(ms, 1),
+                  "rows": rows, "route": ROUTE.get(), "sql": re.sub(r"\s+", " ", sql)[:300]})
+
+
+def queries(minutes: int = 60) -> list[Json]:
+    """Per query name: count, p50, p95, max, rows, the routes that ran it, the slowest SQL seen."""
+    cut = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - minutes * 60))
+    by: dict[str, list[Json]] = {}
+    for q in list(QRING):
+        if q["at"] >= cut:
+            by.setdefault(q["name"], []).append(q)
+    out = []
+    for k, v in by.items():
+        ms = [x["ms"] for x in v]
+        worst = max(v, key=lambda x: x["ms"])
+        out.append({"name": k, "kind": v[0]["kind"], "count": len(v), "p50": _pct(ms, .5), "p95": _pct(ms, .95), "max": max(ms),
+                    "total": round(sum(ms)), "rows": round(sum(x["rows"] or 0 for x in v) / len(v)),
+                    "routes": sorted({x["route"] for x in v if x["route"]}), "sql": worst["sql"]})
+    return sorted(out, key=lambda x: -x["total"])
 
 
 def flush(root: str) -> int:
@@ -92,7 +120,7 @@ def summary(minutes: int = 60, route: str | None = None, slow_ms: float = 1000) 
     pick = [r for r in rows if not route or r["route"] == route]
     return {"minutes": minutes, "requests": len(rows), "routes": routes,
             "slowest": sorted(pick, key=lambda r: -r["ms"])[:50], "recent": pick[-200:][::-1],
-            "samples": [s for s in list(SAMPLES) if s["at"] >= cut + "Z"], "rss_mb": rss_mb(),
+            "samples": [s for s in list(SAMPLES) if s["at"] >= cut + "Z"], "rss_mb": rss_mb(), "queries": queries(minutes),
             "load": [round(x, 2) for x in os.getloadavg()], "cpus": os.cpu_count()}
 
 
