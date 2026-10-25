@@ -130,7 +130,7 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
         from . import selfknow
         return selfknow.clients(relic.parts.root)
 
-    TRACED = {"relic_search", "relic_show", "relic_session", "relic_sessions"}
+    TRACED = {"relic_search", "relic_show", "relic_session", "relic_sessions", "relic_found"}
 
     def logged(relic_: Relic5, tool: str, args: Json, door: str | None, client: str | None = None) -> mcp.ToolReply:
         """Every tool call, MCP or GET, goes through here: one line in logs/queries.jsonl (selfknow.py), with its trace
@@ -138,7 +138,7 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
         from . import trace
         parent = args.get("parent") if isinstance(args, dict) and isinstance(args.get("parent"), str) else None
         rid = trace.new_id()
-        qid, t0 = selfknow.start(tool, door, (args.get("query") or args.get("id") or "") if isinstance(args, dict) else "", client)
+        qid, t0 = selfknow.start(tool, door, (args.get("query") or args.get("goal") or args.get("id") or "") if isinstance(args, dict) else "", client)
         ok, r = mcp.call_tool(relic_, tool, args, door)
         top = None
         try:

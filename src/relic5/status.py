@@ -107,8 +107,12 @@ def status(root: str, now: _datetime | None = None) -> Json:
     copy = copy_of(p.root)
     if not copy:   # a copy gets no pushes, backups or seals of its own: those checks belong to the live hub
         warnings += SD.overdue(seal_days, now)
-    backup = last_backup(evs, now)
-    offsite = last_backup(evs, now, "offsite")   # white -> black RustFS bucket relic5-hub (bin/relic5-offsite)
+    from .jobs import last_done
+    # the tail (evs) first; a nightly event older than the tail is still the last backup, not "no backup yet"
+    backup = last_backup(evs, now) if any(e.get("verb") == "backup" and e.get("state") == "done" for e in evs) \
+        else last_backup([e for e in [last_done(p.root, "backup")] if e], now)
+    offsite = last_backup(evs, now, "offsite") if any(e.get("verb") == "offsite" and e.get("state") == "done" for e in evs) \
+        else last_backup([e for e in [last_done(p.root, "offsite")] if e], now, "offsite")   # white -> black RustFS bucket relic5-hub (bin/relic5-offsite)
     if not copy and offsite["age_s"] is not None and offsite["age_s"] > BACKUP_STALE_S:
         warnings.append(f"last offsite copy {offsite['age_s'] // 3600} h ago, at {offsite['at']} (should run nightly)")
     if copy:

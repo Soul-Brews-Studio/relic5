@@ -76,6 +76,15 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {"action": {**STR, "enum": ["list", "add", "remove"]}, "id": STR, "from": STR,
                                                       "query": STR, "args": {"type": "object"}, "every": {"type": "integer", "minimum": 5},
                                                       "name": STR}, "additionalProperties": False}},
+    {"name": "relic_found", "description": "Close a search with what came of it, so the next agent (and Nat, on the Asked page) can "
+     "see it: what you were looking for (goal), how you searched (how: the words, layers and windows you tried, what did not "
+     "work), and what you found (found; links: the relic5:// links or session ids that answer it). parent is the trace.id of "
+     "the call that found it. The hub adds the chain's own count of searches and opened hits. found: \"nothing\" is worth "
+     "noting too.",
+     "inputSchema": {"type": "object", "properties": {"parent": {**STR, "description": "trace.id of the call that answered (or the last one tried)"},
+                                                      "goal": STR, "how": STR, "found": STR,
+                                                      "links": {"type": "array", "items": {"type": "string"}}},
+                     "required": ["parent", "goal", "found"], "additionalProperties": False}},
     {"name": "relic_status", "description": "Months, per-machine watermarks, totals, jobs and warnings (StatusReport).",
      "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
     {"name": "relic_artifact_put", "description": "Keep something you made for an oracle on the hub: an image (png jpg webp gif svg), "
@@ -88,6 +97,12 @@ TOOLS = [
     {"name": "relic_artifacts", "description": "List the artifacts kept on the hub, newest first: one oracle's, or every oracle's with a count each.",
      "inputSchema": {"type": "object", "properties": {"oracle": STR, "limit": INT}, "additionalProperties": False}},
 ]
+INSTRUCTIONS = (
+    "relic5 holds every machine's Claude Code and Codex history. Search the rarest literal first (an id, a filename, an "
+    "error), not topic words. Every search, show and session result carries trace {id, root, parent}: pass parent=<the "
+    "trace.id you are following> on your next call (opening a hit, a narrower search, another try), so the hub keeps one "
+    "trace chain per question. When you have the answer, or are giving up, call relic_found {parent, goal, how, found, "
+    "links} once: what you looked for, how you searched, and what you found. relic_trace {id} reads a chain back.")
 UNAVAILABLE = {
     "relic_chain": "relic_chain is not available in relic5 (as in relic3 v3)",
     "relic_now": "relic_now is not available in relic5; use relic_sessions with since=1h",
@@ -121,6 +136,20 @@ def _int(a: Json, k: str, minimum: int = 0) -> int | None:
 
 
 def run_tool(relic: Relic5, name: str, a: Json, door: str | None = None) -> Json:
+    if name == "relic_found":
+        from . import trace
+        _check(a, ["parent", "goal", "how", "found", "links"])
+        for k in ("parent", "goal", "how", "found"):
+            _str(a, k)
+        if not a.get("parent") or not a.get("goal") or not a.get("found"):
+            raise UsageError("relic_found needs parent (a trace.id), goal and found")
+        links = a.get("links") or []
+        if not isinstance(links, list) or not all(isinstance(x, str) for x in links):
+            raise UsageError("links must be a list of strings")
+        ch = trace.chain(relic.parts.root, str(a["parent"]))
+        if "error" in ch:
+            raise NotFound(ch["error"])
+        return {"noted": True, "root": ch["root"], "searches": ch["searches"], "opened": ch["opened"], "steps": len(ch["steps"]) + 1}
     if "parent" in a:   # the trace link is the hub's (api.logged), not the tool's
         _str(a, "parent")
         a = {k: v for k, v in a.items() if k != "parent"}
@@ -227,7 +256,7 @@ def handle(relic: Relic5, msg: object, door: str | None = None, call: ToolCall |
     if method == "initialize":
         want = params.get("protocolVersion")
         return _ok(i, {"protocolVersion": want if want in SUPPORTED else SUPPORTED[0],
-                       "capabilities": {"tools": {"listChanged": False}}, "serverInfo": SERVER_INFO})
+                       "capabilities": {"tools": {"listChanged": False}}, "serverInfo": SERVER_INFO, "instructions": INSTRUCTIONS})
     if method == "ping":
         return None if note else _ok(i, {})
     if method == "tools/list":

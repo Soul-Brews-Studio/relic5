@@ -165,8 +165,9 @@ function OraclePage({ name, onBack }: { name: string; onBack: () => void }) {
           {p.words.length > 0 && <section className="rounded-2xl border border-line bg-panel p-5">
             <Lbl>the words its notes use</Lbl>
             <div className="mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-1.5">
-              {p.words.map(([w, n]) => <span key={w} title={`${n} notes`} style={{ fontSize: `${12 + Math.round(10 * Math.log1p(n) / Math.log1p(max))}px` }}
-                className={n / max > 0.5 ? "font-bold text-text" : n / max > 0.25 ? "font-semibold text-soft" : "text-muted"}>{w}</span>)}
+              {p.words.map(([w, n]) => { const r = Math.log1p(n) / Math.log1p(max); return <span key={w} title={`${n} notes`}
+                style={{ fontSize: `${12 + Math.round(10 * r)}px`, color: `color-mix(in srgb, ${repoColor(w)} ${Math.round(50 + 50 * r)}%, var(--muted))` }}
+                className={n / max > 0.5 ? "font-bold" : n / max > 0.25 ? "font-semibold" : ""}>{w}</span>; })}
             </div>
           </section>}
           <section className="rounded-2xl border border-line bg-panel p-5">

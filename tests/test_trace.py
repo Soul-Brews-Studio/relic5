@@ -85,3 +85,22 @@ def test_a_saved_search_runs_as_a_job_in_the_chain_it_came_from(root, monkeypatc
     assert trace.run_due(root, lambda *a: (True, {"hits": []}, None), now=time.time() + 3600) == [sv["id"], added["id"]]
     assert c.post("/api/saved", json={"action": "remove", "id": sv["id"]}, headers=W).json() == {"removed": sv["id"]}
     assert [i["id"] for i in trace.saved(root)] == [added["id"]]
+
+
+def test_an_agent_notes_what_it_found_and_mcp_tells_it_how(root, monkeypatch):
+    monkeypatch.setenv("RELIC5_WARM", "0")
+    c = app(root)
+    init = c.post("/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}}, headers=H).json()
+    assert "relic_found" in init["result"]["instructions"] and "parent" in init["result"]["instructions"]
+    _, s = rpc(c, "relic_search", {"query": "hub"})
+    _, sh = rpc(c, "relic_show", {"id": s["hits"][0]["link"], "parent": s["trace"]["id"]})
+    _, f = rpc(c, "relic_found", {"parent": sh["trace"]["id"], "goal": "where the hub runs", "how": "searched hub, opened the first hit",
+                                  "found": "on white", "links": [s["hits"][0]["link"]]})
+    assert f["noted"] and f["root"] == s["trace"]["id"] and f["searches"] == 1 and f["opened"] == 1 and f["steps"] == 3
+    ch = c.get("/api/trace", params={"id": s["trace"]["id"]}, headers=H).json()
+    assert ch["found"][0]["found"] == "on white" and ch["found"][0]["links"] == [s["hits"][0]["link"]]
+    assert [x["tool"] for x in ch["steps"]][-1] == "relic_found" and ch["steps"][-1]["depth"] == 2
+    _, lst = rpc(c, "relic_trace", {})
+    assert lst["chains"][0]["goal"] == "where the hub runs" and lst["chains"][0]["found"] == "on white"
+    body = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "relic_found", "arguments": {"parent": "nope", "goal": "g", "found": "f"}}}
+    assert c.post("/mcp", json=body, headers=H).json()["result"]["isError"]

@@ -87,8 +87,9 @@ export interface TraceStep {
   id: string; parent: string | null; at: string; door?: string; client?: string; tool: string; query?: string;
   args?: Record<string, unknown>; hits?: number | null; ms?: number; mode?: string | null; error?: string | null; top?: TopHit[]; depth: number;
 }
-export interface TraceChain { root: string; id: string; steps: TraceStep[]; searches: number; opened: number; first: string; last: string }
-export interface ChainRow { root: string; steps: number; searches: number; opened: number; query: string | null; first: string; last: string; clients: string[] }
+export interface FoundNote { at: string; client?: string; goal?: string; how?: string; found?: string; links?: string[] }
+export interface TraceChain { root: string; id: string; steps: TraceStep[]; found: FoundNote[]; searches: number; opened: number; first: string; last: string }
+export interface ChainRow { root: string; steps: number; searches: number; opened: number; query: string | null; first: string; last: string; clients: string[]; goal: string | null; found: string | null }
 export interface AccessPage { rows: QueryRow[]; total: number; next_before: number | null }
 export interface AskedStats {
   hours: { hour: string; n: number; searches: number; zero: number; p50_ms: number | null; p95_ms: number | null }[];

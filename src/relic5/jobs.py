@@ -79,6 +79,41 @@ def _alive(pid: int) -> bool:
         return True
 
 
+_last_done: dict[tuple[str, str], tuple[int, JobEvent | None]] = {}   # (log, verb) -> (log size when found, event)
+
+
+def last_done(root: str, verb: str) -> JobEvent | None:
+    """The newest finished event of one verb anywhere in the log, read backwards from the end in 512 KB steps.
+    read() sees only the last 512 KB, and an index event every 10 minutes pushes a day-old nightly backup out of that
+    (2026-10-25: a good 3.6 GB snapshot on m5, and Home said "no backup yet"). Cached until the log grows."""
+    p = log_path(root)
+    try:
+        size = os.path.getsize(p)
+    except OSError:
+        return None
+    hit = _last_done.get((p, verb))
+    if hit and hit[0] == size:
+        return hit[1]
+    want, found, end, carry = f'"verb": "{verb}"'.encode(), None, size, b""
+    with open(p, "rb") as f:
+        while end > 0 and found is None:
+            start = max(0, end - TAIL)
+            f.seek(start)
+            buf = f.read(end - start) + carry
+            lines = buf.split(b"\n")
+            carry = lines[0] if start > 0 else b""        # a line cut by the step is finished by the next one
+            for line in reversed(lines[1:] if start > 0 else lines):
+                if want in line and b'"state": "done"' in line:
+                    try:
+                        found = json.loads(line)
+                        break
+                    except ValueError:
+                        continue
+            end = start
+    _last_done[(p, verb)] = (size, found)
+    return found
+
+
 def read(root: str, now: float | None = None) -> tuple[list[JobEvent], list[JobEvent]]:
     """-> (last event per job, newest first; running ones)."""
     p = log_path(root)

@@ -55,7 +55,7 @@ uv run relic5 search ภาษาไทย --limit 5   # RELIC5_URL defaults to 
 ```
 
 MCP is the easy way: an agent calls `relic_search`, `relic_show`, `relic_sessions`, `relic_session`, `relic_trace`,
-`relic_saved` and `relic_status` directly. Register it once per machine. `bin/relic5-mcp-headers` reads the 0600 token file, so the token
+`relic_saved`, `relic_found` and `relic_status` directly. Register it once per machine. `bin/relic5-mcp-headers` reads the 0600 token file, so the token
 never sits in `~/.claude.json`:
 
 ```sh
@@ -82,6 +82,10 @@ search "rustfs backup"      #a1  ── relic_show hit 3   parent=#a1
 - `relic_saved {"action": "add", "from": "<trace.id>", "every": 60}` keeps that search as a job. The hub re-runs it,
   puts each run in the chain of the search it came from, and writes a `saved-search` event to the Jobs log saying how
   many hits are new.
+- `relic_found {"parent": "<trace.id>", "goal", "how", "found", "links"}` closes a chain: what the agent looked
+  for, how it searched, and what it found ("nothing" counts). The hub adds the chain's own count of searches and
+  opened hits. The MCP server's `initialize` answer carries instructions that ask every agent to pass `parent` and
+  to call `relic_found` once at the end.
 - The Search page passes `parent` for you. The Asked page shows the charts, the full paged log, the chains and the saved
   searches. Over HTTP: `GET /api/trace`, `/api/access`, `/api/asked`, `/api/saved`, and `POST /api/saved`.
 

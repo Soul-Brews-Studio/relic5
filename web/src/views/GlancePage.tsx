@@ -6,8 +6,9 @@ import { Badge, HealthCard, levelText, levelWord, type Level } from "../componen
 import { Arrow, Disk, Machine, Pulse, Search, Shield, Vector } from "../components/Icons";
 import { syncChip } from "../components/sync";
 import { Resources } from "../components/Resources";
+import { HourBars, Latency } from "../components/AskedCharts";
 import { cx, Stat as Kpi } from "../components/ui";
-import type { JobEvent, Queries, Status } from "../types";
+import type { AskedStats, JobEvent, Queries, Status } from "../types";
 
 /* Home: the glance page inside the hub's shell. The direction contract for the whole hub is in web/index.html. */
 
@@ -50,7 +51,10 @@ function checks(s: Status, evs: JobEvent[]): Check[] {
   const day = evs.filter(e => Date.now() - Date.parse(e.at) < 86400e3), failed = day.filter(e => e.state === "error");
   // a failure the same job kind on the same machine has since finished cleanly is recovered, not failing (mba's push
   // failed at 19:31 on 10-24 and pushed fine every pass after; the card stayed red for 24 h)
-  const same = (a: typeof evs[number], b: typeof evs[number]) => a.verb === b.verb && (a.message ?? a.host) === (b.message ?? b.host);
+  // a failure is over when the same job ran fine after it: the same verb, for the same month when the message names one
+  // (a recap's "written" never repeats its "no file naming…", so matching whole messages kept a fixed recap red for 24 h)
+  const subject = (e: typeof evs[number]) => (e.message ?? "").match(/\b\d{4}-\d{2}\b(?!-\d)/)?.[0] ?? e.host ?? "";
+  const same = (a: typeof evs[number], b: typeof evs[number]) => a.verb === b.verb && subject(a) === subject(b);
   const open = failed.filter(f => !day.some(e => e.state === "done" && same(e, f) && Date.parse(e.at) > Date.parse(f.at)));
   out.push({ key: "jobs", title: "Jobs, 24 h", icon: Pulse, level: open.length ? "failed" : evs.length ? "ok" : "unknown",
     big: `${day.length - failed.length}/${day.length}`,
@@ -112,6 +116,33 @@ function MachineRows({ s, machines }: { s: Status; machines: string[] }) {
 
 /** What people and agents searched lately: the most-asked queries as a cloud (size = how often), the newest ones as a
  *  list; a click runs it again (GET /api/queries; the eval runs' known-item fragments are left out). */
+/** What a searched string is, by its shape: the cloud's colour says it. */
+type Kind = "words" | "thai" | "link" | "id";
+const KINDS: { k: Kind; label: string; c: string }[] = [
+  { k: "words", label: "words", c: "var(--accent)" }, { k: "thai", label: "Thai", c: "var(--ok)" },
+  { k: "id", label: "an id or name", c: "var(--amber)" }, { k: "link", label: "a message link", c: "var(--tool)" },
+];
+const KIND = Object.fromEntries(KINDS.map(k => [k.k, k])) as Record<Kind, (typeof KINDS)[number]>;
+const kindOf = (q: string): Kind => q.startsWith("relic5://") ? "link" : /[\u0E00-\u0E7F]/.test(q) ? "thai"
+  : !/\s/.test(q) && (/\d/.test(q) || /[.\-_/]/.test(q)) ? "id" : "words";
+
+function Asked({ goAsked }: { goAsked: () => void }) {
+  const p = usePoll<AskedStats>("/api/asked?hours=24", 60000);
+  if (!p.data || !p.data.hours.length) return null;
+  const s = p.data;
+  return (
+    <section className="mt-6 rounded-2xl border border-line bg-panel px-6 py-5">
+      <div className="mb-5 flex flex-wrap items-baseline gap-x-4 gap-y-1">
+        <h2 className="m-0 text-base font-bold text-text">Asked, the last 24 hours</h2>
+        <span className="text-sm text-muted">{num(s.calls)} calls · {num(s.searches)} searches · {s.zero_share == null ? "no searches" : `${Math.round(s.zero_share * 1000) / 10}% found nothing`}
+          {s.by_client[0] && ` · most from ${s.by_client[0].client}`}</span>
+        <button type="button" onClick={goAsked} className="ml-auto inline-flex min-h-11 items-center gap-1.5 rounded-lg px-2 text-sm font-semibold text-accent hover:bg-raised">Log, chains, saved searches<Arrow size={16} /></button>
+      </div>
+      <div className="grid gap-8 lg:grid-cols-2"><HourBars s={s} /><Latency s={s} /></div>
+    </section>
+  );
+}
+
 function Searched({ q, search }: { q: Queries | null; search: (q: string) => void }) {
   if (!q) return null;
   const real = (r: { query: string; client?: string | null; tool?: string }) => r.query && r.query.length < 70 && !(r.client ?? "").startsWith("eval");
@@ -119,18 +150,26 @@ function Searched({ q, search }: { q: Queries | null; search: (q: string) => voi
   const recent = [...new Map([...(q.searches ?? []).map(r => ({ ...r, tool: "relic_search" })), ...q.last].filter(r => r.tool === "relic_search" && real(r)).map(r => [r.query.trim(), r] as const)).values()].slice(0, 8);
   if (!top.length && !recent.length) return null;
   const max = Math.max(...top.map(t => t.n), 1);
-  const size = (n: number) => (n / max > 0.66 ? "text-lg font-bold text-text" : n / max > 0.33 ? "text-base font-semibold text-soft" : "text-sm text-muted");
+  const size = (n: number) => (n / max > 0.66 ? "text-lg font-bold" : n / max > 0.33 ? "text-base font-semibold" : "text-sm");
+  const kinds = top.reduce((m, t) => m.add(kindOf(t.query)), new Set<Kind>());
   return (
     <section className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
       <div className="rounded-2xl border border-line bg-panel px-6 py-5">
-        <h2 className="m-0 mb-4 text-base font-bold text-text">Searched most</h2>
+        <div className="mb-4 flex flex-wrap items-baseline gap-x-4 gap-y-1">
+          <h2 className="m-0 text-base font-bold text-text">Searched most</h2>
+          {KINDS.filter(k => kinds.has(k.k)).map(k => <span key={k.k} className="inline-flex items-center gap-1.5 text-xs text-muted"><i className="inline-block size-2 rounded-full" style={{ background: k.c }} />{k.label}</span>)}
+        </div>
         <div className="flex flex-wrap items-baseline gap-x-4 gap-y-2">
-          {top.map(t => (
-            <button key={t.query} type="button" onClick={() => search(t.query)} title={`asked ${t.n} times`}
-              className={cx("rounded-md px-1 py-0.5 text-left leading-snug transition-colors hover:bg-raised hover:text-accent", size(t.n))}>
-              {t.query}<sup className="ml-0.5 font-mono text-xs font-normal text-faint">{t.n}</sup>
-            </button>
-          ))}
+          {top.map(t => {
+            const k = KIND[kindOf(t.query)], w = t.n / max;
+            return (
+              <button key={t.query} type="button" onClick={() => search(t.query)} title={`${k.label}: asked ${t.n} times`}
+                style={{ color: `color-mix(in srgb, ${k.c} ${Math.round(55 + 45 * w)}%, var(--muted))` }}
+                className={cx("rounded-md px-1 py-0.5 text-left leading-snug transition-[background-color,filter] hover:bg-raised hover:brightness-125", size(t.n))}>
+                {t.query}<sup className="ml-0.5 font-mono text-xs font-normal text-faint">{t.n}</sup>
+              </button>
+            );
+          })}
         </div>
       </div>
       <div className="rounded-2xl border border-line bg-panel px-6 py-5">
@@ -219,6 +258,7 @@ export function GlancePage({ s, error, at, openHub, search }: { s: Status | null
         </section>
 
         <Searched q={asked.data} search={search} />
+        <Asked goAsked={() => { location.hash = "tab=queries"; }} />
 
         <Section title="The hub's machine" sub="What the hub holds on white's disk and what it costs the machine right now. The Disk page has the detail.">
           <Resources s={s} />
