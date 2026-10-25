@@ -133,15 +133,20 @@ def files(relic: Any, since: str | None = None, until: str | None = None, projec
 def usage(relic: Any, by: str = "month", group: str = "engine", since: str | None = None, until: str | None = None) -> Json:
     """AI usage from relic-scan's session table (MCP relic_usage): per period and engine (or tier, project, via, version),
     sessions, subagent sessions, messages typed / written, thinking blocks, tool calls, tool results and tool errors. A
-    session counts in the period it started (Bangkok). Model names and tokens are not in the table (relic-scan does not
-    extract them yet)."""
+    session counts in the period it started (Bangkok). Models and tokens come from relic-scan's sessions table once it
+    carries them (relic4-scan #74 / PR #76: models, model_msgs, in_tokens, out_tokens, cache_read_tokens,
+    cache_write_tokens); months indexed before that read NULL and are counted as unknown, never as 0."""
     buckets = {"day": 10, "month": 7, "year": 4}
     if by not in buckets and by != "week":
         raise ValueError("by is one of day, week, month, year")
     groups = {"engine": "engine", "tier": "tier", "project": "coalesce(nullif(cat, ''), '(none)')", "via": "coalesce(nullif(via, ''), 'terminal')",
               "version": "coalesce(nullif(version, ''), '?')", "none": "'all'"}
+    if relic.meta_has("models"):
+        # a session's main model: the first of `models` (most answers first), past Claude Code's own '<synthetic>'
+        groups["model"] = "coalesce(list_filter(models, x -> x <> '<synthetic>')[1], '(unknown)')"
     if group not in groups:
-        raise ValueError(f"group is one of {', '.join(groups)}")
+        hint = " (models are not in the sessions table yet: relic4-scan #74)" if group == "model" else ""
+        raise ValueError(f"group is one of {', '.join(groups)}{hint}")
     meta = relic._meta()
     if not meta:
         return {"rows": []}
@@ -157,6 +162,9 @@ def usage(relic: Any, by: str = "month", group: str = "engine", since: str | Non
         where.append(f"substr({th}, 1, ?) <= ?")
         params += [len(until), until.replace("T", " ")]
     cols = {c for c in ("user_text", "assistant_text", "thinking", "tool_calls", "tool_results", "tool_errors") if relic.meta_has(c)}
+    toks = [c for c in ("in_tokens", "out_tokens", "cache_read_tokens", "cache_write_tokens") if relic.meta_has(c)]
+    tok_sql = "".join(f", sum({c}) AS {c}" for c in toks) + (", count(*) FILTER (WHERE out_tokens IS NOT NULL) AS tokens_known"
+                                                           if "out_tokens" in toks else "")
 
     def s(c: str) -> str:
         return f"sum(coalesce({c}, 0))" if c in cols else "0"
@@ -168,17 +176,19 @@ def usage(relic: Any, by: str = "month", group: str = "engine", since: str | Non
                                   count(*) FILTER (WHERE parent_sid IS NOT NULL AND ({act}) > 0) AS subagents,
                                   count(*) FILTER (WHERE ({act}) = 0) AS empty_sessions, {s('user_text')} AS typed,
                                   {s('assistant_text')} AS written, {s('thinking')} AS thinking, {s('tool_calls')} AS tool_calls,
-                                  {s('tool_results')} AS tool_results, {s('tool_errors')} AS tool_errors
+                                  {s('tool_results')} AS tool_results, {s('tool_errors')} AS tool_errors{tok_sql}
                            FROM {meta} WHERE {' AND '.join(where)} GROUP BY 1, 2 HAVING period IS NOT NULL ORDER BY 1, 2""", params)
     out = [{k: (int(v) if isinstance(v, (int, float)) and k not in ("period", "g") else v) for k, v in r.items()} for r in rows]
     for r in out:
         r[group] = r.pop("g")
     totals: dict[str, int] = {}
     for r in out:
-        for k in ("sessions", "subagents", "empty_sessions", "typed", "written", "thinking", "tool_calls", "tool_errors"):
-            totals[k] = totals.get(k, 0) + r[k]
+        for k in ("sessions", "subagents", "empty_sessions", "typed", "written", "thinking", "tool_calls", "tool_errors",
+                  *toks, *(["tokens_known"] if toks else [])):
+            totals[k] = totals.get(k, 0) + (r.get(k) or 0)
     return {"by": by, "group": group, "rows": out, "totals": totals, "first": out[0]["period"] if out else None,
             "note": "sessions counted in the period they started (Bangkok), only those with a message or a tool call; "
                     "empty_sessions = placeholders with every counter 0 (e.g. jsonl-truth-import shells); typed = the human's "
                     "messages; tool_errors = tool results flagged as errors (is_error: a failed command, a refused edit); "
-                    "model names and token counts are not extracted yet"}
+                    + ("tokens: summed over the sessions that carry them (tokens_known); the others were indexed before "
+                       "relic-scan extracted tokens" if toks else "model names and token counts are not extracted yet")}
