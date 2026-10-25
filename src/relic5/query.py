@@ -71,7 +71,7 @@ def folded(src: str, where: str = "TRUE") -> str:
 
 def home_kind(home: str | None, agent: str | None = None) -> Json:
     """Whose a home is and what kind: the owner from the path (the last /Users/<u>/ or /home/<u>/, so a mirror of nat's
-    ~/.claude under beta's folder is nat's), else relic-scan's user@host; the kind: user (~/.claude, ~/.codex), extra
+    ~/.claude under beta's folder is nat's), else relic-scan's user@host; the kind: user (~/.claude, ~/.codex, ~/.omp/agent, ~/.thclaws), extra
     (another home of the same user: ~/.claude1, ~/.claude-lean), mirror (a copy: .relic3-mirror, .relic-mirrors), backup (a backup or attic
     folder inside a home: .codex/path-migration-backup-*, .codex-team-attic/slot-3-dead),
     export (/Users/Shared/<u>-export), project (a .claude inside a project or an archive), unknown (no src_path)."""
@@ -80,13 +80,13 @@ def home_kind(home: str | None, agent: str | None = None) -> Json:
     owners = re.findall(r"/(?:Users|home)/([^/]+)/", home + "/")
     exp = re.search(r"/Users/Shared/([^/]+?)-export/", home + "/")
     user = (exp.group(1) if exp else None) or next((u for u in reversed(owners) if u != "Shared"), None) or (agent or "").split("@")[0] or None
-    if "/.relic3-mirror/" in home or "/.relic-mirrors/" in home:
+    if "/.relic3-mirror/" in home or "/.relic-mirrors/" in home or re.search(r"/\.(?:claude|codex)[^/]*/from-", home):
         kind = "mirror"
-    elif re.search(r"/\.(?:claude|codex)[^/]*(?:-attic/|/.*(?:backup|attic|rescued|-dead))", home):
+    elif re.search(r"/\.[^/]+.*(?:backup|attic|rescued|-dead|-removed)|/\.tmp$", home):
         kind = "backup"
     elif exp:
         kind = "export"
-    elif re.fullmatch(r"/(?:Users|home)/[^/]+/\.(?:claude|codex)", home):
+    elif re.fullmatch(r"/(?:Users|home)/[^/]+/\.(?:claude|codex|thclaws|omp/agent)", home):   # other agents' own homes too
         kind = "user"
     elif re.fullmatch(r"/(?:Users|home)/[^/]+/\.(?:claude|codex)(?:[^/]+|[^/]*/[^/]+)", home):   # ~/.claude1, ~/.codex-team/1
         kind = "extra"

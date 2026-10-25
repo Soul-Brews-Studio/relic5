@@ -52,7 +52,10 @@ agent, relic-scan's user@host. Tables built before this have none of them (index
 # with any folders under the home before projects/, sessions/ or a Claude project folder (-Users-...):
 # .codex-team/1/sessions, .codex/path-migration-backup-*/sessions, .claude/rescued-*/full-backup-*/-Users-nat-x
 # (2026-10-25: those left 1,587 sessions without a home)
-HOME_SQL = r"nullif(regexp_extract(src_path, '^(.*/\.(?:claude|codex)[^/]*(?:/[^/]+)*?)/(?:(?:projects|sessions|backups|archived)[^/]*|-[^/]+)/', 1), '')"
+# other agents' homes and copies that hold no .claude/.codex: ~/.omp/agent/sessions, <repo>/.thclaws/sessions,
+# ~/.relic-mirrors/<name>/2026/..., ~/.tmp/projects-bak/-home-nat-x (2026-10-25: the last 648 sessions without a home)
+HOME_SQL = (r"coalesce(nullif(regexp_extract(src_path, '^(.*/\.(?:claude|codex)[^/]*(?:/[^/]+)*?)/(?:(?:projects|sessions|backups|archived)[^/]*|-[^/]+)/', 1), ''),"
+            r" nullif(regexp_extract(src_path, '^(.*/\.(?:omp|thclaws|relic-mirrors|relic3-mirror|tmp)[^/]*(?:/[^/]+)*?)/(?:(?:projects|sessions|state)[^/]*|-[^/]+|20[0-9][0-9])/', 1), ''))")
 KEEP = 3
 
 
