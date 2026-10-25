@@ -64,3 +64,15 @@ def test_brief_for_an_agent(hub):
     with pytest.raises(ValueError):
         ravens.brief(hub, "2026-10-25", "09")
     assert ravens.lead("---\nx: 1\n---\n# T\n> one\n> two\nbody") == "one two"
+
+
+def test_months_overall_and_one(hub, root):
+    os.makedirs(os.path.join(root, "recaps"))
+    open(os.path.join(root, "recaps/2026-10.md"), "w").write("# 2026-10")
+    o = {m["month"]: m for m in ravens.months(hub)["months"]}
+    assert o["2026-10"] == {"month": "2026-10", "days_read": 1, "huginn_daily": 1, "day_types": {"build": 1}, "recap": True}
+    one = ravens.months(hub, "2026-10")
+    assert one["recap"] == "# 2026-10" and [d["date"] for d in one["days"]] == ["2026-10-25"]
+    assert one["days"][0]["huginn"] == "the day" and one["days"][0]["models"][0]["focus"] == "focus 2026-10-25 day"
+    with pytest.raises(ValueError):
+        ravens.months(hub, "2026")

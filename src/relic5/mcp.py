@@ -93,6 +93,11 @@ TOOLS = [
      "and what z.ai / gb300 made of each hour (relic_readings). Start here for 'what happened today / yesterday'. date: "
      "YYYY-MM-DD (default today); hour: 'HH' for that hour in full.",
      "inputSchema": {"type": "object", "properties": {"date": STR, "hour": STR}, "additionalProperties": False}},
+    {"name": "relic_month", "description": "The long view. Without month: every month, with how many days the models read "
+     "(relic_readings), how many Huginn daily roll-ups, what kind of days (build / fix / ops / mixed counts) and whether a "
+     "sealed month recap exists. With month 'YYYY-MM': its recap and each day as Huginn's daily opening lines plus each "
+     "model's day focus. Then relic_hours {date} for one day hour by hour.",
+     "inputSchema": {"type": "object", "properties": {"month": STR}, "additionalProperties": False}},
     {"name": "relic_trace", "description": "The trace log. With id (a trace.id from any result): the whole chain it belongs to, oldest "
      "first: each search with its first 10 hits as links, each message or session opened from it, the narrower searches after "
      "it and the saved-search runs made from it, with depth by parent. Without id: the newest chains.",
@@ -289,6 +294,13 @@ def run_tool(relic: Relic5, name: str, a: Json, door: str | None = None) -> Json
         _check(a, ["date", "hour"])
         try:
             return ravens.brief(relic, _str(a, "date") or _time.strftime("%Y-%m-%d", _time.gmtime(_time.time() + 7 * 3600)), _str(a, "hour"))
+        except ValueError as ex:
+            raise UsageError(str(ex)) from ex
+    if name == "relic_month":
+        from . import ravens
+        _check(a, ["month"])
+        try:
+            return ravens.months(relic, _str(a, "month"))
         except ValueError as ex:
             raise UsageError(str(ex)) from ex
     if name == "relic_readings":

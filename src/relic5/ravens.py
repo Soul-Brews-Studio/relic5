@@ -131,3 +131,52 @@ def brief(relic: Any, date: str, hour: str | None = None) -> Json:
         "notes_newest": d["notes_newest"],
         "more": "relic_hours {date, hour: 'HH'} for one hour in full; relic_readings for 15m windows",
     }
+
+
+MONTH = re.compile(r"^\d{4}-\d{2}$")
+
+
+def _recap(relic: Any, month: str) -> str | None:
+    p = os.path.join(relic.parts.root, "recaps", f"{month}.md")
+    try:
+        with open(p, encoding="utf-8") as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+def months(relic: Any, month: str | None = None) -> Json:
+    """The long view (MCP relic_month). Without month: every month with a Huginn daily roll-up, a model reading of a
+    day, or a sealed recap, and what kind of days it had. With month: its recap (bin/relic5-month-recap, when sealed)
+    and each day as Huginn's daily opening lines and the models' day focus."""
+    from . import readings as R
+    days_r = R.readings(relic.parts.root, grain="day", limit=10**6)["rows"]
+    if month is None:
+        out: dict[str, Json] = {}
+        for r in days_r:
+            m = out.setdefault(r["start"][:7], {"month": r["start"][:7], "days_read": set(), "types": {}, "huginn_daily": 0})
+            m["days_read"].add(r["start"][:10])
+            if r.get("type"):
+                m["types"][r["type"]] = m["types"].get(r["type"], 0) + 1
+        for n in _notes(relic, ["memory/huginn/%/DAILY%"]):
+            d = n["path"].split("/")[2]
+            m = out.setdefault(d[:7], {"month": d[:7], "days_read": set(), "types": {}, "huginn_daily": 0})
+            m["huginn_daily"] += 1
+        rows = []
+        for k in sorted(out, reverse=True):
+            m = out[k]
+            rows.append({"month": k, "days_read": len(m["days_read"]), "huginn_daily": m["huginn_daily"],
+                         "day_types": dict(sorted(m["types"].items(), key=lambda x: -x[1])), "recap": _recap(relic, k) is not None})
+        return {"months": rows, "more": "relic_month {month: 'YYYY-MM'} for one month day by day; relic_hours {date} for one day"}
+    if not MONTH.match(month):
+        raise ValueError("month is YYYY-MM")
+    by_day: dict[str, Json] = {}
+    for r in days_r:
+        if r["start"].startswith(month):
+            d = by_day.setdefault(r["start"][:10], {"date": r["start"][:10], "huginn": None, "models": []})
+            d["models"].append({k: r.get(k) for k in ("model", "type", "focus", "friction", "lesson")})
+    for n in _notes(relic, [f"memory/huginn/{month}-%/DAILY%"]):
+        d = n["path"].split("/")[2]
+        by_day.setdefault(d, {"date": d, "huginn": None, "models": []})["huginn"] = lead(n["text"], 700)
+    return {"month": month, "recap": _recap(relic, month), "days": [by_day[k] for k in sorted(by_day)],
+            "more": "relic_hours {date} for a day hour by hour"}
