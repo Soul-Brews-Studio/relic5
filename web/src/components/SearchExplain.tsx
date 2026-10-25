@@ -1,81 +1,93 @@
-// How the hub read this search (Nat, 2026-10-25: "can we show like how we tokenize? visualize"): the query as the
-// BM25 index's tokens (GET /api/explain: lance's ICU tokenizer with the index's settings), each token's weight, and a
-// matrix of the top hits by token, so a reader sees why a hit ranks where it does. Colours are the tokens' own
-// (tokenHue), the same as the highlights in every hit.
-import { useState } from "react";
+// How the hub read this search, kept to one line (Nat, 2026-10-25: "can we show like how we tokenize?", then "too
+// much? can we like 3d embedding? and result?"): the query as the BM25 index's tokens (GET /api/explain), each chip
+// shaded by its weight (rarer = stronger, numbers on hover), and a 3D view of the hits in the Map's own embedding space
+// over the dimmed cloud of sessions (POST /api/place). Click a hit in 3D to read it.
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { compact, num } from "../format";
 import type { Explain, Hit } from "../types";
-import { cx, tokenHue } from "./ui";
+import type { MapPoint } from "../views/MapView";
+import { Loading, tokenHue } from "./ui";
 
-export function SearchExplain({ e, hits, active, pick, mapHref }: {
-  e: Explain; hits: Hit[]; active: number; pick: (i: number) => void; mapHref: string | null;
-}) {
-  const [open, setOpen] = useState(() => localStorage.getItem("relic5-explain") !== "0");
-  const toggle = () => { localStorage.setItem("relic5-explain", open ? "0" : "1"); setOpen(!open); };
-  const terms = e.terms, top = Math.max(0.001, ...terms.map(t => t.idf ?? 0));
-  const shown = hits.slice(0, 24), best = Math.max(0.001, ...shown.map(h => h.score));
-  const rare = [...terms].sort((a, b) => (b.idf ?? 0) - (a.idf ?? 0))[0];
+const Map3D = lazy(() => import("../views/Map3D"));
+
+interface Space { points: { uid: string; x: number; y: number; z: number }[]; centre: { x: number; y: number; z: number } | null; missing: string[];
+  cloud: { sid: string; x: number; y: number; z: number; repo?: string | null }[]; error?: string }
+
+function HitSpace({ hits, active, pick }: { hits: Hit[]; active: number; pick: (i: number) => void }) {
+  const [sp, setSp] = useState<Space | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [hover, setHover] = useState<{ i: number; x: number; y: number }>({ i: -1, x: 0, y: 0 });
+  const key = hits.map(h => h.uid).join(",");
+  useEffect(() => {
+    let live = true;
+    setSp(null); setErr(null);
+    fetch("/api/place", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ uids: hits.map(h => h.uid), scores: hits.map(h => h.score) }) })
+      .then(r => r.json()).then(j => { if (live) (j.error ? setErr(j.error) : setSp(j)); }).catch(e => live && setErr(String(e)));
+    return () => { live = false; };
+  }, [key]);   // eslint-disable-line
+  // points: the cloud first (dimmed), then the hits in rank order, then the hits' centre
+  const view = useMemo(() => {
+    if (!sp) return null;
+    const at = new Map(sp.points.map(p => [p.uid, p]));
+    const hitIdx = hits.map((h, i) => ({ h, i, p: at.get(h.uid) })).filter(x => x.p);
+    const pts: MapPoint[] = [
+      ...sp.cloud.map(c => ({ sid: c.sid, x: c.x, y: c.y, z: c.z, n: 0, ts: "", repo: c.repo, machines: [] })),
+      ...hitIdx.map(x => ({ sid: x.h.session_uuid, x: x.p!.x, y: x.p!.y, z: x.p!.z, n: 0, ts: x.h.ts, repo: x.h.repo_key, name: x.h.session_name, machines: x.h.machines })),
+      ...(sp.centre ? [{ sid: "centre", ...sp.centre, n: 0, ts: "", machines: [] }] : []),
+    ];
+    const nc = sp.cloud.length;
+    const colors = pts.map((_, i) => (i < nc ? "#6b7488" : i < nc + hitIdx.length ? "#64b5f6" : "#f5b73b"));
+    const dim = pts.map((_, i) => i < nc);
+    return { pts, colors, dim, nc, hitIdx };
+  }, [sp, key]);   // eslint-disable-line
+  if (err) return <p className="m-0 px-4 py-3 text-sm text-muted">The 3D view needs vectors: {err}</p>;
+  if (!view) return <div className="p-4"><Loading label="Placing the hits" /></div>;
+  const sel = view.hitIdx.findIndex(x => x.i === active);
+  const hv = hover.i >= view.nc && hover.i < view.nc + view.hitIdx.length ? view.hitIdx[hover.i - view.nc] : null;
   return (
-    <section aria-label="How this search reads" className="mx-5 mb-4 rounded-xl border border-line bg-deep">
-      <button type="button" onClick={toggle} aria-expanded={open}
-        className="flex min-h-11 w-full flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2 text-left">
-        <span className="text-sm font-bold text-text">How this search reads</span>
-        <span className="flex flex-wrap gap-1">{e.tokens.map((t, i) => (
-          <span key={t + i} className="rounded px-1.5 font-mono text-xs" style={{ background: `color-mix(in srgb, ${tokenHue(terms.findIndex(x => x.token === t))} 22%, transparent)`, color: "var(--text)" }}>{t}</span>))}</span>
-        <span className="ml-auto text-xs text-muted">{open ? "hide" : "show"}</span>
-      </button>
-      {open && (
-        <div className="border-t border-line px-4 pt-3 pb-4">
-          <p className="m-0 mb-3 max-w-[78ch] text-sm text-muted">
-            The index cut your words into <b className="text-soft">{e.tokens.length} tokens</b> ({e.tokenizer}).
-            {e.tokens.length > 1 && <> It first looked for them as one exact phrase{e.phrase_rows != null && <>: <b className="text-soft">{num(e.phrase_rows)}</b> {e.phrase_rows === 1 ? "row has it" : "rows have it"}</>}, then for any of them.</>}{" "}
-            A rare token weighs more than a common one{rare && terms.length > 1 && <>: here <b className="text-soft">{rare.token}</b> counts most</>}. Out of {compact(e.rows)} rows.
-          </p>
-          <div className="grid gap-2" role="table" aria-label="Tokens, the rows that hold each, and its weight">
-            {terms.map((t, i) => (
-              <div key={t.token} role="row" className="grid grid-cols-[minmax(0,9rem)_minmax(0,1fr)_6.5rem] items-center gap-3 text-sm">
-                <span role="cell" className="flex min-w-0 items-center gap-2"><i className="size-2.5 flex-none rounded-sm" style={{ background: tokenHue(i) }} /><span className="truncate font-mono text-text">{t.token}</span></span>
-                <span role="cell" className="h-2 rounded-full bg-raised" title={`weight ${t.idf ?? "?"} (idf)`}>
-                  <span className="block h-2 rounded-full" style={{ width: `${Math.max(3, (100 * (t.idf ?? 0)) / top)}%`, background: tokenHue(i) }} />
-                </span>
-                <span role="cell" className="text-right font-mono text-xs text-muted tabular-nums">{t.capped ? `${compact(t.rows)}+` : compact(t.rows)} rows</span>
-              </div>
-            ))}
-          </div>
-          <p className="m-0 mt-1 text-xs text-faint">bar: weight (BM25 idf, rarer is longer) · rows: how many messages hold the token</p>
+    <div>
+      <div className="relative h-[340px] overflow-hidden rounded-lg bg-deep" onPointerLeave={() => setHover({ i: -1, x: 0, y: 0 })}>
+        <Suspense fallback={<div className="p-4"><Loading label="Loading the 3D view" /></div>}>
+          <Map3D points={view.pts} colors={view.colors} dim={view.dim} selected={sel >= 0 ? view.nc + sel : -1} spin={false}
+            onHover={(i, x, y) => setHover({ i, x, y })} onSelect={i => { const x = view.hitIdx[i - view.nc]; if (x) pick(x.i); }} />
+        </Suspense>
+        {hv && <div className="pointer-events-none absolute z-[2] max-w-72 rounded-lg border border-line bg-panel px-3 py-2 text-xs shadow-[var(--shadow-pop)]" style={{ left: hover.x + 12, top: hover.y + 12 }}>
+          <b className="text-text">#{hv.i + 1}</b> <span className="text-soft">{hv.h.session_name ?? hv.h.session_uuid.slice(0, 8)}</span>
+          <span className="block text-muted">score {hv.h.score.toFixed(2)} · {hv.h.role}</span></div>}
+      </div>
+      <p className="m-0 mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
+        <span className="inline-flex items-center gap-1.5"><i className="size-2 rounded-full bg-accent" />a hit, placed by its own embedding</span>
+        <span className="inline-flex items-center gap-1.5"><i className="size-2 rounded-full bg-amber" />where the hits sit, by score (the hub does not embed the query)</span>
+        <span className="inline-flex items-center gap-1.5"><i className="size-2 rounded-full bg-faint" />every session, as on the Map</span>
+        {sp && sp.missing.length > 0 && <span>{sp.missing.length} hits have no vector yet</span>}
+        <span className="ml-auto">drag to turn · wheel to zoom · click a hit to read it</span>
+      </p>
+    </div>
+  );
+}
 
-          {shown.length > 0 && shown.some(h => h.matched) && (
-            <div className="mt-5">
-              <div className="mb-2 flex flex-wrap items-baseline gap-x-3"><span className="text-sm font-bold text-text">What each hit matched</span><span className="text-xs text-muted">the top {shown.length}, best first · click a row to read it</span></div>
-              <div className="overflow-x-auto">
-                <table className="border-separate border-spacing-y-0.5 text-xs">
-                  <thead><tr>
-                    <th className="w-8 pr-2 text-right font-normal text-faint">#</th>
-                    {terms.map((t, i) => <th key={t.token} className="px-0.5 pb-1 align-bottom font-mono font-normal" style={{ color: tokenHue(i) }}><span className="block max-w-14 truncate" title={t.token}>{t.token}</span></th>)}
-                    <th className="pl-3 text-left font-normal text-faint">score</th>
-                  </tr></thead>
-                  <tbody>{shown.map((h, n) => {
-                    const m = new Set(h.matched ?? []);
-                    return (
-                      <tr key={h.uid + n} onClick={() => pick(n)} className={cx("cursor-pointer", n === active && "[&>td]:bg-raised")}>
-                        <td className="rounded-l pr-2 text-right font-mono text-faint tabular-nums">{n + 1}</td>
-                        {terms.map((t, i) => (
-                          <td key={t.token} className="px-0.5 text-center">
-                            <span className="mx-auto block size-3.5 rounded-[3px]" title={`${t.token}: ${m.has(t.token) ? "in this hit" : "not in it"}`}
-                              style={m.has(t.token) ? { background: tokenHue(i) } : { boxShadow: "inset 0 0 0 1px var(--line-strong)" }} />
-                          </td>))}
-                        <td className="rounded-r pl-3"><span className="flex items-center gap-2"><span className="h-1.5 w-20 rounded-full bg-raised"><span className="block h-1.5 rounded-full bg-soft" style={{ width: `${(100 * h.score) / best}%` }} /></span><span className="font-mono text-faint tabular-nums">{h.score.toFixed(2)}</span></span></td>
-                      </tr>
-                    );
-                  })}</tbody>
-                </table>
-              </div>
-            </div>
-          )}
-          {mapHref && <a href={mapHref} className="mt-4 inline-flex min-h-11 items-center rounded-lg px-2 text-sm font-semibold text-accent hover:bg-raised">See these hits' sessions on the Map, in 3D</a>}
-          <p className="m-0 mt-2 font-mono text-xs text-faint">GET /api/explain · {e.ms} ms</p>
-        </div>
-      )}
+export function SearchExplain({ e, hits, active, pick }: { e: Explain; hits: Hit[]; active: number; pick: (i: number) => void }) {
+  const [open3d, setOpen3d] = useState(() => localStorage.getItem("relic5-3d") === "1");
+  const toggle = () => { localStorage.setItem("relic5-3d", open3d ? "0" : "1"); setOpen3d(!open3d); };
+  const top = Math.max(0.001, ...e.terms.map(t => t.idf ?? 0));
+  return (
+    <section aria-label="How this search reads" className="mx-5 mb-4">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-xs text-muted">
+        <span>read as</span>
+        {e.terms.map((t, i) => {
+          const w = (t.idf ?? 0) / top;
+          return (
+            <span key={t.token} title={`${t.token}: in ${num(t.rows)} of ${num(e.rows)} rows · weight ${t.idf ?? "?"} (rarer counts more)`}
+              className="rounded-md px-1.5 py-0.5 font-mono" style={{ background: `color-mix(in srgb, ${tokenHue(i)} ${Math.round(10 + 40 * w)}%, transparent)`, color: "var(--text)", boxShadow: `inset 0 -2px 0 ${tokenHue(i)}` }}>
+              {t.token}<span className="ml-1 text-faint">{compact(t.rows)}</span></span>
+          );
+        })}
+        {e.phrase_rows != null && e.tokens.length > 1 && <span>· exact phrase in {num(e.phrase_rows)}</span>}
+        <button type="button" onClick={toggle} aria-pressed={open3d}
+          className="ml-auto inline-flex min-h-9 items-center rounded-lg px-2 font-semibold text-accent hover:bg-raised">{open3d ? "Hide 3D" : "See the hits in 3D"}</button>
+      </div>
+      {open3d && hits.length > 0 && <div className="mt-3"><HitSpace hits={hits.slice(0, 40)} active={active} pick={pick} /></div>}
     </section>
   );
 }

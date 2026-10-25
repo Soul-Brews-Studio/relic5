@@ -348,6 +348,23 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
         except UsageError as ex:
             return JSONResponse({"error": str(ex)}, status_code=400)   # type: ignore[return-value]
 
+    @app.post("/api/place", response_model=None)
+    async def place_route(request: Request) -> Response | Json:
+        """{uids, scores?} -> those messages as points in the Map's 3D space (universe.place): a search's hits over
+        the map. A POST only because 40 uids do not fit a URL; it reads, never writes."""
+        from . import universe
+        from .query import UsageError
+        try:
+            body: Json = await request.json()
+        except ValueError:
+            return JSONResponse({"error": "body is not JSON"}, status_code=400)
+        uids = [str(u) for u in (body.get("uids") or [])][:200]
+        scores = body.get("scores")
+        try:
+            return universe.search_space(relic, uids, [float(x) for x in scores] if isinstance(scores, list) else None)
+        except UsageError as ex:
+            return JSONResponse({"error": str(ex)}, status_code=400)
+
     @app.get("/api/memory", response_model=None)
     def memory_route() -> "Listing":
         from . import memory
