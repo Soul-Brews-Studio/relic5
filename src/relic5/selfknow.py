@@ -126,11 +126,33 @@ def _du(path: str) -> int:
     return total
 
 
+_measuring = threading.Event()
+
+
 def store(root: str, ttl: int = 120) -> Json:
-    """Sizes, cached for ttl seconds (walking 6 GB of LanceDB files on every status call would be wasteful)."""
+    """Sizes, cached for ttl seconds (walking 6 GB of LanceDB files on every status call would be wasteful). On S3 a
+    walk is ~100 listings (7 s of an 8 s status, 2026-10-25): the last measurement is served and a new one is made
+    in the background every 10 minutes."""
     global _sizes
+    if rfs.is_s3(root) and ttl:
+        if _sizes[1] is not None:
+            if time.time() - _sizes[0] > 600 and not _measuring.is_set():
+                _measuring.set()
+                def bg() -> None:
+                    try:
+                        _measure(root)
+                    finally:
+                        _measuring.clear()
+                threading.Thread(target=bg, name="relic5-sizes", daemon=True).start()
+            return _sizes[1]
+        return _measure(root)
     if _sizes[1] is not None and time.time() - _sizes[0] < ttl:
         return _sizes[1]
+    return _measure(root)
+
+
+def _measure(root: str) -> Json:
+    global _sizes
     out: Json = {"parts": {}, "search": {}, "vectors": {}, "manifests": 0, "logs": 0}
     pd = os.path.join(root, "parts")
     for m in sorted(rfs.listdir(pd)) if rfs.isdir(pd) else []:
