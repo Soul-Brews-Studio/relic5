@@ -3,7 +3,7 @@ import { Drawer } from "../components/Drawer";
 import { usePoll } from "../api";
 import { ago, bkk, bytes, clock, compact, num, secs, sum } from "../format";
 import { Badge, HealthCard, levelText, levelWord, type Level } from "../components/HealthCard";
-import { Arrow, Disk, Machine, Pulse, Search, Shield, Vector } from "../components/Icons";
+import { Arrow, Disk, Lock, Machine, Pulse, Search, Shield, Vector } from "../components/Icons";
 import { syncChip } from "../components/sync";
 import { Resources } from "../components/Resources";
 import { HourBars, Latency } from "../components/AskedCharts";
@@ -12,9 +12,9 @@ import type { AskedStats, JobEvent, Queries, Status } from "../types";
 
 /* Home: the glance page inside the hub's shell. The direction contract for the whole hub is in web/index.html. */
 
-interface Check { key: string; title: string; level: Level; text: string; command?: string; big?: ReactNode; icon: ComponentType<{ size?: number }> }
+export interface Check { key: string; title: string; level: Level; text: string; command?: string; big?: ReactNode; icon: ComponentType<{ size?: number }> }
 
-function checks(s: Status, evs: JobEvent[]): Check[] {
+export function checks(s: Status, evs: JobEvent[]): Check[] {
   const out: Check[] = [];
   // a copy (COPY.json) gets no pushes, backups or seals: those checks belong to the live hub, not to it
   for (const m of s.copy ? [] : Object.keys({ ...s.machines, ...s.versions }).filter(m => !m.endsWith("-import")).sort()) {
@@ -63,7 +63,7 @@ function checks(s: Status, evs: JobEvent[]): Check[] {
   return out;
 }
 
-const rank: Record<Level, number> = { failed: 0, warning: 1, unknown: 2, ok: 3 };
+export const rank: Record<Level, number> = { failed: 0, warning: 1, unknown: 2, ok: 3 };
 
 function Section({ title, sub, children }: { title: string; sub: string; children: ReactNode }) {
   return (
@@ -143,6 +143,72 @@ function Asked({ goAsked }: { goAsked: () => void }) {
   );
 }
 
+const MON = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** The months as a ledger (Nat, 2026-10-25: "make this better"): one column a month, its bar the messages it holds,
+ *  coloured by its seal (sealed, sealing, blocked, open), a lock when sealed and a dot per amendment; one row under
+ *  them says everything about the month picked: when it sealed, its fingerprint, amendments, and its recap. */
+function MonthLedger({ days, months, openRecap }: { days: NonNullable<Status["seal_days"]>; months: Status["months"]["list"]; openRecap: (m: string) => void }) {
+  const rows = new Map(months.map(m => [m.month, m.rows.text]));
+  const max = Math.max(1, ...days.map(d => rows.get(d.month) ?? 0));
+  const [pick, setPick] = useState(() => [...days].reverse().find(d => d.recap)?.month ?? days[days.length - 1]?.month);
+  const [copied, setCopied] = useState(false);
+  const d = days.find(x => x.month === pick) ?? days[days.length - 1];
+  const fill = (st: string) => (st === "reconciled" ? "var(--ok)" : st === "blocked" ? "var(--danger)" : st === "sealing" ? "var(--warning)" : "var(--accent)");
+  const word = (st: string) => (st === "reconciled" ? "sealed" : st === "blocked" ? "blocked" : st === "sealing" ? "sealing" : "open, still being written");
+  const sealed = days.filter(x => x.state === "reconciled").length;
+  return (
+    <div className="rounded-2xl border border-line bg-panel px-5 pt-5 pb-4">
+      <div className="mb-4 flex flex-wrap items-baseline gap-x-4 gap-y-1 text-sm">
+        <b className="text-text">{sealed} of {days.length} sealed</b>
+        <span className="inline-flex items-center gap-1.5 text-muted"><i className="inline-block size-2.5 rounded-sm bg-ok" />sealed</span>
+        <span className="inline-flex items-center gap-1.5 text-muted"><i className="inline-block size-2.5 rounded-sm border border-dashed border-accent" />open</span>
+        <span className="inline-flex items-center gap-1.5 text-muted"><i className="inline-block size-1.5 rounded-full bg-amber" />an amendment</span>
+        <span className="ml-auto text-xs text-muted">bar: messages that month</span>
+      </div>
+      <div className="-mx-5 overflow-x-auto px-5 pb-1 [scrollbar-width:thin]">
+        <div role="listbox" aria-label="Months" className="grid min-w-[560px] grid-flow-col auto-cols-fr items-end gap-1.5">
+          {days.map(x => {
+            const n = rows.get(x.month) ?? 0, h = Math.max(4, Math.round((132 * n) / max)), on = x.month === d?.month, open = x.state === "open";
+            return (
+              <button key={x.month} type="button" role="option" aria-selected={on} onClick={() => setPick(x.month)}
+                title={`${x.month}: ${word(x.state)} · ${num(n)} messages${x.amendments ? ` · ${x.amendments} amendments` : ""}`}
+                className={cx("group flex min-w-0 flex-col items-center gap-1.5 rounded-lg px-0.5 pt-1 pb-1.5 transition-colors", on ? "bg-raised" : "hover:bg-raised/60")}>
+                <span className="font-mono text-[11px] text-faint tabular-nums">{compact(n)}</span>
+                <span className="flex h-[132px] w-full items-end justify-center">
+                  <span className="block w-[70%] max-w-9 rounded-t-[4px] transition-[filter] group-hover:brightness-110"
+                    style={{ height: h, background: open ? `repeating-linear-gradient(135deg, color-mix(in srgb, ${fill(x.state)} 35%, transparent) 0 4px, transparent 4px 8px)` : `color-mix(in srgb, ${fill(x.state)} ${on ? 85 : 55}%, transparent)`,
+                      boxShadow: open ? `inset 0 0 0 1.5px ${fill(x.state)}` : on ? `inset 0 2px 0 ${fill(x.state)}` : undefined }} />
+                </span>
+                <span className="flex h-3 items-center gap-[3px]" aria-hidden>{Array.from({ length: Math.min(x.amendments, 8) }, (_, i) => <i key={i} className="size-1.5 rounded-full bg-amber" />)}</span>
+                <span className={cx("text-xs font-semibold tabular-nums", on ? "text-text" : "text-soft")}>{MON[+x.month.slice(5, 7)]}</span>
+                <span className="flex h-4 items-center text-[11px] text-faint tabular-nums">{x.month.slice(5) === "01" || x === days[0] ? `'${x.month.slice(2, 4)}` : x.state === "reconciled" ? <span className="text-ok"><Lock size={12} /></span> : open ? <span className="text-accent">live</span> : ""}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      {d && (
+        <div className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-line pt-3 text-sm">
+          <b className="text-base text-text tabular-nums">{d.month}</b>
+          <span className={cx("font-semibold", d.state === "reconciled" ? "text-ok" : d.state === "blocked" ? "text-danger" : d.state === "sealing" ? "text-warning" : "text-accent")}>{word(d.state)}</span>
+          <span className="text-soft tabular-nums">{num(rows.get(d.month) ?? 0)} messages</span>
+          {d.reconciled_at && <span className="text-muted">sealed {bkk(d.reconciled_at)}</span>}
+          {d.amendments > 0 && <span className="text-muted">{d.amendments} {d.amendments === 1 ? "amendment" : "amendments"} (late rows, added, never rewritten)</span>}
+          {d.fingerprint && (
+            <button type="button" onClick={() => { navigator.clipboard.writeText(d.fingerprint!); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
+              className="inline-flex min-h-9 items-center gap-2 rounded-lg bg-deep px-2.5 font-mono text-xs text-soft hover:text-text" title="Copy the fingerprint">
+              <span className="text-faint">fingerprint</span>{d.fingerprint}<span className="font-sans font-semibold text-accent">{copied ? "copied" : "copy"}</span>
+            </button>
+          )}
+          {(d.problems.length > 0 || d.waiting.length > 0) && <span className="text-warning">{[...d.problems, ...d.waiting].join(" · ")}</span>}
+          {d.recap && <button type="button" onClick={() => openRecap(d.month)} className="ml-auto inline-flex min-h-11 items-center rounded-lg px-3 text-sm font-semibold text-accent hover:bg-raised">Read the {MON[+d.month.slice(5, 7)]} recap</button>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Searched({ q, search }: { q: Queries | null; search: (q: string) => void }) {
   if (!q) return null;
   // what a person would type: no eval fragments, no message links or bare message ids (a human never typed those)
@@ -156,7 +222,7 @@ function Searched({ q, search }: { q: Queries | null; search: (q: string) => voi
   const px = (n: number) => 14 + 20 * (Math.log1p(n - 1) / Math.log1p(Math.max(1, max - 1)));
   const kinds = top.reduce((m, t) => m.add(kindOf(t.query)), new Set<Kind>());
   return (
-    <section className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+    <section className="mt-6 grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
       <div className="flex flex-col rounded-2xl border border-line bg-panel px-6 py-5">
         <div className="mb-4 flex flex-wrap items-baseline gap-x-4 gap-y-1">
           <h2 className="m-0 text-base font-bold text-text">Searched most</h2>
@@ -168,7 +234,7 @@ function Searched({ q, search }: { q: Queries | null; search: (q: string) => voi
             return (
               <button key={t.query} type="button" onClick={() => search(t.query)} title={`${k.label}: asked ${t.n} times`}
                 style={{ color: `color-mix(in srgb, ${k.c} ${Math.round(55 + 45 * w)}%, var(--muted))`, fontSize: `${px(t.n)}px`, fontWeight: w > 0.5 ? 700 : w > 0.2 ? 600 : 400 }}
-                className="rounded-md px-1 py-0.5 text-left leading-tight tracking-[-0.01em] transition-[background-color,filter] hover:bg-raised hover:brightness-125">
+                className="max-w-full rounded-md px-1 py-0.5 text-left leading-tight tracking-[-0.01em] [overflow-wrap:anywhere] transition-[background-color,filter] hover:bg-raised hover:brightness-125">
                 {t.query}<sup className="ml-0.5 font-mono text-xs font-normal text-faint">{t.n}</sup>
               </button>
             );
@@ -241,15 +307,6 @@ export function GlancePage({ s, error, at, openHub, search }: { s: Status | null
           </div>
         </section>
 
-        {!s.copy && (bad.length > 0 || s.warnings.length > 0) && (
-          <div className="mt-8 grid gap-4 md:grid-cols-2">
-            {bad.map(c => <HealthCard key={c.key} title={c.title} level={c.level} command={c.command} big={c.big} icon={c.icon}>{c.text}</HealthCard>)}
-            {s.warnings.map(w => <HealthCard key={w} title="The hub warns" level="warning">{w}</HealthCard>)}
-          </div>
-        )}
-
-        {/* what was asked, near the top (Nat, 2026-10-25: "bring on top home page"); problems still come first */}
-        <div className="mt-8"><Asked goAsked={() => { location.hash = "tab=queries"; }} /></div>
 
         {/* the four numbers Nat asks for first, on the canvas like relic-scan's strip; colour only when one is short */}
         <section className="mt-12 grid grid-cols-2 gap-x-8 gap-y-8 lg:grid-cols-4">
@@ -263,6 +320,9 @@ export function GlancePage({ s, error, at, openHub, search }: { s: Status | null
             note={s.backup?.at ? "old · restore-tested on m5" : "no snapshot yet"} />
         </section>
 
+        {/* what was asked, under the four numbers (Nat, 2026-10-25: "ask under stats"); open problems float in the
+            incident card on every page (components/Incidents.tsx) */}
+        <Asked goAsked={() => { location.hash = "tab=queries"; }} />
         <Searched q={asked.data} search={search} />
 
         <Section title="The hub's machine" sub="What the hub holds on white's disk and what it costs the machine right now. The Disk page has the detail.">
@@ -296,23 +356,7 @@ export function GlancePage({ s, error, at, openHub, search }: { s: Status | null
 
         {(s.seal_days?.length ?? 0) > 0 && (
           <Section title="Months" sub="Each Bangkok month seals when it ends. On seal day the hub checks every machine's copy byte for byte, then writes the month down with a fingerprint; a late row adds an amendment, never a rewrite.">
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
-              {s.seal_days!.map(d => {
-                const tone = d.state === "reconciled" ? "border-line bg-panel" : d.state === "blocked" ? "border-danger bg-danger-wash" : d.state === "sealing" ? "border-warning" : "border-dashed border-line-strong";
-                const word = d.state === "reconciled" ? "sealed" : d.state === "blocked" ? "blocked" : d.state === "sealing" ? "sealing" : "open";
-                const why = d.state === "reconciled" ? `fingerprint ${d.fingerprint}${d.amendments ? ` · ${d.amendments} amendment(s)` : ""}` : [...d.problems, ...d.waiting].join("\n") || "this month is still being written";
-                return (
-                  <div key={d.month} title={why} className={cx("rounded-xl border px-4 py-3.5", tone)}>
-                    <div className="text-base font-bold tabular-nums text-text">{d.month}</div>
-                    <div className={cx("text-xs font-semibold", d.state === "reconciled" ? "text-ok" : d.state === "blocked" ? "text-danger" : d.state === "sealing" ? "text-warning" : "text-accent")}>
-                      {word}{d.amendments ? ` +${d.amendments}` : ""}
-                    </div>
-                    <div className="mt-1 truncate font-mono text-xs text-faint">{d.fingerprint ?? (d.state === "open" ? "live" : (d.problems[0] ?? d.waiting[0] ?? "").split(":")[0])}</div>
-                    {d.recap && <button type="button" onClick={() => openRecap(d.month)} className="mt-2 -ml-2 flex min-h-11 items-center rounded-lg px-2 text-xs font-semibold text-accent hover:bg-raised">Read the recap</button>}
-                  </div>
-                );
-              })}
-            </div>
+            <MonthLedger days={s.seal_days!} months={s.months.list} openRecap={openRecap} />
           </Section>
         )}
 
