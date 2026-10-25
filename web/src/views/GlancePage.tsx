@@ -248,6 +248,9 @@ export function GlancePage({ s, error, at, openHub, search }: { s: Status | null
           </div>
         )}
 
+        {/* what was asked, near the top (Nat, 2026-10-25: "bring on top home page"); problems still come first */}
+        <div className="mt-8"><Asked goAsked={() => { location.hash = "tab=queries"; }} /></div>
+
         {/* the four numbers Nat asks for first, on the canvas like relic-scan's strip; colour only when one is short */}
         <section className="mt-12 grid grid-cols-2 gap-x-8 gap-y-8 lg:grid-cols-4">
           <Kpi label="Transcript events" value={every ? compact(every.events) : "unknown"}
@@ -261,7 +264,6 @@ export function GlancePage({ s, error, at, openHub, search }: { s: Status | null
         </section>
 
         <Searched q={asked.data} search={search} />
-        <Asked goAsked={() => { location.hash = "tab=queries"; }} />
 
         <Section title="The hub's machine" sub="What the hub holds on white's disk and what it costs the machine right now. The Disk page has the detail.">
           <Resources s={s} />
