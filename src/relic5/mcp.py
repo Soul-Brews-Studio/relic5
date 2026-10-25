@@ -98,6 +98,20 @@ TOOLS = [
      "sealed month recap exists. With month 'YYYY-MM': its recap and each day as Huginn's daily opening lines plus each "
      "model's day focus. Then relic_hours {date} for one day hour by hour.",
      "inputSchema": {"type": "object", "properties": {"month": STR}, "additionalProperties": False}},
+    {"name": "relic_activity", "description": "How much happened when, ready to chart: message counts (each message once) "
+     "by a time bucket and optionally split by one dimension. by: day | week | month | hour | hour_of_day | weekday (1 = Mon); "
+     "group: none | role (user = the human typed it) | project | machine | engine; filters since/until ('YYYY-MM-DD', "
+     "Bangkok time), role, project (substring), machine; top: how many groups before 'other' (default 12). "
+     "Use it for activity charts, heatmaps, busiest hours, which projects took the time.",
+     "inputSchema": {"type": "object", "properties": {"by": STR, "group": STR, "since": STR, "until": STR, "role": STR,
+                     "project": STR, "machine": STR, "top": INT}, "additionalProperties": False}},
+    {"name": "relic_team", "description": "Sessions started per project per Bangkok day over the last N days (default 90), "
+     "and which projects ran on the same days (pairs): who worked with whom, for a timeline or a co-activity chart.",
+     "inputSchema": {"type": "object", "properties": {"days": INT}, "additionalProperties": False}},
+    {"name": "relic_oracles", "description": "The oracles (agents with a ψ vault). Without name: every oracle with its notes "
+     "count, sections and machines. With name: that oracle's portrait: who it says it is, what it learned, its sessions, "
+     "its rules, and character / enlightenment prompts built from its notes.",
+     "inputSchema": {"type": "object", "properties": {"name": STR}, "additionalProperties": False}},
     {"name": "relic_trace", "description": "The trace log. With id (a trace.id from any result): the whole chain it belongs to, oldest "
      "first: each search with its first 10 hits as links, each message or session opened from it, the narrower searches after "
      "it and the saved-search runs made from it, with depth by parent. Without id: the newest chains.",
@@ -303,6 +317,28 @@ def run_tool(relic: Relic5, name: str, a: Json, door: str | None = None) -> Json
             return ravens.months(relic, _str(a, "month"))
         except ValueError as ex:
             raise UsageError(str(ex)) from ex
+    if name == "relic_activity":
+        from . import activity
+        _check(a, ["by", "group", "since", "until", "role", "project", "machine", "top"])
+        try:
+            return activity.activity(relic, _str(a, "by") or "day", _str(a, "group") or "none", _str(a, "since"), _str(a, "until"),
+                                     _str(a, "role"), _str(a, "project"), _str(a, "machine"), min(_int(a, "top", 1) or 12, 50))
+        except ValueError as ex:
+            raise UsageError(str(ex)) from ex
+    if name == "relic_team":
+        from . import family
+        _check(a, ["days"])
+        return family.team(relic, max(7, min(_int(a, "days", 1) or 90, 400)))
+    if name == "relic_oracles":
+        from . import oracles
+        _check(a, ["name"])
+        nm = _str(a, "name")
+        if not nm:
+            return oracles.listing(relic)
+        out = oracles.portrait(relic, nm)
+        if "error" in out:
+            raise NotFound(str(out["error"]))
+        return out
     if name == "relic_readings":
         from . import readings
         _check(a, ["since", "until", "grain", "model", "q", "limit", "offset"])
