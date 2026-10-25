@@ -22,7 +22,7 @@ from collections import Counter
 from typing import Any
 
 from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, Response
 
 from .types_ import Json
 
@@ -327,6 +327,90 @@ def router(relic: Any, status: Any, oracles: Any, version: str) -> APIRouter:
         rows.sort(key=lambda x: x.get("ts") or "")
         return PlainTextResponse("\n\n".join(f"[{(x.get('ts') or '')[:19]}] {x.get('role')}: {x.get('text') or ''}" for x in rows)
                                  or f"no messages for {path}", status_code=200 if rows else 404)
+
+    def ms(ts: Any) -> int:
+        import datetime as dt
+        try:
+            return int(dt.datetime.fromisoformat(str(ts).replace("Z", "+00:00")).timestamp() * 1000)
+        except ValueError:
+            return 0
+
+    @r.get("/session/stats")
+    def session_stats(since: int = 0) -> Json:
+        """The header's counters since this browser opened Studio: searches over the whole hub (the query log)."""
+        from . import trace
+        lo = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(since / 1000)) if since else None
+        n = sum(1 for x in trace.rows(relic.parts.root) if x.get("tool") == "relic_search" and (not lo or str(x.get("at") or "") >= lo))
+        return {"searches": n, "learnings": 0}
+
+    @r.get("/sessions")
+    def sessions_() -> Json:
+        got = relic.sessions(limit=50).get("sessions") or []
+        return {"sessions": [{"id": x["uuid"], "oracle": x.get("tenant") or x.get("name") or "", "last_seen": x.get("endedAt"),
+                              "thread_count": x.get("children") or 0, "learning_count": x.get("events") or 0, "trace_count": 0,
+                              "name": x.get("name")} for x in got]}
+
+    @r.get("/session/{sid}/context")
+    def session_context(sid: str) -> Json:
+        s = relic.session(sid)
+        rows = [x for x in relic.tail(300, session=sid)["rows"] if x.get("role") == "user"]
+        rows.sort(key=lambda x: x.get("ts") or "")
+        meta = s.get("session") or s
+        return {"id": sid, "oracle": meta.get("cat") or meta.get("tenant") or meta.get("name"),
+                "threads": [{"id": x.get("msgkey"), "title": (x.get("text") or "")[:80], "message": x.get("text") or "",
+                             "timestamp": x.get("ts")} for x in rows[:40]],
+                "learnings": [], "traces": []}
+
+    def trace_summary(c: Json) -> Json:
+        return {"traceId": c["root"], "query": c.get("query") or c.get("goal") or "", "depth": max(0, int(c.get("steps") or 1) - 1),
+                "fileCount": int(c.get("opened") or 0), "commitCount": 0, "issueCount": 0,
+                "status": "distilled" if c.get("found") else "raw", "hasAwakening": bool(c.get("found")),
+                "createdAt": ms(c.get("first")), "parentTraceId": None, "prevTraceId": None, "nextTraceId": None,
+                "clients": c.get("clients")}
+
+    @r.get("/traces")
+    def traces(limit: int = 50, offset: int = 0, status: str = "all", query: str = "") -> Json:
+        """relic5's question chains (the query log: a search, the hits it opened, the relic_found at the end)."""
+        from . import trace
+        got = [trace_summary(c) for c in trace.chains(relic.parts.root, 200)]
+        if status != "all":
+            got = [t for t in got if t["status"] == status]
+        if query:
+            got = [t for t in got if query.lower() in t["query"].lower()]
+        page = got[max(0, offset):max(0, offset) + max(1, min(limit, 200))]
+        return {"traces": page, "total": len(got), "hasMore": offset + len(page) < len(got)}
+
+    @r.get("/traces/{tid}", response_model=None)
+    def trace_detail(tid: str) -> Response:
+        from . import trace
+        c = trace.chain(relic.parts.root, tid)
+        if "error" in c:
+            return JSONResponse({"error": c["error"]}, status_code=404)
+        steps = c.get("steps") or []
+        hits = [h for st in steps for h in (st.get("top") or [])]
+        found = c.get("found") or []
+        return JSONResponse({"traceId": c["root"], "query": steps[0].get("query") if steps else "", "queryType": steps[0].get("tool") if steps else "",
+                "project": None, "foundFiles": [{"path": h.get("link") or "", "type": h.get("role"), "matchReason": h.get("repo")} for h in hits[:40]],
+                "foundCommits": [], "foundIssues": [], "foundRetrospectives": [], "foundLearnings": [f.get("found") or "" for f in found if f.get("found")],
+                "fileCount": int(c.get("opened") or 0), "commitCount": 0, "issueCount": 0, "depth": max((st.get("depth") or 0) for st in steps) if steps else 0,
+                "parentTraceId": None, "childTraceIds": [], "prevTraceId": None, "nextTraceId": None,
+                "status": "distilled" if found else "raw", "awakening": (found[-1].get("found") if found else None), "createdAt": ms(c.get("first")),
+                "steps": steps})
+
+    @r.get("/traces/{tid}/linked-chain")
+    def linked_chain(tid: str) -> Json:
+        return {"chain": [], "position": 0}
+
+    @r.get("/inbox")
+    def inbox(limit: int = 50) -> Json:
+        """Handoff notes: the vaults' inbox/handoff notes, newest first."""
+        got = notes.rows("section LIKE 'inbox/handoff%' OR section LIKE '%/handoff%'", [], limit=max(1, min(limit, 200)))
+        return {"files": [{"filename": (x.get("path") or "").rsplit("/", 1)[-1], "path": x.get("path") or "", "created": x.get("ts"),
+                           "preview": (x.get("text") or "")[:300], "type": x.get("cat") or "handoff"} for x in got], "total": len(got)}
+
+    @r.get("/supersede")
+    def supersede(limit: int = 50, offset: int = 0) -> Json:
+        return {"supersessions": [], "total": 0}
 
     @r.get("/auth/status")
     def auth_status() -> Json:
