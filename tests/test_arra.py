@@ -46,6 +46,12 @@ def test_studio_reads_the_shapes_it_expects(client):
     assert {"documents", "total"} <= m.keys()                       # empty without a vector index, never an error
     g = client.get("/arra/api/graph", headers=H).json()
     assert {"nodes", "links"} <= g.keys()
+    assert client.get("/arra/api/sessions", headers=H).json()["sessions"] is not None
+    assert {"traces", "total", "hasMore"} <= client.get("/arra/api/traces", headers=H).json().keys()
+    assert client.get("/arra/api/traces/nope", headers=H).status_code == 404
+    assert {"files", "total"} <= client.get("/arra/api/inbox", headers=H).json().keys()
+    assert client.get("/arra/api/supersede", headers=H).json() == {"supersessions": [], "total": 0}
+    assert {"searches", "learnings"} <= client.get("/arra/api/session/stats?since=0", headers=H).json().keys()
     assert client.get("/arra/api/auth/status", headers=H).json()["authenticated"] is True
     assert client.post("/arra/api/learn", json={"pattern": "x"}, headers=H).status_code == 403   # read-only
 
