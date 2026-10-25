@@ -40,6 +40,10 @@ class SearchKw(TypedDict):
     cursor: str | None
 
 
+NEEDS_QUERY = ("search needs a query (words to find). For counts over time use relic_activity (stream text | tools | "
+               "thinking | git: commits), for a day relic_hours, for a month relic_month, for a whole session relic_conversation")
+
+
 class UsageError(ValueError):
     pass
 
@@ -186,7 +190,7 @@ class Relic5:
         """BM25 over the published index (search.py); ILIKE over the parts when none is built or FTS cannot parse
         the query (relic3 falls back the same way, query.ts:127-140)."""
         if query is None or not query.split():   # None or blank
-            raise UsageError("search needs a query")
+            raise UsageError(NEEDS_QUERY)
         kw = SearchKw(since=since, until=until, horizon=horizon, repo=repo, session=session, role=role, tier=tier, with_=with_,
                        limit=limit, cursor=cursor)
         if vector is not None:
@@ -214,7 +218,7 @@ class Relic5:
                      with_: str | None = None, limit: int = DEFAULT_LIMIT, cursor: str | None = None) -> Json:
         words = (query or "").split()
         if not words:
-            raise UsageError("search needs a query")
+            raise UsageError(NEEDS_QUERY)
         streams = ["text"] + ([s for s in with_.split(",") if s] if with_ else [])
         if with_ == "all":
             streams = list(STREAMS)
