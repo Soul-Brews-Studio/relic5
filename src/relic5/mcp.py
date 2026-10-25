@@ -76,6 +76,20 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {"action": {**STR, "enum": ["list", "add", "remove"]}, "id": STR, "from": STR,
                                                       "query": STR, "args": {"type": "object"}, "every": {"type": "integer", "minimum": 5},
                                                       "name": STR}, "additionalProperties": False}},
+    {"name": "relic_asked", "description": "What was asked of the hub in a period, to pick up later what a person or an agent was "
+     "looking into: every distinct search (how often, hits, when, who), the ones that found nothing, the found notes (an "
+     "agent's relic_found, or Nat's \"Keep this hit\" on the Search page) with their links, and the chains. since/until: "
+     "YYYY-MM-DD (a Bangkok day), an ISO time, or Nd/Nh before now; default the last 24 hours.",
+     "inputSchema": {"type": "object", "properties": {"since": STR, "until": STR, "limit": INT}, "additionalProperties": False}},
+    {"name": "relic_tag", "description": "Put labels on something found, like digger's node tags: a message (its relic5:// link), "
+     "a session (its id) or a search (its trace.id). add and remove are lists of tags (letters, digits, Thai, - . / _); a "
+     "note says why. Read them back with relic_tags.",
+     "inputSchema": {"type": "object", "properties": {"target": STR, "add": {"type": "array", "items": STR},
+                                                      "remove": {"type": "array", "items": STR}, "note": STR},
+                     "required": ["target"], "additionalProperties": False}},
+    {"name": "relic_tags", "description": "Tags on the hub: with tag, everything carrying it (newest first, with notes); with "
+     "target, that thing's tags; with neither, every tag and its count. since/until as relic_asked.",
+     "inputSchema": {"type": "object", "properties": {"tag": STR, "target": STR, "since": STR, "until": STR}, "additionalProperties": False}},
     {"name": "relic_found", "description": "Close a search with what came of it, so the next agent (and Nat, on the Asked page) can "
      "see it: what you were looking for (goal), how you searched (how: the words, layers and windows you tried, what did not "
      "work), and what you found (found; links: the relic5:// links or session ids that answer it). parent is the trace.id of "
@@ -102,7 +116,8 @@ INSTRUCTIONS = (
     "error), not topic words. Every search, show and session result carries trace {id, root, parent}: pass parent=<the "
     "trace.id you are following> on your next call (opening a hit, a narrower search, another try), so the hub keeps one "
     "trace chain per question. When you have the answer, or are giving up, call relic_found {parent, goal, how, found, "
-    "links} once: what you looked for, how you searched, and what you found. relic_trace {id} reads a chain back.")
+    "links} once: what you looked for, how you searched, and what you found. relic_trace {id} reads a chain back; "
+    "relic_asked {since, until} tells what was looked into in a period and what was found.")
 UNAVAILABLE = {
     "relic_chain": "relic_chain is not available in relic5 (as in relic3 v3)",
     "relic_now": "relic_now is not available in relic5; use relic_sessions with since=1h",
@@ -136,6 +151,28 @@ def _int(a: Json, k: str, minimum: int = 0) -> int | None:
 
 
 def run_tool(relic: Relic5, name: str, a: Json, door: str | None = None) -> Json:
+    if name == "relic_tag":
+        from . import trace
+        _check(a, ["target", "add", "remove", "note"])
+        for k in ("add", "remove"):
+            if a.get(k) is not None and (not isinstance(a[k], list) or not all(isinstance(x, str) for x in a[k])):
+                raise UsageError(f"{k} must be a list of strings")
+        return trace.tag(relic.parts.root, _str(a, "target") or "", a.get("add"), a.get("remove"), door, _str(a, "note"))
+    if name == "relic_tags":
+        from . import trace
+        _check(a, ["tag", "target", "since", "until"])
+        if a.get("target"):
+            t = trace.tags_of(relic.parts.root).get(str(a["target"]))
+            return t or {"target": a["target"], "tags": [], "notes": []}
+        return trace.tagged(relic.parts.root, _str(a, "tag"), _str(a, "since"), _str(a, "until"))
+    if name == "relic_asked":
+        from . import trace
+        from .window import WindowError
+        _check(a, ["since", "until", "limit"])
+        try:
+            return trace.asked(relic.parts.root, _str(a, "since") or ("1d" if not a.get("until") else None), _str(a, "until"), min(_int(a, "limit", 1) or 50, 500))
+        except WindowError as ex:
+            raise UsageError(str(ex))
     if name == "relic_found":
         from . import trace
         _check(a, ["parent", "goal", "how", "found", "links"])

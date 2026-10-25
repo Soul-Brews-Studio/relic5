@@ -46,7 +46,7 @@ function writeHash(view: View, machine: string, s: SearchState) {
     const was = new URLSearchParams(location.hash.slice(1));
     if (view === "oracles" && was.get("tab") === "oracles" && was.get("oracle")) h.set("oracle", was.get("oracle")!);
     if (view === "map" && was.get("tab") === "map" && was.get("sessions")) h.set("sessions", was.get("sessions")!);
-    if (view === "queries" && was.get("tab") === "queries") for (const k of ["pane", "trace"]) if (was.get(k)) h.set(k, was.get(k)!);
+    if (view === "queries" && was.get("tab") === "queries") for (const k of ["pane", "trace", "since", "until"]) if (was.get(k)) h.set(k, was.get(k)!);
     next = "#" + h;
   }
   if (next !== (location.hash || "#")) history.pushState(null, "", next === "#" ? location.pathname : next);

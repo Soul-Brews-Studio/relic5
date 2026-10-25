@@ -53,3 +53,14 @@ export async function post<T>(path: string, body: unknown): Promise<T> {
   if (!r.ok) throw new Error(j.error || String(r.status));
   return j as T;
 }
+
+/** Call one of the hub's MCP tools from the page (the same tools agents use): -> its result, or throws its error. */
+export async function tool<T>(name: string, args: Record<string, unknown>): Promise<T> {
+  const r = await fetch("/mcp", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }) });
+  const j = await r.json();
+  const res = j.result ?? {};
+  const text = res.content?.[0]?.text ?? "";
+  if (res.isError || j.error) throw new Error(j.error?.message ?? text);
+  return JSON.parse(text) as T;
+}

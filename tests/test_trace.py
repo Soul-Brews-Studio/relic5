@@ -104,3 +104,33 @@ def test_an_agent_notes_what_it_found_and_mcp_tells_it_how(root, monkeypatch):
     assert lst["chains"][0]["goal"] == "where the hub runs" and lst["chains"][0]["found"] == "on white"
     body = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "relic_found", "arguments": {"parent": "nope", "goal": "g", "found": "f"}}}
     assert c.post("/mcp", json=body, headers=H).json()["result"]["isError"]
+
+
+def test_a_period_tells_what_was_asked_and_found_and_tags_label_it(root, monkeypatch):
+    monkeypatch.setenv("RELIC5_WARM", "0")
+    c = app(root)
+    _, s = rpc(c, "relic_search", {"query": "hub"})
+    rpc(c, "relic_search", {"query": "hub"})
+    rpc(c, "relic_search", {"query": "nothingmatchesthis"})
+    link = s["hits"][0]["link"]
+    _, f = rpc(c, "relic_found", {"parent": s["trace"]["id"], "goal": "where the hub runs", "found": "white", "links": [link]})
+    _, t = rpc(c, "relic_tag", {"target": link, "add": ["Hub", "#deploy", "ทดสอบ"], "note": "the answer"})
+    assert t["tags"] == ["hub", "deploy", "ทดสอบ"]
+    rpc(c, "relic_tag", {"target": link, "remove": ["deploy"]})
+    _, one = rpc(c, "relic_tags", {"target": link})
+    assert one["tags"] == ["hub", "ทดสอบ"] and one["notes"][0]["note"] == "the answer" and one["kind"] == "message"
+    _, by = rpc(c, "relic_tags", {"tag": "hub"})
+    assert [x["target"] for x in by["targets"]] == [link]
+    body = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "relic_tag", "arguments": {"target": link, "add": ["bad tag!"]}}}
+    assert c.post("/mcp", json=body, headers=H).json()["result"]["isError"]
+
+    import time
+    today = time.strftime("%Y-%m-%d", time.gmtime(time.time() + 7 * 3600))   # a Bangkok day
+    _, p = rpc(c, "relic_asked", {"since": today})
+    assert p["top"][0]["query"] == "hub" and p["top"][0]["times"] == 2 and p["zero_hits"] == ["nothingmatchesthis"]
+    assert p["found"][0]["found"] == "white" and {"tag": "hub", "n": 1} in p["tags"] and p["chains"]
+    _, old = rpc(c, "relic_asked", {"since": "2020-01-01", "until": "2020-01-02"})
+    assert old["searches"] == 0 and old["found"] == []
+    acc = c.get("/api/access", params={"since": today, "tool": "relic_search"}, headers=H).json()
+    assert len(acc["rows"]) == 3 and c.get("/api/access", params={"since": "nonsense"}, headers=H).status_code == 400
+    assert c.get("/api/tags", headers=H).json()["tags"][0]["tag"] == "hub"

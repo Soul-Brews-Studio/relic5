@@ -71,7 +71,7 @@ export interface SearchResult { older_hits?: number; trace?: TraceRef;
 }
 
 export interface Msg { ts: string; role: string; text: string; machines?: string[]; sid?: string }
-export interface ShowResult { before: Msg[]; target: Msg; after: Msg[]; link: string }
+export interface ShowResult { before: Msg[]; target: Msg; after: Msg[]; link: string; trace?: TraceRef }
 
 export interface TailRow { ts_th?: string; machines?: string[]; role: string; session_name?: string; sid?: string; cat?: string; link?: string; text?: string; uid?: string }
 export interface TailResult { rows: TailRow[]; newest?: string }
