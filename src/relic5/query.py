@@ -9,7 +9,7 @@ reads relic5 the same way. What differs, by design:
   score      keyword hits: how many times the query's words occur (no BM25 until the embed milestone)
 Search is keyword: every word of the query must occur (ILIKE, so a Thai substring matches).
 """
-import base64, hashlib, json, os, re
+import base64, hashlib, json, os, re, time
 from collections.abc import Callable, Collection, Sequence
 from typing import TYPE_CHECKING, TypedDict
 
@@ -424,8 +424,17 @@ class Relic5:
         if machine:
             where.append("machine = ?")
             params.append(machine)
-        rows = self._rows(f"""SELECT msgkey, month, sid, ts, ts_th, role, engine, cat, machines, substr(text, 1, 600) AS text
-                              FROM {folded(src, ' AND '.join(where))} ORDER BY ts DESC LIMIT ?""", params + [int(n)])
+        def run(w: list[str], p: list[object]) -> list[Json]:
+            return self._rows(f"""SELECT msgkey, month, sid, ts, ts_th, role, engine, cat, machines, substr(text, 1, 600) AS text
+                                  FROM {folded(src, ' AND '.join(w))} ORDER BY ts DESC LIMIT ?""", p + [int(n)])
+        rows: list[Json] = []
+        if not since and not session:
+            # the newest rows are almost always in the last 3 days: a bound on ts lets the parquet scan skip the rest of the
+            # month (2.7 s for two whole months on white, 2026-10-25); fewer than n there, and the whole months are read
+            cut = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(time.time() - 3 * 86400))
+            rows = run(where + ["ts > ?"], params + [cut])
+        if len(rows) < n:
+            rows = run(where, params)
         names = self._names({r["sid"] for r in rows if r["sid"]})
         for r in rows:
             r["session_name"] = names.get(r["sid"])
