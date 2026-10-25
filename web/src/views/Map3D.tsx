@@ -17,9 +17,11 @@ function dot(): CanvasTexture {
   return new CanvasTexture(c);
 }
 
-export default function Map3D({ points, colors, dim, selected, onHover, onSelect, spin }: {
+export default function Map3D({ points, colors, dim, selected, onHover, onSelect, spin, hot }: {
   points: MapPoint[]; colors: string[]; dim: boolean[]; selected: number; onHover: (i: number, x: number, y: number) => void;
   onSelect: (i: number) => void; spin: boolean;
+  /** indexes drawn again as bigger points on top (a search's hits over the map) */
+  hot?: number[];
 }) {
   const host = useRef<HTMLDivElement>(null);
   const api = useRef<{ paint: () => void; select: (i: number) => void; spin: (on: boolean) => void } | null>(null);
@@ -44,6 +46,7 @@ export default function Map3D({ points, colors, dim, selected, onHover, onSelect
     const still = matchMedia("(prefers-reduced-motion: reduce)").matches, t0 = performance.now(), DUR = 900;
     let growing = !still;
     pos.set(still ? target : target.map(v => v * 0.02));
+    // (hot points follow pos; see tick)
     const geo = new BufferGeometry();
     geo.setAttribute("position", new BufferAttribute(pos, 3));
     geo.setAttribute("color", new BufferAttribute(col, 3));
@@ -52,6 +55,17 @@ export default function Map3D({ points, colors, dim, selected, onHover, onSelect
     const cloud = new Points(geo, mat);
     cloud.frustumCulled = false;   // its bounds change while the points fly out
     scene.add(cloud);
+    // hot points (a search's hits): drawn again bigger, in their own colours, over the cloud
+    const hotIdx = hot ?? [];
+    const hotGeo = new BufferGeometry();
+    const hotPos = new Float32Array(hotIdx.length * 3), hotCol = new Float32Array(hotIdx.length * 3);
+    hotGeo.setAttribute("position", new BufferAttribute(hotPos, 3));
+    hotGeo.setAttribute("color", new BufferAttribute(hotCol, 3));
+    const hotCloud = new Points(hotGeo, new PointsMaterial({ size: 0.11, vertexColors: true, map: sprite, transparent: true, alphaTest: 0.05, depthWrite: false }));
+    hotCloud.frustumCulled = false;
+    { const c = new Color(); hotIdx.forEach((p, j) => { c.set(colors[p] ?? "#ffffff"); hotCol[j * 3] = c.r; hotCol[j * 3 + 1] = c.g; hotCol[j * 3 + 2] = c.b; }); }
+    hotIdx.forEach((p, j) => { hotPos[j * 3] = pos[p * 3]; hotPos[j * 3 + 1] = pos[p * 3 + 1]; hotPos[j * 3 + 2] = pos[p * 3 + 2]; });
+    scene.add(hotCloud);
     // the selected session: one bigger white point drawn on top
     const selGeo = new BufferGeometry();
     selGeo.setAttribute("position", new BufferAttribute(new Float32Array(3), 3));
@@ -102,6 +116,8 @@ export default function Map3D({ points, colors, dim, selected, onHover, onSelect
         const t = Math.min(1, (performance.now() - t0) / DUR), k = 1 - Math.pow(1 - t, 3);
         for (let i = 0; i < pos.length; i++) pos[i] = target[i] * (0.02 + 0.98 * k);
         geo.attributes.position.needsUpdate = true;
+        hotIdx.forEach((p, j) => { hotPos[j * 3] = pos[p * 3]; hotPos[j * 3 + 1] = pos[p * 3 + 1]; hotPos[j * 3 + 2] = pos[p * 3 + 2]; });
+        hotGeo.attributes.position.needsUpdate = true;
         if (t >= 1) { growing = false; geo.computeBoundingSphere(); }
       }
       if (!document.hidden) { controls.update(); renderer.render(scene, camera); }
@@ -110,7 +126,7 @@ export default function Map3D({ points, colors, dim, selected, onHover, onSelect
     tick();
     return () => {
       cancelAnimationFrame(raf); ro.disconnect(); controls.dispose();
-      geo.dispose(); selGeo.dispose(); mat.dispose(); sprite.dispose(); renderer.dispose(); renderer.domElement.remove();
+      geo.dispose(); selGeo.dispose(); hotGeo.dispose(); mat.dispose(); sprite.dispose(); renderer.dispose(); renderer.domElement.remove();
     };
   }, [points]);
 
