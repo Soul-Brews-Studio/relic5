@@ -135,21 +135,24 @@ function WhenTyping({ on }: { on: boolean }) {
   const hours = a.data?.series[0]?.counts ?? {};
   const wk = w.data?.series[0]?.counts ?? {};
   if (!a.data?.total) return null;
-  const hm = Math.max(...Object.values(hours), 1), wm = Math.max(...Object.values(wk), 1);
+  // scaled from the quietest to the busiest, not from zero: every hour has typing, so a zero base reads as flat
+  const scale = (o: Record<string, number>) => { const v = Object.values(o); const lo = Math.min(...v), hi = Math.max(...v);
+    return (n: number) => 0.1 + 0.9 * (hi > lo ? (n - lo) / (hi - lo) : 1); };
+  const hs = scale(hours), ws = scale(wk);
   return (
     <div className="min-w-0">
-      <div className="mb-2 text-xs text-muted"><b className="text-soft">When Nat types</b> · by hour of day (Bangkok) and by weekday, all time</div>
+      <div className="mb-2 text-xs text-muted"><b className="text-soft">When Nat types</b> · by hour of day (Bangkok) and by weekday, all time · faint = the quietest, full = the busiest</div>
       <div className="flex gap-[3px]">
         {Array.from({ length: 24 }, (_, h) => String(h).padStart(2, "0")).map(h => (
           <div key={h} className="flex flex-col items-center gap-1" title={`${h}:00 · ${num(hours[h] ?? 0)} typed`}>
-            <div className="h-16 w-3.5 rounded-sm" style={{ background: "var(--user)", opacity: 0.08 + 0.92 * ((hours[h] ?? 0) / hm) }} />
+            <div className="h-16 w-3.5 rounded-sm" style={{ background: "var(--user)", opacity: hs(hours[h] ?? 0) }} />
             <span className="font-mono text-[9px] text-faint">{h}</span>
           </div>))}
       </div>
       <div className="mt-3 flex gap-1.5">
         {days.map((dn, i) => (
           <div key={dn} className="flex flex-col items-center gap-1" title={`${dn} · ${num(wk[String(i + 1)] ?? 0)} typed`}>
-            <div className="h-6 w-9 rounded-sm" style={{ background: "var(--user)", opacity: 0.08 + 0.92 * ((wk[String(i + 1)] ?? 0) / wm) }} />
+            <div className="h-6 w-9 rounded-sm" style={{ background: "var(--user)", opacity: ws(wk[String(i + 1)] ?? 0) }} />
             <span className="text-[10px] text-faint">{dn}</span>
           </div>))}
       </div>
