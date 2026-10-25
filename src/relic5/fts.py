@@ -43,6 +43,13 @@ LAYERS = {"prose": ("text", "vault"), "tools": ("tools",), "thinking": ("thinkin
 SIDE = {"memory": ("_memory", "notes.parquet"), "git": ("_git", "commits.parquet")}
 """Layers built from a table the hub folds itself (memory.py, gitlog.py), not from month parts: history only."""
 COLS = ["uid", "msgkey", "chunk", "key", "month", "sid", "ts", "ts_th", "role", "engine", "cat", "layer", "machines", "text", "title"]
+HOME_COLS = ["home", "homes", "agent"]
+"""Which .claude (or .codex) a row came from (Nat, 2026-10-25: "can we separate like .claude from user nat / .claude
+from user beta or .claude project of some project"): home is the last .claude*/.codex* folder before projects*,
+sessions or backups in relic-scan's src_path (/Users/beta/.claude, /Users/nat/.claude1, a project's own
+.../exp/.claude-hello/.claude); homes, every home that holds the message (a copy lives in several), newline-joined;
+agent, relic-scan's user@host. Tables built before this have none of them (index --force adds them)."""
+HOME_SQL = r"nullif(regexp_extract(src_path, '^(.*/\.(?:claude|codex)[^/]*)/(?:projects|sessions|backups|archived)', 1), '')"
 KEEP = 3
 
 
@@ -64,7 +71,17 @@ def current(root: str) -> dict[str, str]:
     return rfs.read_json(p) if rfs.exists(p) else {}
 
 
-def _select(parts: Parts, layer: str, months: Collection[str]) -> str | None:
+def _columns(con: "duckdb.DuckDBPyConnection | None", files: list[str]) -> set[str]:
+    """The columns a set of parts has between them (old parts have no src_path)."""
+    if con is None or not files:
+        return set()
+    try:
+        return {r[0] for r in con.execute(f"DESCRIBE SELECT * FROM read_parquet({sql_list(files)}, union_by_name = true)").fetchall()}
+    except Exception:
+        return set()
+
+
+def _select(parts: Parts, layer: str, months: Collection[str], con: "duckdb.DuckDBPyConnection | None" = None) -> str | None:
     """SQL for the folded rows of one layer over some months (vault, a single file, goes to history; so do memory and
     git, already folded by memory.py and gitlog.py)."""
     if layer in SIDE:
@@ -72,23 +89,29 @@ def _select(parts: Parts, layer: str, months: Collection[str]) -> str | None:
         if "history" not in months or not rfs.exists(p):
             return None
         return f"""SELECT msgkey AS uid, msgkey, chunk, key, month, sid, ts, ts_th, role, engine, cat, '{layer}' AS layer,
-                   machines, text, title FROM read_parquet({sql_list([p])}) ORDER BY ts, msgkey"""
+                   machines, text, title, NULL::VARCHAR AS home, NULL::VARCHAR AS homes, NULL::VARCHAR AS agent
+                   FROM read_parquet({sql_list([p])}) ORDER BY ts, msgkey"""
     srcs: list[str] = []
     for s in LAYERS[layer]:
         fs = [p for _, mon, p in parts.files(s) if (s == "vault" and "history" in months) or mon in months]
         if fs:
             title = "title" if s == "vault" else "NULL::VARCHAR AS title"
+            have = _columns(con, fs)
+            home = (f"{HOME_SQL} AS home" if "src_path" in have else "NULL::VARCHAR AS home") + ", " + \
+                   ("src_agent AS agent" if "src_agent" in have else "NULL::VARCHAR AS agent")
             srcs.append(f"""SELECT regexp_extract(filename, '/parts/([^/]+)/', 1) AS machine, msgkey, chunk, key,
-                coalesce(month, substr(ts_th, 1, 7)) AS month, sid, ts, ts_th, role, engine, cat, '{layer}' AS layer, text, {title}
+                coalesce(month, substr(ts_th, 1, 7)) AS month, sid, ts, ts_th, role, engine, cat, '{layer}' AS layer, text, {title}, {home}
                 FROM read_parquet({sql_list(fs)}, union_by_name = true, filename = true) WHERE text IS NOT NULL AND text <> ''""")
     if not srcs:
         return None
     u = " UNION ALL BY NAME ".join(srcs)
-    return f"""SELECT msgkey || CASE WHEN chunk > 0 THEN ':' || chunk ELSE '' END AS uid, * EXCLUDE (rn, machine) FROM (
-               SELECT *, list(machine) OVER (PARTITION BY msgkey, chunk ORDER BY machine
-                 ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS machines,
-               row_number() OVER (PARTITION BY msgkey, chunk ORDER BY machine) AS rn FROM ({u})) WHERE rn = 1
-               ORDER BY ts, msgkey, chunk"""
+    return f"""SELECT msgkey || CASE WHEN chunk > 0 THEN ':' || chunk ELSE '' END AS uid,
+               * EXCLUDE (rn, machine, home_list) REPLACE (coalesce(home, home_list[1]) AS home),
+               nullif(array_to_string(list_sort(list_distinct(home_list)), chr(10)), '') AS homes FROM (
+               SELECT *, list(machine) OVER w AS machines, list(home) FILTER (WHERE home IS NOT NULL) OVER w AS home_list,
+               row_number() OVER (PARTITION BY msgkey, chunk ORDER BY machine) AS rn FROM ({u})
+               WINDOW w AS (PARTITION BY msgkey, chunk ORDER BY machine ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING))
+               WHERE rn = 1 ORDER BY ts, msgkey, chunk"""
 
 
 def _sig(parts: Parts, layer: str, months: Collection[str]) -> Json:
@@ -162,7 +185,7 @@ def build(root: str, con: "duckdb.DuckDBPyConnection", log: Callable[[str], obje
     for name, (layer, ms, sig) in plan.items():
         t = time.time()
         is_vec = layer.startswith("vec:")
-        sql = V.table_sql(parts, root, layer[4:], ms) if is_vec else _select(parts, layer, ms)
+        sql = V.table_sql(parts, root, layer[4:], ms) if is_vec else _select(parts, layer, ms, con)
         tab = con.execute(sql).arrow() if sql else None
         if tab is not None and hasattr(tab, "read_all"):
             tab = tab.read_all()
@@ -227,6 +250,10 @@ class Index:
             self.tables, self.seen = tabs, m
         return self.tables
 
+    def has_column(self, col: str) -> bool:
+        tabs = self._load()
+        return bool(tabs) and all(col in t.schema.names for n, t in tabs.items() if not n.startswith("vec_"))
+
     def built(self) -> bool:
         return bool(self._load())
 
@@ -266,7 +293,8 @@ class Index:
             qb = tb.search(q, query_type="fts").limit(limit)
             if where:
                 qb = qb.where(where, prefilter=True)
-            out += qb.select(COLS + ["_score"]).to_list()
+            have = set(tb.schema.names)
+            out += qb.select([c for c in COLS + HOME_COLS if c in have] + ["_score"]).to_list()
         out.sort(key=lambda r: (-r["_score"], r["ts"] or ""))
         return out[:limit]
 

@@ -35,6 +35,43 @@ def path(root: str) -> str:
     return os.path.join(root, "index", "_search", "names.parquet")
 
 
+def homes_path(root: str) -> str:
+    return os.path.join(root, "index", "_search", "homes.parquet")
+
+
+def _write(con: "duckdb.DuckDBPyConnection", table: str, p: str) -> None:
+    if rfs.is_s3(p):   # one PUT on S3 is whole already; DuckDB writes s3:// through httpfs
+        rfs.duck(con, p)
+        con.execute(f"COPY {table} TO '{p}' (FORMAT parquet)")
+    else:
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        con.execute(f"COPY {table} TO '{p}.tmp' (FORMAT parquet)")
+        os.replace(p + ".tmp", p)
+
+
+def build_homes(root: str, con: "duckdb.DuckDBPyConnection", parts: "Parts") -> int:
+    """index/_search/homes.parquet: per session, the machine, the .claude (or .codex) it was written in, relic-scan's
+    user@host, its messages and first/last time (Nat, 2026-10-25: separate .claude of nat, of beta, of a project).
+    Parts from before relic-scan wrote src_path give home NULL: unknown, never guessed."""
+    from .fts import HOME_SQL, _columns
+    from .parts import sql_list
+    fs = [p for _, _, p in parts.files("text")]
+    if not fs:
+        return 0
+    have = _columns(con, fs)
+    home = HOME_SQL if "src_path" in have else "NULL::VARCHAR"
+    agent = "src_agent" if "src_agent" in have else "NULL::VARCHAR"
+    con.execute(f"""CREATE OR REPLACE TEMP TABLE _homes AS
+                    SELECT sid, min(machine) AS machine, mode({home}) AS home, mode({agent}) AS agent, count(*) AS messages,
+                           min(ts) AS first_ts, max(ts) AS last_ts
+                    FROM (SELECT regexp_extract(filename, '/parts/([^/]+)/', 1) AS machine, *
+                          FROM read_parquet({sql_list(fs)}, union_by_name = true, filename = true))
+                    WHERE sid IS NOT NULL GROUP BY sid""")
+    _write(con, "_homes", homes_path(root))
+    n = con.execute("SELECT count(*) FROM _homes").fetchone()
+    return int(n[0]) if n else 0
+
+
 def titles(con: "duckdb.DuckDBPyConnection", parts: "Parts") -> dict[str, str]:
     """Rule 1: the host's own title (relic-scan PR #37: the newest Claude custom-title), when the meta carries it."""
     from .parts import sql_list
@@ -57,12 +94,6 @@ def build(root: str, con: "duckdb.DuckDBPyConnection", parts: "Parts") -> int:
     tt = titles(con, parts)
     con.execute("CREATE OR REPLACE TEMP TABLE _names(sid VARCHAR, name VARCHAR, first_ts VARCHAR)")
     con.executemany("INSERT INTO _names VALUES (?, ?, ?)", [(s, tt.get(s) or name_of(t), f) for s, t, f in rows])
-    p = path(root)
-    if rfs.is_s3(p):   # one PUT on S3 is whole already; DuckDB writes s3:// through httpfs
-        rfs.duck(con, p)
-        con.execute(f"COPY _names TO '{p}' (FORMAT parquet)")
-    else:
-        os.makedirs(os.path.dirname(p), exist_ok=True)
-        con.execute(f"COPY _names TO '{p}.tmp' (FORMAT parquet)")
-        os.replace(p + ".tmp", p)
+    _write(con, "_names", path(root))
+    build_homes(root, con, parts)
     return len(rows)

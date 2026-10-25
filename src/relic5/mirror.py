@@ -105,15 +105,22 @@ def copy(src: str, dst: str, dirs: tuple[str, ...] = DIRS, log: Any = None) -> J
     t0 = time.time()
     a, b = _listing(src, dirs), _listing(dst, dirs)
     todo = sorted(k for k in a if b.get(k) != a[k])
-    sent, errors = 0, []
-    for i, rel in enumerate(todo):
-        try:
-            _copy_one(os.path.join(src, rel), os.path.join(dst, rel))
-            sent += a[rel]
-        except Exception as ex:   # one file failing leaves the rest to copy; the next run tries it again
-            errors.append(f"{rel}: {type(ex).__name__}: {str(ex)[:120]}")
-        if log and (i % 50 == 0 or i == len(todo) - 1):
-            log(i + 1, len(todo), sent)
+    sent, errors, done = 0, [], 0
+    # 8 files at a time: one stream is bound by the round trips (5.6 MB/s from white to black's RustFS, one at a time,
+    # measured 2026-10-25), and RustFS takes parallel uploads at 60-100 MB/s (neo's benchmark)
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    with ThreadPoolExecutor(max_workers=int(os.environ.get("RELIC5_MIRROR_THREADS", "8"))) as pool:
+        futs = {pool.submit(_copy_one, os.path.join(src, rel), os.path.join(dst, rel)): rel for rel in todo}
+        for f in as_completed(futs):
+            rel = futs[f]
+            try:
+                f.result()
+                sent += a[rel]
+            except Exception as ex:   # one file failing leaves the rest to copy; the next run tries it again
+                errors.append(f"{rel}: {type(ex).__name__}: {str(ex)[:120]}")
+            done += 1
+            if log and (done % 50 == 0 or done == len(todo)):
+                log(done, len(todo), sent)
     return {"src": src, "dst": dst, "files": len(todo) - len(errors), "bytes": sent, "skipped": len(a) - len(todo),
             "seconds": round(time.time() - t0, 1), "errors": errors[:20]}
 

@@ -194,6 +194,11 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
         from . import mirror as _mirror
         _mirror.keep_mirrored(relic.parts.root)
 
+    @app.get("/api/homes", response_model=None)
+    def homes_route() -> Json:
+        """Every .claude (or .codex) the history came from, per machine (query.homes)."""
+        return relic.homes()
+
     @app.get("/api/storage", response_model=None)
     def storage_route() -> Json:
         """Where the hub keeps its data, the mirror and its last run, and a switch waiting for the next start."""

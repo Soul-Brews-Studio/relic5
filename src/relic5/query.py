@@ -108,6 +108,32 @@ class Relic5:
         except Exception:
             return False
 
+    def sessions_of_home(self, home: str) -> list[str]:
+        """Every session whose home holds this (substring, case-blind): names.build_homes."""
+        from .names import homes_path
+        p = homes_path(self.parts.root)
+        if not rfs.exists(p):
+            return []
+        return [r["sid"] for r in self._rows(f"SELECT sid FROM read_parquet('{p}') WHERE lower(home) LIKE ?", ["%" + home.lower() + "%"])]
+
+    def homes(self) -> Json:
+        """Where the history comes from: per machine and home, the user@host, sessions, messages, first and last."""
+        from .names import homes_path
+        p = homes_path(self.parts.root)
+        if not rfs.exists(p):
+            return {"homes": [], "note": "no homes table yet: run relic5 index"}
+        rows = self._rows(f"""SELECT machine, home, agent, count(*) AS sessions, sum(messages) AS messages,
+                                     min(first_ts) AS first, max(last_ts) AS last
+                              FROM read_parquet('{p}') GROUP BY ALL ORDER BY messages DESC""")
+        for r in rows:
+            h = r["home"] or ""
+            user = re.search(r"^/(?:Users|home)/([^/]+)/", h)
+            r["user"] = (r["agent"] or "").split("@")[0] or (user.group(1) if user else None)
+            r["kind"] = ("unknown" if not h else "project" if not re.match(r"^/(?:Users|home)/[^/]+/\.[^/]+$", h) and not h.startswith("/Users/Shared/")
+                         and "/.relic" not in h else "user")
+            r["label"] = (h.replace(f"/Users/{r['user']}/", "~/").replace(f"/home/{r['user']}/", "~/") if h else "unknown (parts before src_path)")
+        return {"homes": rows}
+
     def _names(self, sids: Collection[str]) -> dict[str, str]:
         from .names import path
         p = path(self.parts.root)
@@ -127,7 +153,7 @@ class Relic5:
                with_: str | None = None, limit: int = DEFAULT_LIMIT, cursor: str | None = None,
                vector: Sequence[float] | None = None, model: str | None = None, hybrid: bool = False, sort: str | None = None,
                min_chars: int | None = None, cwd: str | None = None, branch: str | None = None, title: str | None = None,
-               via: str | None = None, chat: str | None = None, from_user: str | None = None) -> Json:
+               via: str | None = None, chat: str | None = None, from_user: str | None = None, home: str | None = None) -> Json:
         """BM25 over the published index (search.py); ILIKE over the parts when none is built or FTS cannot parse
         the query (relic3 falls back the same way, query.ts:127-140)."""
         if query is None or not query.split():   # None or blank
@@ -138,12 +164,12 @@ class Relic5:
             if not self.index.built():
                 raise UsageError("no index published yet")
             from . import search as S
-            return S.search(self, self.index, query, vector=vector, model=model, hybrid=hybrid, sort=sort, min_chars=min_chars, cwd=cwd, branch=branch, title=title, via=via, chat=chat, from_user=from_user, **kw)
+            return S.search(self, self.index, query, vector=vector, model=model, hybrid=hybrid, sort=sort, min_chars=min_chars, cwd=cwd, branch=branch, title=title, via=via, chat=chat, from_user=from_user, home=home, **kw)
         if self.index.built():
             from . import search as S
             try:
                 return S.search(self, self.index, query, sort=sort, cwd=cwd, branch=branch, title=title, via=via, chat=chat,
-                                from_user=from_user, **kw)
+                                from_user=from_user, home=home, **kw)
             except UsageError:
                 raise
             except NotFound:
@@ -385,7 +411,8 @@ class Relic5:
 
     # ---- sessions ----
     def sessions(self, repo: str | None = None, since: str | None = None, until: str | None = None, limit: int | None = None,
-                 via: str | None = None, chat: str | None = None, from_user: str | None = None, by_repo: bool = False) -> Json:
+                 via: str | None = None, chat: str | None = None, from_user: str | None = None, by_repo: bool = False,
+                 home: str | None = None) -> Json:
         meta = self._meta()
         if not meta:
             raise NotFound("no sessions on the hub: push relic-scan's meta/sessions.parquet")
@@ -404,6 +431,13 @@ class Relic5:
             if v:
                 where.append(cond)
                 params.append(v)
+        if home:   # whose .claude: the sessions names.build_homes found in that home
+            from .names import homes_path
+            hp = homes_path(self.parts.root)
+            if not rfs.exists(hp):
+                raise UsageError("home is not in the index yet: run relic5 index")
+            where.append(f"sid IN (SELECT sid FROM read_parquet('{hp}') WHERE lower(home) LIKE ?)")
+            params.append("%" + home.lower() + "%")
         w = " AND ".join(where)
         total, events = self._rows(f"SELECT count(*) AS n, coalesce(sum(n_rows), 0) AS e FROM {meta} WHERE {w}", params)[0].values()
         # the same window and filters with subagents too: every session once, so "transcript events" is every .jsonl
