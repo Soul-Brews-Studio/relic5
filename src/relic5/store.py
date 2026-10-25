@@ -43,7 +43,18 @@ def root_of(root: str) -> str:
     return os.path.abspath(os.path.expanduser(root))
 
 
+_CFG: dict[tuple[str, ...], dict[str, str]] = {}
+
+
 def s3_config() -> dict[str, str]:
+    """The endpoint and key, read once per environment (status asked ~3,000 times a call, each a file read)."""
+    env = tuple(os.environ.get(k, "") for k in ("RELIC5_S3_KEY", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "RELIC5_S3_ENDPOINT", "RELIC5_S3_REGION"))
+    if env not in _CFG:
+        _CFG[env] = _s3_config()
+    return _CFG[env]
+
+
+def _s3_config() -> dict[str, str]:
     key_file = os.path.expanduser(os.environ.get("RELIC5_S3_KEY", "~/.config/relic5/s3-live"))
     ak, sk = os.environ.get("AWS_ACCESS_KEY_ID", ""), os.environ.get("AWS_SECRET_ACCESS_KEY", "")
     if os.environ.get("RELIC5_S3_KEY") or not (ak and sk):

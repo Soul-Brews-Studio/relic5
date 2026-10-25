@@ -176,7 +176,14 @@ class Parts:
         """A month is stale when any part was added, removed or changed (size or mtime) since its manifest. Not by
         clock order: rsync -a keeps the SENDING machine's mtimes, so a part pushed late can be older than the manifest
         (relic4-scan docs/LEARNED.md:52: compare each file's own size and mtime, never the index's clock)."""
-        return self.recorded_sig(mon) != self.file_sig(mon)
+        rec, now = self.recorded_sig(mon), self.file_sig(mon)
+        if rfs.is_s3(self.root) and rec is not None:
+            # an object's time is when it was uploaded, not the part's own mtime: a mirror or a push re-stamps every
+            # file, so on S3 a month is stale when a part was added, removed or changed size
+            def sizes(sig: FileSig) -> dict[str, dict[str, object]]:
+                return {s: {m: v[0] for m, v in d.items()} for s, d in sig.items()}
+            return sizes(rec) != sizes(now)
+        return rec != now
 
     def index(self, con: "duckdb.DuckDBPyConnection", months: list[str] | None = None, log: Callable[[str], object] = print,
               now: datetime | None = None) -> list[str]:
