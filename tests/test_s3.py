@@ -32,7 +32,10 @@ def test_a_hub_on_s3_indexes_and_answers_like_one_on_a_disk(s3root):
     from relic5.doors import Doors
 
     main(["index", "--root", s3root])
-    assert rfs.isfile(s3root + "/index/_search/current.json") and rfs.isfile(s3root + "/index/2026-10/manifest.json")
+    from relic5.fts import search_dir
+    # the data's manifests in the bucket; the search index (derived) in the local cache, where queries are fast
+    assert rfs.isfile(s3root + "/index/2026-10/manifest.json") and os.path.isfile(os.path.join(search_dir(s3root), "current.json"))
+    assert not search_dir(s3root).startswith("s3://")
     c = TestClient(make_app(s3root, {"m5": "t"}, Doors({"m5": "t"}, enabled=False)))
 
     hub = c.get("/api/search", params={"q": "hub"}, headers=H).json()
@@ -73,5 +76,26 @@ def test_a_disk_hub_mirrors_to_s3_and_verifies(root):
         out = mirror.copy(root, dst)
         assert out["files"] > 0 and not out["errors"] and mirror.verify(root, dst)["ok"]
         assert mirror.copy(root, dst)["files"] == 0
+    finally:
+        rfs.rmtree(dst)
+
+
+
+def test_a_fresh_s3_hub_seeds_its_local_index_from_the_bucket(root, monkeypatch, tmp_path):
+    """A disk hub mirrored to S3 carries its index; a hub started on that S3 root copies it down once and searches
+    without a rebuild."""
+    import duckdb
+    from relic5 import mirror, store as rfs
+    from relic5.cli import main
+    from relic5.fts import search_dir, seed_local
+    from relic5.query import Relic5
+    main(["index", "--root", root])
+    dst = f"{S3.rstrip('/')}/seed-{uuid.uuid4().hex[:8]}"
+    monkeypatch.setenv("RELIC5_CACHE", str(tmp_path / "fresh-cache"))
+    try:
+        mirror.copy(root, dst)
+        assert seed_local(dst) > 0 and os.path.isfile(os.path.join(search_dir(dst), "current.json"))
+        assert seed_local(dst) == 0                                               # once
+        assert Relic5(dst, duckdb.connect()).search("hub")["hits"]
     finally:
         rfs.rmtree(dst)

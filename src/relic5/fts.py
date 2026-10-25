@@ -49,7 +49,10 @@ from user beta or .claude project of some project"): home is the last .claude*/.
 sessions or backups in relic-scan's src_path (/Users/beta/.claude, /Users/nat/.claude1, a project's own
 .../exp/.claude-hello/.claude); homes, every home that holds the message (a copy lives in several), newline-joined;
 agent, relic-scan's user@host. Tables built before this have none of them (index --force adds them)."""
-HOME_SQL = r"nullif(regexp_extract(src_path, '^(.*/\.(?:claude|codex)[^/]*)/(?:projects|sessions|backups|archived)', 1), '')"
+# with any folders under the home before projects/, sessions/ or a Claude project folder (-Users-...):
+# .codex-team/1/sessions, .codex/path-migration-backup-*/sessions, .claude/rescued-*/full-backup-*/-Users-nat-x
+# (2026-10-25: those left 1,587 sessions without a home)
+HOME_SQL = r"nullif(regexp_extract(src_path, '^(.*/\.(?:claude|codex)[^/]*(?:/[^/]+)*?)/(?:(?:projects|sessions|backups|archived)[^/]*|-[^/]+)/', 1), '')"
 KEEP = 3
 
 
@@ -63,7 +66,36 @@ def tokens(text: str) -> list[str]:
 
 
 def search_dir(root: str) -> str:
+    """Where the search index lives. On a disk: <root>/index/_search. On an S3 root: the local cache, because the index
+    is derived (rebuilt from the parts) and every query reads it: from the bucket a search took 1.2-1.6 s where the
+    disk hub took 0.3 s (2026-10-25). RELIC5_INDEX_LOCAL=0 keeps it in the bucket."""
+    root = str(root)
+    if rfs.is_s3(root) and os.environ.get("RELIC5_INDEX_LOCAL", "1") != "0":
+        return rfs.cache_dir(root.rstrip("/"), "index", "_search")
     return os.path.join(root, "index", "_search")
+
+
+def seed_local(root: str, log: Callable[[str], object] = print) -> int:
+    """An S3 hub with no local index yet: copy the bucket's index/_search down (a mirror of a disk hub carries one), the
+    pointers last, so it can search at once. -> files copied (0: nothing to seed, or already seeded)."""
+    root = str(root).rstrip("/")
+    if not rfs.is_s3(root) or os.environ.get("RELIC5_INDEX_LOCAL", "1") == "0":
+        return 0
+    local, remote = search_dir(root), os.path.join(root, "index", "_search")
+    if os.path.exists(os.path.join(local, "current.json")) or not rfs.isfile(os.path.join(remote, "current.json")):
+        return 0
+    from .mirror import _copy_one
+    cur = rfs.read_json(os.path.join(remote, "current.json"))
+    gens = {v.split("/")[0] for v in cur.values()}
+    todo = [p for g in sorted(gens) for p, _, _ in rfs.files(os.path.join(remote, g))]
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(lambda p: _copy_one(p, os.path.join(local, p[len(remote) + 1:])), todo))
+    for f in ("names.parquet", "homes.parquet", "shard_months.json", "vectors.json", "state.json", "current.json"):
+        if rfs.isfile(os.path.join(remote, f)):
+            _copy_one(os.path.join(remote, f), os.path.join(local, f))
+    log(f"seeded the local index from {remote}: {len(todo)} files")
+    return len(todo)
 
 
 def current(root: str) -> dict[str, str]:
