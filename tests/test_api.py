@@ -37,7 +37,7 @@ def test_mcp_initialize_and_list(client):
     r = rpc(client, "initialize", {"protocolVersion": "2025-06-18"}).json()
     assert r["result"]["protocolVersion"] == "2025-06-18" and r["result"]["serverInfo"]["name"] == "relic5"
     names = [t["name"] for t in rpc(client, "tools/list").json()["result"]["tools"]]
-    assert names == ["relic_search", "relic_show", "relic_sessions", "relic_session", "relic_conversation", "relic_readings", "relic_trace", "relic_saved", "relic_asked", "relic_tag", "relic_tags", "relic_found", "relic_homes", "relic_status", "relic_artifact_put", "relic_artifacts"]
+    assert names == ["relic_search", "relic_show", "relic_sessions", "relic_session", "relic_conversation", "relic_readings", "relic_hours", "relic_trace", "relic_saved", "relic_asked", "relic_tag", "relic_tags", "relic_found", "relic_homes", "relic_status", "relic_artifact_put", "relic_artifacts"]
     assert rpc(client, "notifications/initialized", i=None).status_code == 202
 
 

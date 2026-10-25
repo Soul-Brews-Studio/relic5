@@ -53,3 +53,14 @@ def test_the_day_picker(hub):
     days = {d["date"]: d for d in ravens.days(hub)["days"]}
     assert days["2026-10-25"] == {"date": "2026-10-25", "huginn": 2, "readings": 3}
     assert days["2026-10-24"]["huginn"] == 1 and days["2026-10-26"]["readings"] == 1
+
+
+def test_brief_for_an_agent(hub):
+    b = ravens.brief(hub, "2026-10-25")
+    assert b["daily"] == "the day" and [h["hour"] for h in b["hours"]] == ["15", "14"]
+    assert b["hours"][0]["huginn"].startswith("# Huginn 15:00") and [r["grain"] for r in b["hours"][0]["readings"]] == ["1h"]
+    one = ravens.brief(hub, "2026-10-25", "15")
+    assert one["hour"] == "15" and len(one["readings"]) == 2 and one["huginn"].startswith("# Huginn")
+    with pytest.raises(ValueError):
+        ravens.brief(hub, "2026-10-25", "09")
+    assert ravens.lead("---\nx: 1\n---\n# T\n> one\n> two\nbody") == "one two"
