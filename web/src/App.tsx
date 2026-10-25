@@ -9,6 +9,7 @@ import { Drawer } from "./components/Drawer";
 import { Mark, Menu as MenuIcon, Search as SearchIcon } from "./components/Icons";
 import { cx, Loading, State } from "./components/ui";
 import { Context, SearchView, shortRepo, type SearchState } from "./views/SearchView";
+import { Incidents } from "./components/Incidents";
 import { GlancePage } from "./views/GlancePage";
 // Every view but Home and Search loads on first use, so the first page carries only those two (relic4-scan's
 // review, 2026-10-25: "fast"; the main JS had grown to 51.9 KB gz with all ten views in it).
@@ -122,12 +123,6 @@ export function App() {
               A copy of {s.copy.of}'s hub, as of {bkk(s.copy.at)} Bangkok ({ago(s.copy.at)}, snapshot {s.copy.snapshot}). Search works; nothing new arrives here, so push, backup and seal checks are off.
             </p>
           )}
-          {st.view !== "home" && (status.error || (s?.warnings.length ?? 0) > 0) && (
-            <div className="mb-6 flex flex-col gap-2">
-              {status.error && <p className="m-0 rounded-xl bg-danger-wash px-5 py-3 text-sm text-danger">Last poll failed: {status.error}</p>}
-              {s?.warnings.map(w => <p key={w} className="m-0 rounded-xl bg-[color-mix(in_srgb,var(--warning)_10%,transparent)] px-5 py-3 text-sm text-soft"><b className="text-warning">The hub warns:</b> {w}</p>)}
-            </div>
-          )}
           {st.view === "home" && <GlancePage s={s} error={status.error} at={status.at} openHub={() => go("live")} search={search} />}
           <div hidden={st.view !== "search"}>
             <SearchView st={st.search} setSt={search2 => setSt(v => ({ ...v, search: search2 }))} machine={st.machine}
@@ -150,6 +145,7 @@ export function App() {
         </main>
       </div>
       <TabBar view={st.view} go={go} onMore={() => setPalette(true)} />
+      <Incidents s={s ?? null} error={status.error} />
       <NavDrawer open={drawer} onClose={() => setDrawer(false)} view={st.view} go={go} state={hub} foot={foot} badges={{ jobs: s?.jobs.running.length }} onPalette={() => setPalette(true)} />
       <Palette open={palette} onClose={() => setPalette(false)} go={go} search={search} recent={recent} sessions={palSessions} openSession={openSession} />
       <Drawer open={!!reading} onClose={() => setReading(null)} title={reading ? <>{reading.x.repo} · {reading.x.name}</> : ""}
