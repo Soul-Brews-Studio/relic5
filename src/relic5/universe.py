@@ -73,7 +73,7 @@ def keep_warm(relic: "Relic5", every: float = 60.0) -> None:
         time.sleep(5)
         while True:
             try:
-                sessions_map(relic)
+                sessions_map(relic, need_basis=True)   # with its projection, for the hits in 3D
                 memory_map(relic)
             except Exception:
                 pass
