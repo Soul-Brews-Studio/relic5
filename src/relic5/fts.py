@@ -275,7 +275,7 @@ class Index:
         for part in ("open", "history"):
             tb = self._load().get(f"{layer}_{part}")
             if tb is not None:
-                n += len(tb.search(q, query_type="fts").limit(cap).select(["uid"]).to_arrow())
+                n += len(tb.search(q, query_type="fts").limit(cap).select(["uid", "_score"]).to_arrow())
         return min(n, cap)
 
     def size(self, layer: str) -> int:

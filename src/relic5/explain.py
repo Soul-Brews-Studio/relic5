@@ -2,7 +2,7 @@
 
   tokens   the query as the BM25 index sees it: lance's ICU tokenizer with the index's own settings (fts.tokens), so
            Thai splits into words and case is folded
-  terms    per token: in how many rows of the searched layers it appears (counted up to CAP), and its BM25 weight,
+  terms    per token: in how many rows of the searched layers it appears (exact up to CAP, 5M), and its BM25 weight,
            idf = ln(1 + (N - df + 0.5) / (df + 0.5)), so a rare word counts for more than a common one
   phrase   a query of two or more words also runs as an exact phrase first (fts.Index.query): how many rows have it
 
@@ -14,7 +14,7 @@ import time
 from .fts import tokens
 from .types_ import Json
 
-CAP = 20_000
+CAP = 5_000_000   # exact on this hub: "we" 92,825 rows in 1.4 s cold on white, then cached
 _cache: dict[tuple[str, str, object], Json] = {}
 
 
