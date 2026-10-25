@@ -92,9 +92,10 @@ def queries(root: str) -> Json:
                 for h, v in sorted(hours.items())}
     real = [r for r in rows if not str(r.get("client") or "").startswith("eval")]   # eval runs say so (X-Relic5-Client: eval); keep them out of Nat's view
     counts: dict[str, int] = {}
-    for r in real:
-        if r.get("query"):
-            counts[r["query"]] = counts.get(r["query"], 0) + 1
+    for r in real:   # what people asked: searches only (a show's "query" is a message id or relic5:// link)
+        q = str(r.get("query") or "")
+        if r.get("tool") == "relic_search" and q and not q.startswith("relic5://"):
+            counts[q] = counts.get(q, 0) + 1
     zero = [r for r in real if r.get("hits") == 0 and r.get("query")]
     with LOCK:
         running = [v | {"for_s": round(now - time.mktime(time.strptime(v["at"], "%Y-%m-%dT%H:%M:%SZ")) + time.timezone)} for v in RUNNING.values()]

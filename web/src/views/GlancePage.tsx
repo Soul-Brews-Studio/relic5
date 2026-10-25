@@ -117,13 +117,13 @@ function MachineRows({ s, machines }: { s: Status; machines: string[] }) {
 /** What people and agents searched lately: the most-asked queries as a cloud (size = how often), the newest ones as a
  *  list; a click runs it again (GET /api/queries; the eval runs' known-item fragments are left out). */
 /** What a searched string is, by its shape: the cloud's colour says it. */
-type Kind = "words" | "thai" | "link" | "id";
+type Kind = "words" | "thai" | "id";
 const KINDS: { k: Kind; label: string; c: string }[] = [
   { k: "words", label: "words", c: "var(--accent)" }, { k: "thai", label: "Thai", c: "var(--ok)" },
-  { k: "id", label: "an id or name", c: "var(--amber)" }, { k: "link", label: "a message link", c: "var(--tool)" },
+  { k: "id", label: "an id or name", c: "var(--amber)" },
 ];
 const KIND = Object.fromEntries(KINDS.map(k => [k.k, k])) as Record<Kind, (typeof KINDS)[number]>;
-const kindOf = (q: string): Kind => q.startsWith("relic5://") ? "link" : /[\u0E00-\u0E7F]/.test(q) ? "thai"
+const kindOf = (q: string): Kind => /[\u0E00-\u0E7F]/.test(q) ? "thai"
   : !/\s/.test(q) && (/\d/.test(q) || /[.\-_/]/.test(q)) ? "id" : "words";
 
 function Asked({ goAsked }: { goAsked: () => void }) {
@@ -145,7 +145,9 @@ function Asked({ goAsked }: { goAsked: () => void }) {
 
 function Searched({ q, search }: { q: Queries | null; search: (q: string) => void }) {
   if (!q) return null;
-  const real = (r: { query: string; client?: string | null; tool?: string }) => r.query && r.query.length < 70 && !(r.client ?? "").startsWith("eval");
+  // what a person would type: no eval fragments, no message links or bare message ids (a human never typed those)
+  const real = (r: { query: string; client?: string | null; tool?: string }) => r.query && r.query.length < 70 && !(r.client ?? "").startsWith("eval")
+    && !r.query.startsWith("relic5://") && !/^[0-9a-f]{16,}$/i.test(r.query.trim());
   const top = q.top.filter(t => real(t)).slice(0, 24);
   const recent = [...new Map([...(q.searches ?? []).map(r => ({ ...r, tool: "relic_search" })), ...q.last].filter(r => r.tool === "relic_search" && real(r)).map(r => [r.query.trim(), r] as const)).values()].slice(0, 8);
   if (!top.length && !recent.length) return null;
