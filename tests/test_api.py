@@ -215,3 +215,9 @@ def test_each_query_is_timed_under_its_name_and_route(client):
     qs = {q["name"]: q for q in client.get("/api/perf", headers=H).json()["queries"]}
     assert any(n.startswith(("Index.query", "Relic5.")) for n in qs if n != "Relic5.tail") and "Relic5.tail" in qs
     assert "/api/tail" in qs["Relic5.tail"]["routes"] and qs["Relic5.tail"]["sql"].startswith("SELECT")
+
+
+def test_status_counts_sessions_once_indexed(client, root):
+    from relic5.cli import main
+    main(["index", "--root", root])
+    assert client.get("/api/status", headers=H).json()["rows"]["sessions"] > 0
