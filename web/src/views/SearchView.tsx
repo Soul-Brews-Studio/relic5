@@ -245,9 +245,9 @@ export function SearchView({ st, setSt, machine, setMachine, machines, recent, t
   useEffect(() => {
     setEx(null);
     if (!st.q) return;
-    let live = true;
-    get<Explain>(`/api/explain?${new URLSearchParams({ q: st.q, ...(st.with ? { w: st.with } : {}) })}`).then(e => { if (live) setEx(e); }).catch(() => {});
-    return () => { live = false; };
+    let live = true;   // after the hits and the first message: those come first
+    const t = setTimeout(() => get<Explain>(`/api/explain?${new URLSearchParams({ q: st.q, ...(st.with ? { w: st.with } : {}) })}`).then(e => { if (live) setEx(e); }).catch(() => {}), 600);
+    return () => { live = false; clearTimeout(t); };
   }, [st.q, st.with]);
   const hq = ex ? ex.tokens.join(" ") : st.q;   // highlight the index's own tokens (Thai split into words)
 

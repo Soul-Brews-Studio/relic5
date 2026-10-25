@@ -8,6 +8,7 @@ lanceglass ships as deterministic-pca-3d: no random seed, the same hub gives the
 
 Points carry the session's id, name, repo, newest time, chunk count and machines; the page colours them by repo.
 """
+import os
 import threading
 from typing import TYPE_CHECKING, Any
 
@@ -73,7 +74,7 @@ def keep_warm(relic: "Relic5", every: float = 60.0) -> None:
         time.sleep(5)
         while True:
             try:
-                sessions_map(relic, need_basis=True)   # with its projection, for the hits in 3D
+                sessions_map(relic, need_basis=True, wait=True)   # this thread makes the new one; requests never wait
                 memory_map(relic)
             except Exception:
                 pass
@@ -92,7 +93,7 @@ LIMIT = 3000   # sessions on the Map by default
 
 
 def sessions_map(relic: "Relic5", model: str | None = None, limit: int = LIMIT, min_chunks: int = MIN_CHUNKS,
-                 need_basis: bool = False) -> Json:
+                 need_basis: bool = False, wait: bool = False) -> Json:
     """-> {model, sessions, chunks, explained, points: [{sid, x, y, z, n, ts, repo, name, machines}]}, newest
     sessions first up to limit (the projection is fitted on exactly those)."""
     import numpy as np
@@ -102,8 +103,16 @@ def sessions_map(relic: "Relic5", model: str | None = None, limit: int = LIMIT, 
     mats = index.matrices(slug)
     key = ("sessions", index.seen, slug, int(limit), int(min_chunks))
     hit = _get(relic, key)
-    if hit is not None and (not need_basis or _basis_of(relic, key) is not None):
+    if hit is not None and (not need_basis or _basis_by_id(relic, hit.get("map_id")) is not None):
         return hit
+    # a push publishes a new index generation every 10 minutes, and a rebuild costs seconds of CPU: a request gets the
+    # newest map already made at once (the one before this generation), and the warm-up thread makes the new one
+    # (2026-10-25: opening a hit took 10-20 s while a request rebuilt the map in front of it)
+    if not wait:
+        old = _latest(relic, (slug, int(limit), int(min_chunks)))
+        if old is not None and (not need_basis or _basis_by_id(relic, old.get("map_id")) is not None):
+            _rebuild_soon(relic, model, int(limit), int(min_chunks))
+            return old
     if not mats:
         return {"model": slug, "sessions": 0, "chunks": 0, "explained": [], "points": []}
 
@@ -123,19 +132,27 @@ def sessions_map(relic: "Relic5", model: str | None = None, limit: int = LIMIT, 
     dim = mats[0].M.shape[1]
     means = np.zeros((len(keep), dim), dtype=np.float32)
     bounds = np.cumsum([0] + [m.n for m in mats])   # global row -> (matrix, row): rows are the matrices end to end
+    # each kept session's rows summed in one pass per matrix: a session index per row, then per 20k-row chunk a sort
+    # by it and np.add.reduceat (no Python loop over sessions; no copy of a whole matrix)
+    gid = np.full(len(sid), -1, dtype=np.int64)
     for j, g in enumerate(keep):
-        rows = order[starts[g]:starts[g] + counts[g]]
-        acc = np.zeros(dim, dtype=np.float32)
-        for k, m in enumerate(mats):
-            r = rows[(rows >= bounds[k]) & (rows < bounds[k + 1])] - bounds[k]
-            if len(r):
-                acc += m.M[r].sum(axis=0)
-        means[j] = acc
+        gid[order[starts[g]:starts[g] + counts[g]]] = j
+    for k, m in enumerate(mats):
+        g_k = gid[bounds[k]:bounds[k + 1]]
+        sel = np.flatnonzero(g_k >= 0)
+        for c in range(0, len(sel), 20_000):
+            rows = sel[c:c + 20_000]
+            gg = g_k[rows]
+            o = np.argsort(gg, kind="stable")
+            gg, rows = gg[o], rows[o]
+            cut = np.flatnonzero(np.r_[True, gg[1:] != gg[:-1]])
+            means[gg[cut]] += np.add.reduceat(m.M[rows], cut, axis=0)
     means /= np.linalg.norm(means, axis=1, keepdims=True) + 1e-9
 
     basis: dict[str, Any] = {}
     xyz, explained = project(means, basis)
-    _save_basis(relic, key, basis)
+    map_id = os.path.basename(_file(relic, key))[:-5]
+    _save_basis(relic, map_id, basis)
 
     sids = [str(sid_s[starts[g]]) for g in keep]
     names, repos = relic._names(sids), relic._repos(sids)
@@ -149,8 +166,9 @@ def sessions_map(relic: "Relic5", model: str | None = None, limit: int = LIMIT, 
                            "machines": machines.get(x, [])}
                           for x, p, g in zip(sids, xyz, keep)]
     out: Json = {"model": slug, "sessions": len(points), "chunks": int(counts[keep].sum()), "explained": explained,
-                 "projection": "pca-3d of per-session mean vectors", "points": points}
+                 "projection": "pca-3d of per-session mean vectors", "points": points, "map_id": map_id}
     _put(relic, key, out)
+    _set_latest(relic, (slug, int(limit), int(min_chunks)), map_id)
     return out
 
 
@@ -180,30 +198,90 @@ def project(vecs: "Any", basis: "dict[str, Any] | None" = None) -> "tuple[Any, l
 _BASIS: dict[tuple[object, ...], dict[str, "Any"]] = {}   # a sessions map's key -> its projection (mean, axes, span)
 
 
-def _save_basis(relic: "Relic5", key: tuple[object, ...], basis: dict[str, "Any"]) -> None:
-    import numpy as np, os
-    with _LOCK:
-        _BASIS.clear()
-        _BASIS[key] = basis
-    f = _file(relic, key)[:-5] + ".npz"
+def _save_basis(relic: "Relic5", map_id: str, basis: dict[str, "Any"]) -> None:
+    import numpy as np
+    d = os.path.join(relic.parts.root, "index", "_maps")
+    f = os.path.join(d, map_id + ".npz")
     np.savez(f + ".tmp.npz", **basis)
     os.replace(f + ".tmp.npz", f)
-
-
-def _basis_of(relic: "Relic5", key: tuple[object, ...]) -> "dict[str, Any] | None":
-    import numpy as np, os
     with _LOCK:
-        if key in _BASIS:
-            return _BASIS[key]
-    f = _file(relic, key)[:-5] + ".npz"
+        _BASIS.clear()
+        _BASIS[(map_id,)] = basis
+
+
+def _basis_by_id(relic: "Relic5", map_id: object) -> "dict[str, Any] | None":
+    """A map's projection, by the map's id (its cache file's name), in memory or from its .npz."""
+    import numpy as np
+    if not map_id:
+        return None
+    with _LOCK:
+        if (map_id,) in _BASIS:
+            return _BASIS[(map_id,)]
+    f = os.path.join(relic.parts.root, "index", "_maps", f"{map_id}.npz")
     if not os.path.exists(f):
         return None
     with np.load(f) as z:
         b = {k: z[k] for k in z.files}
     with _LOCK:
         _BASIS.clear()
-        _BASIS[key] = b
+        _BASIS[(map_id,)] = b
     return b
+
+
+def _latest_file(relic: "Relic5") -> str:
+    return os.path.join(relic.parts.root, "index", "_maps", "latest.ptr")   # not *.json: the cache keeps its newest *.json files only
+
+
+def _set_latest(relic: "Relic5", which: tuple[object, ...], map_id: str) -> None:
+    import json
+    p = _latest_file(relic)
+    try:
+        cur = json.load(open(p))
+    except (OSError, ValueError):
+        cur = {}
+    cur[repr(which)] = map_id
+    with open(p + ".tmp", "w") as fh:
+        json.dump(cur, fh)
+    os.replace(p + ".tmp", p)
+
+
+def _latest(relic: "Relic5", which: tuple[object, ...]) -> Json | None:
+    """The newest map already made for (model, limit, min chunks), whatever index generation it was made on."""
+    import json
+    try:
+        map_id = json.load(open(_latest_file(relic))).get(repr(which))
+        if not map_id:
+            return None
+        with _LOCK:
+            for v in _CACHE.values():
+                if v.get("map_id") == map_id:
+                    return v
+        out: Json = json.load(open(os.path.join(relic.parts.root, "index", "_maps", f"{map_id}.json")))
+        return out
+    except (OSError, ValueError):
+        return None
+
+
+_SOON: set[tuple[object, ...]] = set()
+
+
+def _rebuild_soon(relic: "Relic5", model: str | None, limit: int, min_chunks: int) -> None:
+    """One background rebuild per (model, limit, min chunks) at a time."""
+    k = (model, limit, min_chunks)
+    with _LOCK:
+        if k in _SOON:
+            return
+        _SOON.add(k)
+
+    def run() -> None:
+        try:
+            sessions_map(relic, model, limit, min_chunks, need_basis=True, wait=True)
+        except Exception:
+            pass
+        finally:
+            with _LOCK:
+                _SOON.discard(k)
+    threading.Thread(target=run, name="relic5-map-rebuild", daemon=True).start()
 
 
 def place(relic: "Relic5", uids: list[str], scores: list[float] | None = None, model: str | None = None) -> Json:
@@ -214,13 +292,10 @@ def place(relic: "Relic5", uids: list[str], scores: list[float] | None = None, m
     from .search import pick_model
     index = relic.index
     slug = pick_model(index, model)
-    # the Map's own projection, kept beside its cached JSON when the map was made (sessions_map); a map from before
-    # that is made again once. Never refitted here: refitting meant stacking every vector (4 GB, 54 s on white)
-    key = ("sessions", index.seen, slug, LIMIT, MIN_CHUNKS)
-    b = _basis_of(relic, key)
-    if b is None:
-        sessions_map(relic, slug, need_basis=True)
-        b = _basis_of(relic, key)
+    # the Map's own projection, by the map's id (the newest map made, sessions_map): never refitted here (refitting
+    # meant stacking every vector, 4 GB and 54 s on white)
+    mp = sessions_map(relic, slug, need_basis=True)
+    b = _basis_by_id(relic, mp.get("map_id"))
     if b is None:
         return {"points": [], "missing": uids, "centre": None}
     want = list(dict.fromkeys(u for u in uids if u))
@@ -255,7 +330,7 @@ def place(relic: "Relic5", uids: list[str], scores: list[float] | None = None, m
 def search_space(relic: "Relic5", uids: list[str], scores: list[float] | None = None) -> Json:
     """A search's hits placed (place) with the Map's own cloud of sessions (sessions_map, cached) behind them."""
     out = place(relic, uids, scores)
-    cloud = sessions_map(relic)
+    cloud = sessions_map(relic, need_basis=True)
     out["cloud"] = [{"sid": p["sid"], "x": p["x"], "y": p["y"], "z": p["z"], "repo": p.get("repo")} for p in cloud.get("points", [])]
     return out
 
