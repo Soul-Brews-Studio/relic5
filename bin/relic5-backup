@@ -44,7 +44,18 @@ for p in $PARTS; do
   $SSH "$HUB" "test -e '$home/relic5/$p'" || continue
   link=""
   [ -n "$PREV" ] && [ -d "$PREV/$p" ] && link="--link-dest=$PREV/$p"
-  out=$("$RSYNC" -a $DRY --delete --timeout=300 --stats $link "$HUB:$home/relic5/$p/" "$SNAP.partial/$p/" 2>&1) || { echo "$out" >&2; rc=1; continue; }
+  # A push lands every 10 minutes, so a file can change while it is copied: the 2026-10-25 run lost two small files
+  # under parts/white/git and failed (rsync code 23) after 2 GB. Try once more (only what changed moves again);
+  # code 24 (a file vanished on the hub mid-copy) is a finished copy of what is there.
+  try=0
+  while :; do
+    out=$("$RSYNC" -a $DRY --delete --timeout=300 --stats $link "$HUB:$home/relic5/$p/" "$SNAP.partial/$p/" 2>&1); r=$?
+    [ $r -eq 0 ] || [ $r -eq 24 ] && break
+    try=$((try + 1))
+    [ $try -lt 3 ] || break
+    echo "copy of $p failed (rsync $r), trying again" >&2; sleep 20
+  done
+  [ $r -eq 0 ] || [ $r -eq 24 ] || { echo "$out" >&2; rc=1; continue; }
   s=$(printf '%s\n' "$out" | sed -n -E 's/^Total bytes received: ([0-9,]+).*/\1/p' | tr -d ',')
   sent=$((sent + ${s:-0}))
   printf 'kept %-8s received=%s\n' "$p" "${s:-0}"
