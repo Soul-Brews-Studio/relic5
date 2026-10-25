@@ -5,7 +5,8 @@ Counts messages of the text stream (each message once: chunk 0, one msgkey howev
 bucket and, optionally, one dimension. Bangkok time throughout (ts_th), as every other page of the hub.
 
   by     day | week | month | hour (YYYY-MM-DDTHH) | hour_of_day (00..23) | weekday (1 Mon .. 7 Sun)
-  group  none | role | project (relic-scan's cat: the repo's short name) | machine | engine
+  group  none | role | project (relic-scan's cat: the repo's short name) | machine | engine | tool (tools stream)
+  stream text (messages) | tools (tool calls) | thinking | git (commits: role commit-claude / commit-codex / commit)
 """
 from typing import Any
 
@@ -19,18 +20,32 @@ BY = {
     "week": "strftime(date_trunc('week', TRY_CAST(substr(ts_th, 1, 10) AS DATE)), '%Y-%m-%d')",
     "weekday": "CAST(isodow(TRY_CAST(substr(ts_th, 1, 10) AS DATE)) AS VARCHAR)",
 }
-GROUP = {"none": "'all'", "role": "role", "project": "coalesce(nullif(cat, ''), '(none)')", "machine": "machine", "engine": "engine"}
+GROUP = {"none": "'all'", "role": "coalesce(role, '(none)')", "project": "coalesce(nullif(cat, ''), '(none)')", "machine": "machine",
+         "engine": "engine", "tool": "coalesce(name, '(none)')"}
+STREAMS = ("text", "tools", "thinking", "git")
+UNIT = {"text": "messages", "tools": "tool calls", "thinking": "thinking blocks", "git": "commits"}
 
 
 def activity(relic: Any, by: str = "day", group: str = "none", since: str | None = None, until: str | None = None,
-             role: str | None = None, project: str | None = None, machine: str | None = None, top: int = 12) -> Json:
+             role: str | None = None, project: str | None = None, machine: str | None = None, top: int = 12,
+             stream: str = "text") -> Json:
     """{by, group, buckets, series: [{name, total, counts: {bucket: n}}], total}: the top groups by total, the rest
     folded into 'other'. since/until: 'YYYY-MM-DD' or a longer Bangkok time prefix, on the message's time."""
     if by not in BY:
         raise ValueError(f"by is one of {', '.join(BY)}")
     if group not in GROUP:
         raise ValueError(f"group is one of {', '.join(GROUP)}")
-    src = relic.parts.source("text")
+    if stream not in STREAMS:
+        raise ValueError(f"stream is one of {', '.join(STREAMS)}")
+    if group == "tool" and stream != "tools":
+        raise ValueError("group tool needs stream tools")
+    if stream == "git":
+        import os
+        from . import gitlog
+        p = gitlog.table(relic.parts.root)
+        src = f"read_parquet('{p}')" if os.path.exists(p) else None
+    else:
+        src = relic.parts.source(stream)
     if not src:
         return {"by": by, "group": group, "buckets": [], "series": [], "total": 0}
     where: list[str] = ["chunk = 0", "ts_th IS NOT NULL"]
@@ -64,6 +79,6 @@ def activity(relic: Any, by: str = "day", group: str = "none", since: str | None
     buckets = sorted({b for s in series.values() for b in s})
     ranked = sorted(((g, c) for g, c in series.items() if c), key=lambda x: (x[0] == "other", -sum(x[1].values())))
     out: list[Json] = [{"name": g, "total": sum(c.values()), "counts": dict(sorted(c.items()))} for g, c in ranked]
-    return {"by": by, "group": group, "since": since, "until": until, "buckets": buckets, "series": out,
+    return {"by": by, "group": group, "stream": stream, "unit": UNIT[stream], "since": since, "until": until, "buckets": buckets, "series": out,
             "total": sum(sum(c.values()) for _, c in ranked),
-            "note": "messages (text stream, each once); weekday 1 = Monday; Bangkok time"}
+            "note": f"{UNIT[stream]}, each once; weekday 1 = Monday; Bangkok time"}
