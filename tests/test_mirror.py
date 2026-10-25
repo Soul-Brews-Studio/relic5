@@ -47,3 +47,19 @@ def test_the_storage_page_sets_a_mirror_verifies_and_switches(root, tmp_path, mo
     assert c.post("/api/storage", json={"action": "switch"}, headers=W).json()["switch_to"] == dst
     st = c.get("/api/storage", headers=W).json()
     assert st["switch_to"] == dst and st["last_job"]["verb"] == "mirror" and st["every_min"] == 30
+
+
+def test_a_copy_caught_mid_publish_still_serves(root, tmp_path, monkeypatch):
+    """current.json naming a table its generation folder lacks: the hub serves the other tables (2026-10-25: a
+    mirror caught white mid-publish, and the S3 hub answered every search with 'Table ... was not found')."""
+    import json
+    import duckdb
+    from relic5.cli import main
+    from relic5.query import Relic5
+    main(["index", "--root", root])
+    cur = os.path.join(root, "index/_search/current.json")
+    c = json.load(open(cur))
+    c["vec_gone_open"] = next(iter(c.values())).split("/")[0] + "/vec_gone_open.lance"
+    json.dump(c, open(cur, "w"))
+    r = Relic5(root, duckdb.connect())
+    assert r.search("hub")["hits"] and r.index.missing == ["vec_gone_open"]

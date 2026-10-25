@@ -244,10 +244,15 @@ class Index:
             import lancedb
             cur = current(self.root)
             tabs: dict[str, lancedb.table.Table] = {}
+            missing: list[str] = []
             for name, rel in cur.items():
                 gen, fname = rel.split("/")
-                tabs[name] = rfs.lancedb_connect(os.path.join(search_dir(self.root), gen)).open_table(fname[:-6])
-            self.tables, self.seen = tabs, m
+                try:   # a table current.json names but the folder lacks (a copy caught mid-publish): serve the rest
+                    tabs[name] = rfs.lancedb_connect(os.path.join(search_dir(self.root), gen)).open_table(fname[:-6])
+                except (ValueError, OSError, FileNotFoundError):
+                    missing.append(name)
+            self.tables, self.seen, self.missing = tabs, m, missing
+        return self.tables
         return self.tables
 
     def has_column(self, col: str) -> bool:

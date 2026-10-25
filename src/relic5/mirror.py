@@ -105,6 +105,11 @@ def copy(src: str, dst: str, dirs: tuple[str, ...] = DIRS, log: Any = None) -> J
     t0 = time.time()
     a, b = _listing(src, dirs), _listing(dst, dirs)
     todo = sorted(k for k in a if b.get(k) != a[k])
+    # an index's pointers last: current.json names tables in generation folders, so it may only arrive after them
+    # (2026-10-25: a mirror copied a new current.json before its generation, and the S3 hub could not open a table)
+    LAST = ("index/_search/current.json", "index/_search/state.json", "index/_search/vectors.json")
+    later = [k for k in todo if k in LAST]
+    todo = [k for k in todo if k not in LAST]
     sent, errors, done = 0, [], 0
     # 8 files at a time: one stream is bound by the round trips (5.6 MB/s from white to black's RustFS, one at a time,
     # measured 2026-10-25), and RustFS takes parallel uploads at 60-100 MB/s (neo's benchmark)
@@ -121,6 +126,14 @@ def copy(src: str, dst: str, dirs: tuple[str, ...] = DIRS, log: Any = None) -> J
             done += 1
             if log and (done % 50 == 0 or done == len(todo)):
                 log(done, len(todo), sent)
+    # then the pointers, and only when everything they may name arrived; else the next run sends them
+    for rel in later if not errors else []:
+        try:
+            _copy_one(os.path.join(src, rel), os.path.join(dst, rel))
+            sent += a[rel]
+        except Exception as ex:
+            errors.append(f"{rel}: {type(ex).__name__}: {str(ex)[:120]}")
+    todo += later
     return {"src": src, "dst": dst, "files": len(todo) - len(errors), "bytes": sent, "skipped": len(a) - len(todo),
             "seconds": round(time.time() - t0, 1), "errors": errors[:20]}
 
