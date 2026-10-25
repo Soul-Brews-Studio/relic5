@@ -39,3 +39,14 @@ def test_homes_split_search_and_sessions(tmp_path):
     hs = {h["home"]: h for h in r.homes()["homes"]}
     assert hs["/Users/beta/.claude"]["user"] == "beta" and hs["/Users/beta/.claude"]["kind"] == "user"
     assert hs["/Users/nat/Code/exp/.claude-hello/.claude"]["kind"] == "project" and hs["/Users/nat/.claude"]["label"] == "~/.claude"
+
+
+def test_home_kinds_and_owners():
+    from relic5.query import home_kind
+    assert home_kind("/Users/beta/.claude") == {"user": "beta", "kind": "user", "label": "~/.claude"}
+    assert home_kind("/Users/nat/.claude1")["kind"] == "extra"
+    assert home_kind("/Users/beta/.relic3-mirror/Users/nat/.claude") | {} == {"user": "nat", "kind": "mirror", "label": "~beta/.relic3-mirror/Users/nat/.claude"}
+    assert home_kind("/Users/Shared/nat-export/.claude")["user"] == "nat" and home_kind("/Users/Shared/nat-export/.claude")["kind"] == "export"
+    assert home_kind("/opt/Code/_archive/oracle-world/neo-2026-06-10/.claude", "beta@m5") == {"user": "beta", "kind": "project", "label": "/opt/Code/_archive/oracle-world/neo-2026-06-10/.claude"}
+    assert home_kind("/Users/nat/Code/exp/.claude-hello/.claude")["kind"] == "project"
+    assert home_kind(None, "nat@m5")["kind"] == "unknown"
