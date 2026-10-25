@@ -90,17 +90,21 @@ export function NavDrawer({ open, onClose, view, go, state, foot, badges, onPale
   badges?: Partial<Record<View, number>>; onPalette: () => void;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  // Nat, 2026-10-25: "when active left drawer it should main and can see and working with the right side". On a wide
+  // screen the drawer is a panel beside the page (non-modal: the page pushes right and stays usable, a view change
+  // keeps it open); on a phone it stays a modal sheet over the page.
+  const wide = () => matchMedia("(min-width: 1024px)").matches;
   useEffect(() => {
     const d = ref.current;
     if (!d) return;
-    if (open && !d.open) d.showModal();
+    if (open && !d.open) { if (wide()) d.show(); else d.showModal(); }
     if (!open && d.open) d.close();
   }, [open]);
   const item = (v: (typeof VIEWS)[number]) => {
     const I = v.icon, on = view === v.id;
     return (
       <a key={v.id} href={v.id === "home" ? "#" : `#tab=${v.id}`} aria-current={on ? "page" : undefined}
-        onClick={e => { e.preventDefault(); go(v.id); onClose(); }}
+        onClick={e => { e.preventDefault(); go(v.id); if (!wide()) onClose(); }}
         className={cx("flex min-h-11 items-center gap-3 rounded-lg px-3 text-sm font-medium", on ? "bg-raised text-text" : "text-soft hover:bg-raised hover:text-text")}>
         <span className={on ? "text-accent" : "text-muted"}><I size={20} /></span>{v.label}
         {!!badges?.[v.id] && <span className="ml-auto rounded-full bg-accent px-1.5 text-xs font-bold text-on-accent">{badges[v.id]}</span>}
@@ -109,7 +113,7 @@ export function NavDrawer({ open, onClose, view, go, state, foot, badges, onPale
   };
   return (
     <dialog ref={ref} onClose={onClose} onClick={e => e.target === ref.current && onClose()} aria-label="Menu"
-      className="m-0 h-dvh max-h-none w-[280px] max-w-[85vw] border-0 border-r border-line bg-rail p-0 text-text shadow-[var(--shadow-pop)] backdrop:bg-black/50">
+      className="fixed inset-y-0 left-0 z-30 m-0 h-dvh max-h-none w-[280px] max-w-[85vw] border-0 border-r border-line bg-rail p-0 text-text shadow-[var(--shadow-pop)] backdrop:bg-black/50 lg:shadow-none">
       <div className="flex h-full flex-col px-3 pt-4 pb-4">
         <div className="mb-5 flex items-center gap-3 px-1.5">
           <Mark size={34} /><b className="text-lg font-bold text-accent">relic5</b>

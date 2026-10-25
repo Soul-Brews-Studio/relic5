@@ -38,13 +38,19 @@ export default function Map3D({ points, colors, dim, selected, onHover, onSelect
     controls.enableDamping = true; controls.dampingFactor = 0.08; controls.autoRotateSpeed = 0.6;
 
     const pos = new Float32Array(points.length * 3), col = new Float32Array(points.length * 3);
-    points.forEach((p, i) => { pos[i * 3] = p.x; pos[i * 3 + 1] = p.y; pos[i * 3 + 2] = p.z; });
+    const target = new Float32Array(points.length * 3);
+    points.forEach((p, i) => { target[i * 3] = p.x; target[i * 3 + 1] = p.y; target[i * 3 + 2] = p.z; });
+    // the points fly out from the centre to where they belong (900 ms, ease-out), unless motion is turned down
+    const still = matchMedia("(prefers-reduced-motion: reduce)").matches, t0 = performance.now(), DUR = 900;
+    let growing = !still;
+    pos.set(still ? target : target.map(v => v * 0.02));
     const geo = new BufferGeometry();
     geo.setAttribute("position", new BufferAttribute(pos, 3));
     geo.setAttribute("color", new BufferAttribute(col, 3));
     const sprite = dot();
     const mat = new PointsMaterial({ size: 0.045, vertexColors: true, map: sprite, transparent: true, alphaTest: 0.05, depthWrite: false, sizeAttenuation: true });
     const cloud = new Points(geo, mat);
+    cloud.frustumCulled = false;   // its bounds change while the points fly out
     scene.add(cloud);
     // the selected session: one bigger white point drawn on top
     const selGeo = new BufferGeometry();
@@ -91,7 +97,16 @@ export default function Map3D({ points, colors, dim, selected, onHover, onSelect
     const size = () => { const w = el.clientWidth, h = el.clientHeight; renderer.setSize(w, h, false); renderer.domElement.style.width = "100%"; renderer.domElement.style.height = "100%"; camera.aspect = w / Math.max(h, 1); camera.updateProjectionMatrix(); };
     const ro = new ResizeObserver(size); ro.observe(el); size();
     let raf = 0;
-    const tick = () => { if (!document.hidden) { controls.update(); renderer.render(scene, camera); } raf = requestAnimationFrame(tick); };
+    const tick = () => {
+      if (growing) {
+        const t = Math.min(1, (performance.now() - t0) / DUR), k = 1 - Math.pow(1 - t, 3);
+        for (let i = 0; i < pos.length; i++) pos[i] = target[i] * (0.02 + 0.98 * k);
+        geo.attributes.position.needsUpdate = true;
+        if (t >= 1) { growing = false; geo.computeBoundingSphere(); }
+      }
+      if (!document.hidden) { controls.update(); renderer.render(scene, camera); }
+      raf = requestAnimationFrame(tick);
+    };
     tick();
     return () => {
       cancelAnimationFrame(raf); ro.disconnect(); controls.dispose();

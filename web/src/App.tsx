@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { flushSync } from "react-dom";
-import { get } from "./api";
+import { get, prefetch } from "./api";
 import { usePoll } from "./api";
 import { ago, bkk, clock } from "./format";
 import type { Queries, ShowResult, Status } from "./types";
@@ -72,6 +72,10 @@ export function App() {
 
   useEffect(() => { document.documentElement.dataset.theme = theme; localStorage.setItem("relic5-theme", theme); }, [theme]);
   useEffect(() => { writeHash(st.view, st.machine, st.search); }, [st]);
+  useEffect(() => {   // when the first page has settled: the Map's points and its three.js, so the Map opens at once
+    const idle = (window as Window & { requestIdleCallback?: (f: () => void) => number }).requestIdleCallback ?? ((f: () => void) => setTimeout(f, 2500));
+    idle(() => { prefetch("/api/map?limit=3000"); import("./views/Map3D").catch(() => {}); });
+  }, []);
   useEffect(() => {
     const pop = () => setSt(readHash());
     const key = (e: KeyboardEvent) => {
@@ -101,9 +105,10 @@ export function App() {
         className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:rounded-lg focus:bg-panel focus:px-4 focus:py-3 focus:text-sm">Skip to content</a>
       {layout === "side" && <Sidebar view={st.view} go={go} state={hub} foot={foot} theme={theme} setTheme={setTheme} badges={{ jobs: s?.jobs.running.length }}
         onPalette={() => setPalette(true)} onLayout={() => setLayout("top")} />}
-      <div id="main" tabIndex={-1} className={cx("h-dvh overflow-y-auto focus:outline-none", layout === "side" && "sm:pl-[232px] max-[1100px]:sm:pl-[68px]")}>
+      {/* the drawer on a wide screen sits beside the page and pushes it right: the page stays in view and in use */}
+      <div id="main" tabIndex={-1} className={cx("h-dvh overflow-y-auto transition-[padding] duration-200 ease-out focus:outline-none", layout === "side" && "sm:pl-[232px] max-[1100px]:sm:pl-[68px]", drawer && layout !== "side" && "lg:pl-[280px]")}>
         {layout === "top" && <TopNav view={st.view} go={go} state={hub} foot={foot} theme={theme} setTheme={setTheme} badges={{ jobs: s?.jobs.running.length }}
-          onPalette={() => setPalette(true)} onLayout={() => setLayout("side")} onDrawer={() => setDrawer(true)} version={s?.code.version} />}
+          onPalette={() => setPalette(true)} onLayout={() => setLayout("side")} onDrawer={() => setDrawer(d => !d)} version={s?.code.version} />}
         {/* phone: a slim top bar (mark, state, the palette); the views sit in the bottom bar */}
         <header className="sticky top-0 z-10 flex items-center gap-3 border-b border-line bg-[color-mix(in_srgb,var(--bg)_90%,transparent)] px-4 py-2.5 backdrop-blur sm:hidden">
           <button type="button" onClick={() => setDrawer(true)} aria-label="Open the menu" aria-haspopup="dialog" className="-ml-2 grid size-11 place-items-center rounded-lg text-muted"><MenuIcon size={20} /></button>

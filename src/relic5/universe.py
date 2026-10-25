@@ -60,6 +60,8 @@ def _put(relic: "Relic5", key: tuple[object, ...], out: Json) -> None:
     old = sorted(glob.glob(os.path.join(os.path.dirname(f), "*.json")), key=os.path.getmtime)[:-KEEP]
     for x in old:
         os.remove(x)
+        if os.path.exists(x[:-5] + ".npz"):   # the map's projection goes with it
+            os.remove(x[:-5] + ".npz")
 
 
 def keep_warm(relic: "Relic5", every: float = 60.0) -> None:
@@ -89,7 +91,8 @@ MIN_CHUNKS = 3   # a session with one or two embedded lines lands wherever its o
 LIMIT = 3000   # sessions on the Map by default
 
 
-def sessions_map(relic: "Relic5", model: str | None = None, limit: int = LIMIT, min_chunks: int = MIN_CHUNKS) -> Json:
+def sessions_map(relic: "Relic5", model: str | None = None, limit: int = LIMIT, min_chunks: int = MIN_CHUNKS,
+                 need_basis: bool = False) -> Json:
     """-> {model, sessions, chunks, explained, points: [{sid, x, y, z, n, ts, repo, name, machines}]}, newest
     sessions first up to limit (the projection is fitted on exactly those)."""
     import numpy as np
@@ -99,7 +102,7 @@ def sessions_map(relic: "Relic5", model: str | None = None, limit: int = LIMIT, 
     mats = index.matrices(slug)
     key = ("sessions", index.seen, slug, int(limit), int(min_chunks))
     hit = _get(relic, key)
-    if hit is not None:
+    if hit is not None and (not need_basis or _basis_of(relic, key) is not None):
         return hit
     if not mats:
         return {"model": slug, "sessions": 0, "chunks": 0, "explained": [], "points": []}
@@ -130,7 +133,9 @@ def sessions_map(relic: "Relic5", model: str | None = None, limit: int = LIMIT, 
         means[j] = acc
     means /= np.linalg.norm(means, axis=1, keepdims=True) + 1e-9
 
-    xyz, explained = project(means)
+    basis: dict[str, Any] = {}
+    xyz, explained = project(means, basis)
+    _save_basis(relic, key, basis)
 
     sids = [str(sid_s[starts[g]]) for g in keep]
     names, repos = relic._names(sids), relic._repos(sids)
@@ -172,7 +177,33 @@ def project(vecs: "Any", basis: "dict[str, Any] | None" = None) -> "tuple[Any, l
     return xyz, ([round(float(v / var.sum()), 4) for v in var[:k]] if var.sum() > 0 else [])
 
 
-_BASIS: dict[tuple[object, ...], dict[str, "Any"]] = {}   # (generation, model) -> the sessions map's projection
+_BASIS: dict[tuple[object, ...], dict[str, "Any"]] = {}   # a sessions map's key -> its projection (mean, axes, span)
+
+
+def _save_basis(relic: "Relic5", key: tuple[object, ...], basis: dict[str, "Any"]) -> None:
+    import numpy as np, os
+    with _LOCK:
+        _BASIS.clear()
+        _BASIS[key] = basis
+    f = _file(relic, key)[:-5] + ".npz"
+    np.savez(f + ".tmp.npz", **basis)
+    os.replace(f + ".tmp.npz", f)
+
+
+def _basis_of(relic: "Relic5", key: tuple[object, ...]) -> "dict[str, Any] | None":
+    import numpy as np, os
+    with _LOCK:
+        if key in _BASIS:
+            return _BASIS[key]
+    f = _file(relic, key)[:-5] + ".npz"
+    if not os.path.exists(f):
+        return None
+    with np.load(f) as z:
+        b = {k: z[k] for k in z.files}
+    with _LOCK:
+        _BASIS.clear()
+        _BASIS[key] = b
+    return b
 
 
 def place(relic: "Relic5", uids: list[str], scores: list[float] | None = None, model: str | None = None) -> Json:
@@ -183,34 +214,26 @@ def place(relic: "Relic5", uids: list[str], scores: list[float] | None = None, m
     from .search import pick_model
     index = relic.index
     slug = pick_model(index, model)
-    key = (index.seen, slug)
-    if key not in _BASIS:
-        _BASIS.clear()
-        mats = index.matrices(slug)
-        if not mats:
-            return {"points": [], "missing": uids, "centre": None}
-        b: dict[str, Any] = {}
-        # exactly sessions_map's rows (the newest `limit` sessions with at least MIN_CHUNKS chunks, each its unit mean),
-        # so the PCA is the same one the Map drew; reduceat sums each session's rows in one pass
-        sid = np.concatenate([m.cols["sid"].astype(str) for m in mats])
-        ts = np.concatenate([m.cols["ts"].astype(str) for m in mats])
-        allv = np.concatenate([m.M for m in mats])
-        order = np.lexsort((ts, sid))
-        sid_s = sid[order]
-        starts = np.flatnonzero(np.r_[True, sid_s[1:] != sid_s[:-1]])
-        counts = np.diff(np.r_[starts, len(sid_s)])
-        newest = ts[order][starts + counts - 1]
-        keep = np.flatnonzero(counts >= MIN_CHUNKS)
-        keep = keep[np.argsort(newest[keep])[::-1][:LIMIT]]
-        means = np.add.reduceat(allv[order], starts)[keep]
-        means /= np.linalg.norm(means, axis=1, keepdims=True) + 1e-9
-        project(means, b)
-        _BASIS[key] = b
-    b = _BASIS[key]
+    # the Map's own projection, kept beside its cached JSON when the map was made (sessions_map); a map from before
+    # that is made again once. Never refitted here: refitting meant stacking every vector (4 GB, 54 s on white)
+    key = ("sessions", index.seen, slug, LIMIT, MIN_CHUNKS)
+    b = _basis_of(relic, key)
+    if b is None:
+        sessions_map(relic, slug, need_basis=True)
+        b = _basis_of(relic, key)
+    if b is None:
+        return {"points": [], "missing": uids, "centre": None}
     want = list(dict.fromkeys(u for u in uids if u))
     found: dict[str, "Any"] = {}
     for m in index.matrices(slug):
-        hit = np.flatnonzero(np.isin(m.cols["uid"].astype(str), want))
+        u = getattr(m, "_uid", None)
+        if u is None:   # made once per matrix: a 1.4M-row astype per call cost about a second
+            u = m.cols["uid"].astype(str)
+            try:
+                setattr(m, "_uid", u)
+            except AttributeError:
+                pass
+        hit = np.flatnonzero(np.isin(u, want))
         for i in hit:
             found.setdefault(str(m.cols["uid"][i]), m.M[i])
     def xyz(v: "Any") -> list[float]:
