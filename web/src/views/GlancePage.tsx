@@ -223,8 +223,7 @@ function Homes() {
           <span className="text-sm font-semibold text-text">{h.user ?? "unknown"}<span className="ml-2 text-xs font-normal text-muted">{h.machine}</span></span>
           <span className="col-span-2 min-w-0 md:col-span-1">
             <span className="block truncate font-mono text-sm text-soft" title={h.home ?? ""}>{h.label}</span>
-            {h.kind === "project" && <span className="text-xs text-amber">a project's own home</span>}
-            {h.kind === "unknown" && <span className="text-xs text-muted">pushed before relic-scan wrote where</span>}
+            {h.kind !== "user" && <span className={"text-xs " + (h.kind === "project" ? "text-amber" : "text-muted")}>{({ extra: "another home of the same user", project: "a project's own home", mirror: "a mirror copy of another home", export: "an exported home", unknown: "pushed before relic-scan wrote where" } as Record<string, string>)[h.kind]}</span>}
           </span>
           <span className="text-right text-sm text-muted tabular-nums md:text-left">{num(h.sessions)} sessions</span>
           <span className="flex items-center gap-2"><span className="h-1.5 min-w-0 flex-1 rounded-full bg-raised"><span className="block h-1.5 rounded-full bg-accent" style={{ width: `${Math.max(2, (100 * Math.log1p(h.messages)) / Math.log1p(max))}%` }} /></span>

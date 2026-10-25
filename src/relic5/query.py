@@ -69,6 +69,31 @@ def folded(src: str, where: str = "TRUE") -> str:
                row_number() OVER (PARTITION BY msgkey, chunk ORDER BY machine) AS rn FROM {src} WHERE {where}) WHERE rn = 1)"""
 
 
+def home_kind(home: str | None, agent: str | None = None) -> Json:
+    """Whose a home is and what kind: the owner from the path (the last /Users/<u>/ or /home/<u>/, so a mirror of nat's
+    ~/.claude under beta's folder is nat's), else relic-scan's user@host; the kind: user (~/.claude, ~/.codex), extra
+    (another home of the same user: ~/.claude1, ~/.claude-lean), mirror (a copy: .relic3-mirror, .relic-mirrors),
+    export (/Users/Shared/<u>-export), project (a .claude inside a project or an archive), unknown (no src_path)."""
+    if not home:
+        return {"user": (agent or "").split("@")[0] or None, "kind": "unknown", "label": "unknown (parts before src_path)"}
+    owners = re.findall(r"/(?:Users|home)/([^/]+)/", home + "/")
+    exp = re.search(r"/Users/Shared/([^/]+?)-export/", home + "/")
+    user = (exp.group(1) if exp else None) or next((u for u in reversed(owners) if u != "Shared"), None) or (agent or "").split("@")[0] or None
+    if "/.relic3-mirror/" in home or "/.relic-mirrors/" in home:
+        kind = "mirror"
+    elif exp:
+        kind = "export"
+    elif re.fullmatch(r"/(?:Users|home)/[^/]+/\.(?:claude|codex)", home):
+        kind = "user"
+    elif re.fullmatch(r"/(?:Users|home)/[^/]+/\.(?:claude|codex)[^/]+", home):
+        kind = "extra"
+    else:
+        kind = "project"
+    m = re.match(r"^/(?:Users|home)/([^/]+)/(.*)$", home)
+    label = f"~{'' if m and m.group(1) == user else m.group(1) if m else ''}/{m.group(2)}" if m else home
+    return {"user": user, "kind": kind, "label": label}
+
+
 class Relic5:
     _resolved: str | None   # how show() placed an old relic3 id, set by _parse_id
 
@@ -122,16 +147,11 @@ class Relic5:
         p = homes_path(self.parts.root)
         if not rfs.exists(p):
             return {"homes": [], "note": "no homes table yet: run relic5 index"}
-        rows = self._rows(f"""SELECT machine, home, agent, count(*) AS sessions, sum(messages) AS messages,
+        rows = self._rows(f"""SELECT machine, home, mode(agent) AS agent, count(*) AS sessions, sum(messages) AS messages,
                                      min(first_ts) AS first, max(last_ts) AS last
-                              FROM read_parquet('{p}') GROUP BY ALL ORDER BY messages DESC""")
+                              FROM read_parquet('{p}') GROUP BY machine, home ORDER BY messages DESC""")
         for r in rows:
-            h = r["home"] or ""
-            user = re.search(r"^/(?:Users|home)/([^/]+)/", h)
-            r["user"] = (r["agent"] or "").split("@")[0] or (user.group(1) if user else None)
-            r["kind"] = ("unknown" if not h else "project" if not re.match(r"^/(?:Users|home)/[^/]+/\.[^/]+$", h) and not h.startswith("/Users/Shared/")
-                         and "/.relic" not in h else "user")
-            r["label"] = (h.replace(f"/Users/{r['user']}/", "~/").replace(f"/home/{r['user']}/", "~/") if h else "unknown (parts before src_path)")
+            r.update(home_kind(r["home"], r["agent"]))
         return {"homes": rows}
 
     def _names(self, sids: Collection[str]) -> dict[str, str]:
