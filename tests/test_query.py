@@ -95,8 +95,37 @@ def test_sessions(relic):
     r = relic.sessions()
     assert r["total"] == 2 and [s["uuid"] for s in r["sessions"]] == ["s1-aaaa", "s2-bbbb"]
     assert r["sessions"][0]["children"] == 1   # the subagent is folded into its parent
+    a = r["all"]   # every session once, the subagent too: what "transcript events" on the glance page counts
+    assert a["sessions"] == 3 and a["subagents"] == 1 and a["events"] == r["events"] + a["subagent_events"]
     assert [s["uuid"] for s in relic.sessions(repo="github.com/Soul-Brews-Studio/relic5")["sessions"]] == ["s2-bbbb"]
     assert relic.sessions(since="2026-10-23")["total"] == 1
+
+
+def test_sessions_by_repo(relic):
+    """Counts per repo for the same window and filters: what a month recap's "By project" needs (2026-10-24)."""
+    r = relic.sessions(by_repo=True, limit=0)
+    assert {x["repo"]: x["sessions"] for x in r["repos"]} == {"-opt-Code-github-com-laris-co-neo-oracle": 1,
+                                                              "-opt-Code-github-com-Soul-Brews-Studio-relic5": 1}
+    assert sum(x["sessions"] for x in r["repos"]) == r["total"]
+    assert [x["repo"] for x in relic.sessions(by_repo=True, since="2026-10-23")["repos"]] == ["-opt-Code-github-com-laris-co-neo-oracle"]
+    assert "repos" not in relic.sessions()
+    assert len(relic.sessions(by_repo=True)["repos"]) <= 201                # top 200 plus one "(other N repos)" row
+
+
+def test_sessions_pick_the_same_copy_every_time(root):
+    """A sid held twice on one machine (two homes): always the most complete copy, so counts never move."""
+    import os
+    import duckdb
+    from conftest import META_COLS, meta, write_parquet
+    from relic5.query import Relic5
+    p = os.path.join(root, "parts/m5/meta/sessions.parquet")
+    rows = [meta("s1-aaaa"), meta("s2-bbbb", last="2026-10-22T10:00:00.000Z", proj="-opt-Code-github-com-Soul-Brews-Studio-relic5"),
+            meta("agent-1", tier="subagent", parent="s1-aaaa"),
+            meta("s9-dup", first="2026-09-29T00:00:00.000Z", last="2026-09-30T00:00:00.000Z"),   # an old copy, September only
+            meta("s9-dup", first="2026-09-29T00:00:00.000Z", last="2026-10-23T00:00:00.000Z")]   # the full one, into October
+    write_parquet(p, META_COLS, rows, types={"n_rows": "BIGINT", "months": "VARCHAR[]", **{k: "BIGINT" for k in META_COLS[11:]}})
+    for _ in range(5):
+        assert Relic5(root, duckdb.connect()).sessions(since="2026-10-01")["total"] == 3     # s1, s2 and s9's full copy
 
 
 def test_session(relic):

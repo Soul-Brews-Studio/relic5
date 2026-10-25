@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any, TypedDict
 
 from .parts import Parts, sql_list
 from .types_ import Json
+from . import store as rfs
 
 if TYPE_CHECKING:   # for annotations only: numpy, duckdb and lancedb are loaded where they are used
     import duckdb
@@ -46,14 +47,41 @@ class VecFilter(TypedDict, total=False):
 
 def models(root: str) -> list[str]:
     d = os.path.join(root, VDIR)
-    if not os.path.isdir(d):
+    if not rfs.isdir(d):
         return []
-    return sorted(m for m in os.listdir(d) if MODEL_DIR.match(m) and shards(root, m))
+    return sorted(m for m in rfs.listdir(d) if MODEL_DIR.match(m) and shards(root, m))
 
 
 def shards(root: str, model: str) -> list[str]:
     d = os.path.join(root, VDIR, model)
-    return sorted(os.path.join(d, f) for f in os.listdir(d) if f.endswith(".parquet") and not f.startswith(".")) if os.path.isdir(d) else []
+    return sorted(os.path.join(d, f) for f in rfs.listdir(d) if f.endswith(".parquet") and not f.startswith(".")) if rfs.isdir(d) else []
+
+
+def shard_months(root: str, model: str, con: "duckdb.DuckDBPyConnection", parts: Parts) -> dict[str, list[str]]:
+    """{shard file: the months its keys belong to}, cached in index/_search/shard_months.json by (name, size). A new
+    shard of 100 October chunks then changes only the open table's inputs, and the 1M-row history table is left
+    alone (2026-10-24: every shard rebuilt both, 50 s of a 58 s embed)."""
+    import json
+    from .fts import search_dir
+    p = os.path.join(search_dir(root), "shard_months.json")
+    try:
+        cache: dict[str, Json] = rfs.read_json(p)
+    except (OSError, ValueError):
+        cache = {}
+    fs = [p_ for _, _, p_ in parts.files("text")]
+    out: dict[str, list[str]] = {}
+    for f in shards(root, model):
+        name, size = os.path.basename(f), rfs.getsize(f)
+        hit = cache.get(name)
+        if hit and hit.get("size") == size:
+            out[name] = list(hit["months"])
+            continue
+        months = [m for (m,) in con.execute(f"""SELECT DISTINCT coalesce(month, substr(ts_th, 1, 7)) FROM read_parquet({sql_list(fs)}, union_by_name = true)
+                                                WHERE key IN (SELECT key FROM read_parquet({sql_list([f])})) ORDER BY 1""").fetchall() if m] if fs else []
+        cache[name] = {"size": size, "months": months}
+        out[name] = months
+    rfs.write_json(p, {k: v for k, v in cache.items() if k in out})
+    return out
 
 
 def slug(model: str) -> str:
@@ -79,8 +107,15 @@ def missing(root: str, con: "duckdb.DuckDBPyConnection", model: str = DEFAULT, l
             max_chars: int = 6000) -> Json:
     """Keys of the prose text stream with no vector yet, newest first (the open month first), one row per key.
     prefix: only keys starting with it, so two workers (m5, gb300) can take disjoint slices."""
+    import os
     parts = Parts(root)
     src = text_sql(parts)
+    # the memory notes too (index/_memory/notes.parquet, key = the note's msgkey): each note gets its own vector, so the
+    # Knowledge page can place notes by meaning (Nat, 2026-10-24: "vectorized (individual) vector visualize")
+    mem = os.path.join(root, "index", "_memory", "notes.parquet")
+    if rfs.exists(mem):
+        notes = f"(SELECT key, ts, text FROM read_parquet('{mem.replace(chr(39), chr(39) * 2)}') WHERE text IS NOT NULL AND text <> '')"
+        src = f"(SELECT key, ts, text FROM {src} UNION ALL SELECT * FROM {notes})" if src else notes
     if src is None:
         return {"model": model, "rows": [], "pending": 0}
     have = vectors_sql(root, model)
@@ -116,6 +151,24 @@ def watermarks(root: str, con: "duckdb.DuckDBPyConnection", model: str = DEFAULT
             at = one[0]
         out[m] = {"at": at, "pending": pending}
     return out
+
+
+def write_marks(root: str, con: "duckdb.DuckDBPyConnection", published: bool) -> dict[str, dict[str, Json]]:
+    """Write index/_search/vectors.json: per model and machine the watermark and how many chunks have no vector.
+    The vector lane (published=True) moves "at", the time vectors were last published. The fast lane recounts after
+    every push (published=False, about 1 s), so pending grows as new messages land instead of reading 0 until the
+    next embed; "counted_at" says when the count was taken."""
+    import json, os, time
+    from .fts import search_dir
+    p = os.path.join(search_dir(root), "vectors.json")
+    try:
+        old = rfs.read_json(p).get("at")
+    except (OSError, ValueError, AttributeError):
+        old = None
+    marks = {m: watermarks(root, con, m) for m in models(root)}
+    now = time.strftime("%FT%T%z")
+    rfs.write_json(p, {"at": now if published else old, "counted_at": now, "models": marks}, indent=1)
+    return marks
 
 
 def table_sql(parts: Parts, root: str, model: str, months: Collection[str]) -> str | None:

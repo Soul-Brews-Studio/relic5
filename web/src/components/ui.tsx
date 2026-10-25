@@ -1,31 +1,58 @@
-// Small building blocks shared by every view. Each one owns its Tailwind classes, so a view only composes them.
+// Small building blocks shared by every view, in relic-scan's app vocabulary (relic4-scan src/page/dash.css): amber primary
+// action, hairline borders, 16px cards, tracked uppercase stat labels, numbers in tabular figures. Each one owns its
+// Tailwind classes, so a view only composes them.
 import type { ReactNode } from "react";
 
 const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(" ");
 export { cx };
 
-export function Lbl({ children, className }: { children: ReactNode; className?: string }) {
-  return <span className={cx("text-[12px] font-semibold text-muted", className)}>{children}</span>;
+/** A view's head: the title says what the view is (no eyebrow), one dim line under it, actions on the right. */
+export function PageHead({ title, sub, children }: { title: ReactNode; sub?: ReactNode; children?: ReactNode }) {
+  return (
+    <header className="mb-8 flex flex-wrap items-end gap-x-8 gap-y-4">
+      <div className="min-w-0 flex-[1_1_20rem]">
+        <h1 className="m-0 text-xl lg:text-2xl font-extrabold tracking-[-0.02em] text-text text-balance">{title}</h1>
+        {sub && <p className="m-0 mt-3 max-w-[75ch] text-base text-muted">{sub}</p>}
+      </div>
+      {children && <div className="flex flex-wrap items-center gap-3">{children}</div>}
+    </header>
+  );
 }
 
-export function Btn({ children, primary, ...p }: { primary?: boolean } & React.ButtonHTMLAttributes<HTMLButtonElement>) {
+/** The one container: a 16px card on the canvas. Never put a Card inside a Card. */
+export function Card({ children, title, tone, className, pad = true }:
+  { children: ReactNode; title?: ReactNode; tone?: "amber" | "cyan"; className?: string; pad?: boolean }) {
   return (
-    <button {...p} className={cx("min-h-9 whitespace-nowrap rounded-[5px] border px-3.5 text-[11px] font-semibold disabled:cursor-not-allowed disabled:opacity-55",
-      primary ? "border-accent-dim bg-accent-dim text-accent-ink hover:brightness-110" : "border-line bg-raised text-soft hover:border-line-strong hover:text-text",
+    <section className={cx("min-w-0 rounded-2xl border border-line bg-panel", pad && "p-6", className)}>
+      {title && <h2 className={cx("m-0 mb-4 flex items-center gap-2.5 text-base font-bold", tone === "cyan" ? "text-accent" : tone === "amber" ? "text-amber" : "text-text")}>{title}</h2>}
+      {children}
+    </section>
+  );
+}
+
+export function Lbl({ children, className }: { children: ReactNode; className?: string }) {
+  return <span className={cx("text-xs font-bold tracking-[0.14em] text-muted uppercase", className)}>{children}</span>;
+}
+
+export function Btn({ children, primary, size, ...p }: { primary?: boolean; size?: "lg" } & React.ButtonHTMLAttributes<HTMLButtonElement>) {
+  return (
+    <button {...p} className={cx("inline-flex items-center justify-center gap-2 border font-semibold whitespace-nowrap",
+      size === "lg" ? "min-h-14 rounded-xl px-7 text-base" : "min-h-11 rounded-lg px-4 text-sm",
+      "transition-[background-color,border-color,color,filter] duration-[120ms] ease-[var(--ease-out)] disabled:cursor-not-allowed disabled:opacity-55",
+      primary ? "border-transparent bg-accent text-on-accent hover:brightness-110 active:translate-y-px active:brightness-95" : "border-line bg-raised text-soft hover:border-line-strong hover:text-text",
       p.className)}>{children}</button>
   );
 }
 
 /** Segmented picker: one of `options`, pressed state on the chosen one. */
-export function Seg<T extends string>({ value, options, onChange, label }:
-  { value: T; options: { value: T; label: string }[]; onChange: (v: T) => void; label: string }) {
+export function Seg<T extends string>({ value, options, onChange, label, block }:
+  { value: T; options: { value: T; label: string }[]; onChange: (v: T) => void; label: string; block?: boolean }) {
   return (
-    <div role="group" aria-label={label} className="inline-flex w-max rounded-[5px] bg-raised">
-      {options.map((o, i) => (
+    <div role="group" aria-label={label} className={cx("gap-1 rounded-[10px] border border-line bg-deep p-1", block ? "grid grid-cols-3" : "inline-flex w-max")}>
+      {options.map(o => (
         <button key={o.value} type="button" aria-pressed={value === o.value} onClick={() => onChange(o.value)}
-          className={cx("min-h-9 whitespace-nowrap border border-line px-3 text-[11px] font-semibold",
-            i === 0 && "rounded-l-[5px]", i === options.length - 1 ? "rounded-r-[5px]" : "border-r-0",
-            value === o.value ? "border-line-strong bg-accent-dim text-accent-ink" : "bg-transparent text-muted hover:text-text")}>
+          className={cx("min-h-9 rounded-[7px] px-3 text-xs font-semibold whitespace-nowrap transition-colors duration-[120ms]",
+            value === o.value ? "bg-accent-wash text-text shadow-[inset_0_0_0_1px_var(--accent)]" : "text-muted hover:text-text")}>
           {o.label}
         </button>
       ))}
@@ -33,71 +60,98 @@ export function Seg<T extends string>({ value, options, onChange, label }:
   );
 }
 
-export function Field({ label, children, wide, htmlFor }: { label: string; children: ReactNode; wide?: boolean; htmlFor?: string }) {
-  return (
-    <div className={cx("flex min-w-0 flex-col gap-1.5", wide ? "flex-[1_1_300px]" : "flex-[0_1_190px]")}>
-      <label htmlFor={htmlFor}><Lbl>{label}</Lbl></label>
-      {children}
-    </div>
-  );
-}
+export const inputCls = "h-11 min-w-0 rounded-lg border border-line bg-deep px-3 text-sm text-text placeholder:text-faint hover:border-line-strong focus:border-accent";
 
-export const inputCls = "h-9 min-w-0 rounded-[5px] border border-line bg-deep px-3 text-xs text-text placeholder:text-faint hover:border-line-strong";
-
-export function Toolbar({ children, onSubmit }: { children: ReactNode; onSubmit?: () => void }) {
-  return (
-    <form onSubmit={e => { e.preventDefault(); onSubmit?.(); }}
-      className="flex flex-wrap items-end gap-x-3.5 gap-y-3 border-b border-line bg-panel px-4 pt-3.5 pb-3">{children}</form>
-  );
-}
-
-export type Tone = "ok" | "warn" | "bad" | "dim";
+export type Tone = "ok" | "warn" | "bad" | "dim" | "live";
 const tones: Record<Tone, string> = {
-  ok: "border-accent-dim text-accent", warn: "border-warning text-warning", bad: "border-danger text-danger", dim: "border-line text-muted",
+  live: "bg-accent-wash text-accent", ok: "bg-ok-wash text-ok", warn: "bg-warning-wash text-warning", bad: "bg-danger-wash text-danger", dim: "bg-raised text-muted",
 };
 export function Chip({ tone = "dim", children, title }: { tone?: Tone; children: ReactNode; title?: string }) {
-  return <span title={title} className={cx("inline-flex items-baseline gap-1 rounded border px-1.5 text-[10px] font-semibold", tones[tone])}>{children}</span>;
+  return <span title={title} className={cx("inline-flex items-baseline gap-1 rounded-md px-2 py-px text-xs font-semibold tracking-[0.02em]", tones[tone])}>{children}</span>;
 }
 
-export function Stat({ label, value, tone, note }: { label: string; value: ReactNode; tone?: Tone; note?: string }) {
-  const color = tone === "ok" ? "text-accent" : tone === "warn" ? "text-warning" : tone === "bad" ? "text-danger" : "text-text";
+/** One number with its label above and an optional detail line under it (relic-scan's .stat). */
+export function Stat({ label, value, tone, note }: { label: string; value: ReactNode; tone?: Tone; note?: ReactNode }) {
+  const color = tone === "live" ? "text-accent" : tone === "ok" ? "text-ok" : tone === "warn" ? "text-warning" : tone === "bad" ? "text-danger" : "text-text";
   return (
-    <div className="border-r border-line px-5 py-4 last:border-r-0">
-      <Lbl className="mb-1 block">{label}</Lbl>
-      <b className={cx("text-[22px] font-bold tabular-nums", color)}>{value}</b>
-      {note && <div className="truncate text-[10px] text-faint">{note}</div>}
+    <div className="min-w-0">
+      <Lbl>{label}</Lbl>
+      <div className={cx("mt-1.5 text-xl font-extrabold tracking-[-0.01em] tabular-nums", color)}>{value}</div>
+      {note && <div className="mt-1 truncate text-xs text-muted">{note}</div>}
     </div>
   );
 }
 export function Stats({ children }: { children: ReactNode }) {
-  return <div className="grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] border-b border-line">{children}</div>;
+  return <div className="mb-8 grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-x-8 gap-y-6">{children}</div>;
 }
 
-export function SectionHead({ children }: { children: ReactNode }) {
-  return <div className="px-5 pt-6 pb-2"><h3 className="m-0 text-[15px] font-semibold text-text">{children}</h3></div>;
+export function SectionHead({ children, sub }: { children: ReactNode; sub?: ReactNode }) {
+  return (
+    <div className="mt-12 mb-5">
+      <h2 className="m-0 text-lg font-bold tracking-[-0.01em] text-text">{children}</h2>
+      {sub && <p className="m-0 mt-1.5 max-w-[75ch] text-sm text-muted">{sub}</p>}
+    </div>
+  );
 }
+/** Where a list's numbers came from: the route, when, how long. Quiet, one line. */
 export function Hint({ children }: { children: ReactNode }) {
-  return <div className="border-b border-line bg-panel px-5 py-2.5 text-[12px] text-muted">{children}</div>;
+  return <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-xs text-faint">{children}</div>;
 }
 export function State({ children, error }: { children: ReactNode; error?: boolean }) {
-  return <div className={cx("px-5 py-6 text-[13px]", error ? "border-l-2 border-danger bg-danger-wash whitespace-pre-wrap text-danger" : "text-faint")}>{children}</div>;
+  return <div className={cx("rounded-xl px-5 py-6 text-sm", error ? "bg-danger-wash whitespace-pre-wrap text-danger" : "text-muted")}>{children}</div>;
 }
-export const Loading = () => <div className="loading-bar" />;
+export const Loading = ({ label = "Loading" }: { label?: string }) => <div role="progressbar" aria-label={label} className="loading-bar" />;
 
 export function Kbd({ children }: { children: ReactNode }) {
-  return <kbd className="rounded border border-line bg-raised px-1 text-[10px] text-soft">{children}</kbd>;
+  return <kbd className="rounded-md border border-line bg-raised px-1.5 font-mono text-xs text-soft">{children}</kbd>;
 }
 
-/** Who said it, coloured the way Structor colours roles. */
+/** Who said it: a dot and a word, cyan for the human, amber for the assistant, violet for tools. */
 export function Who({ role }: { role: string }) {
   const c = role === "user" ? "text-user" : role === "assistant" ? "text-assistant" : "text-tool";
-  return <span className={cx("font-semibold", c)}>{role}</span>;
+  const d = role === "user" ? "bg-user" : role === "assistant" ? "bg-assistant" : "bg-tool";
+  return <span className={cx("inline-flex items-center gap-1.5 font-semibold", c)}><span className={cx("size-1.5 rounded-full", d)} />{role === "user" ? "human" : role}</span>;
 }
 
-/** Text with each query word wrapped in <mark>, without ever injecting HTML. */
+/** The colour of the query's n-th token, the same in the token panel, the hit matrix and every highlight. Six theme
+ *  hues in a fixed order; a seventh token and later share the neutral (never a cycled hue). */
+export const TOKEN_HUES = ["var(--accent)", "var(--amber)", "var(--ok)", "var(--tool)", "var(--danger)", "var(--code)"];
+export const tokenHue = (i: number) => TOKEN_HUES[i] ?? "var(--muted)";
+
+/** The words of a query the way the index splits it, near enough: letters and digits runs, lower case. */
+export const queryWords = (q: string) => [...new Set((q.toLowerCase().match(/[\p{L}\p{M}\p{N}_]+/gu) ?? []))];
+
+/** Text with each query word wrapped in <mark>, without ever injecting HTML. A Latin word or number matches only as a
+ *  whole word ("we" not inside "were", the index's tokens are whole words); Thai has no spaces, so it matches inside.
+ *  Each word wears its token colour. */
 export function Marked({ text, q }: { text: string; q: string }) {
-  const words = q.split(/\s+/).filter(Boolean).map(w => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const words = queryWords(q);
   if (!words.length) return <>{text}</>;
-  const parts = text.split(new RegExp(`(${words.join("|")})`, "gi"));
-  return <>{parts.map((p, i) => (i % 2 ? <mark key={i}>{p}</mark> : p))}</>;
+  const esc = (w: string) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pat = words.map(w => (/^[\p{Script=Latin}\p{N}_]+$/u.test(w) ? `(?<![\\p{L}\\p{N}])${esc(w)}(?![\\p{L}\\p{N}])` : esc(w)));
+  const parts = text.split(new RegExp(`(${pat.join("|")})`, "giu"));
+  return <>{parts.map((p, i) => {
+    if (i % 2 === 0) return p;
+    const n = words.indexOf(p.toLowerCase()), c = tokenHue(n);
+    return <mark key={i} style={{ background: `color-mix(in srgb, ${c} 26%, transparent)`, color: "var(--text)", boxShadow: `inset 0 -2px 0 ${c}` }}>{p}</mark>;
+  })}</>;
+}
+
+/** The one "pick some of these" control: chips that press (machines, who). Pressed = cyan outline on a cyan wash, the
+ *  same idiom as Seg and the sidebar's active item (Panel B: five ways of drawing "selected" became one). */
+export function Toggle({ pressed, onClick, children, dot }: { pressed: boolean; onClick: () => void; children: ReactNode; dot?: string }) {
+  return (
+    <button type="button" aria-pressed={pressed} onClick={onClick}
+      className={cx("inline-flex min-h-11 items-center gap-2 rounded-lg border px-3.5 text-sm font-semibold transition-colors duration-[120ms]",
+        pressed ? "border-accent bg-accent-wash text-text" : "border-line text-muted hover:border-line-strong hover:text-text")}>
+      {dot && <span className={cx("size-2 rounded-full", dot, !pressed && "opacity-40")} />}{children}
+    </button>
+  );
+}
+
+/** Machine picker (Search rail, Live head): "all" plus each machine. */
+/** Which machine: the same segmented control as every other "pick one" (Search, Live). */
+export function MachinePick({ machine, machines, onChange, counts }: { machine: string; machines: string[]; onChange: (m: string) => void; counts?: Record<string, number> }) {
+  if (machines.length < 2) return null;
+  return <Seg label="Machine" value={machine} onChange={onChange} options={["", ...machines].map(m => ({ value: m, label: `${m || "all machines"}${counts ? ` · ${counts[m] ?? 0}` : ""}` }))} />;
 }

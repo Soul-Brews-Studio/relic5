@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- bin/claude-sync every 10 minutes, as the account it is loaded in. FROM_HOME = the other account's .claude.
+     Install (as beta, FROM_HOME=/Users/nat/.claude; as nat, FROM_HOME=/Users/beta/.claude):
+       sed "s#FROM_HOME#/Users/nat/.claude#; s#LOG_HOME#$HOME#" deploy/launchd/studio.soulbrews.claude-sync.plist > ~/Library/LaunchAgents/studio.soulbrews.claude-sync.plist
+       launchctl load -w ~/Library/LaunchAgents/studio.soulbrews.claude-sync.plist -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>studio.soulbrews.claude-sync</string>
+  <key>ProgramArguments</key>
+  <array><string>/Users/Shared/claude-sync/claude-sync</string><string>FROM_HOME</string></array>
+  <key>StartInterval</key><integer>600</integer>
+  <key>RunAtLoad</key><true/>
+  <key>Nice</key><integer>10</integer>
+  <key>ProcessType</key><string>Background</string>
+  <key>StandardOutPath</key><string>LOG_HOME/Library/Logs/claude-sync.log</string>
+  <key>StandardErrorPath</key><string>LOG_HOME/Library/Logs/claude-sync.log</string>
+</dict>
+</plist>

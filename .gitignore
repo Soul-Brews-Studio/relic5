@@ -9,3 +9,9 @@ feeder/*.app/
 .impeccable/review/
 .impeccable/*.json
 .impeccable/
+
+# ψ: a symlink to the caretaker oracle's vault (neo-oracle ψ/family/…/relic5), machine-local, never committed (/psi)
+ψ
+ψ/
+.claude/PSI_CARETAKER
+.DS_Store

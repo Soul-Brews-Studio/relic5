@@ -6,22 +6,24 @@ counts so a relic3 consumer that reads weeks.total still gets a number. Watermar
   machines  per machine and stream: the newest ts it pushed (its watermark: every row at or before it is here)
   vectors   nothing embedded yet (embed milestone): pending = every folded text row
 """
-import os, time
+import json, os, time
 from datetime import datetime as _datetime
 
 from . import __version__
 from .parts import MONTH_STREAMS, Parts, this_month
 from .types_ import JobEvent, Json
+from . import store as rfs
 
 
 BACKUP_STALE_S = 36 * 3600   # nightly, plus a day of slack (relic4-scan, 2026-10-24)
 
 
-def last_backup(evs: list[JobEvent], now: _datetime | None = None) -> Json:
-    """The newest finished backup (bin/relic5-backup writes a JobEvent "backup"): when, how big, how old."""
+def last_backup(evs: list[JobEvent], now: _datetime | None = None, verb: str = "backup") -> Json:
+    """The newest finished backup (bin/relic5-backup writes a JobEvent "backup"; bin/relic5-offsite one "offsite"):
+    when, how big, how old."""
     from datetime import datetime
     from .window import utcnow
-    b = next((e for e in evs if e.get("verb") == "backup" and e.get("state") == "done"), None)
+    b = next((e for e in evs if e.get("verb") == verb and e.get("state") == "done"), None)
     if not b:
         return {"at": None, "bytes": None, "message": None, "age_s": None, "host": None}
     try:
@@ -29,6 +31,17 @@ def last_backup(evs: list[JobEvent], now: _datetime | None = None) -> Json:
     except ValueError:
         age = None
     return {"at": b["at"], "bytes": b.get("done"), "message": b.get("message"), "age_s": age, "host": b.get("host")}
+
+
+def copy_of(root: str) -> Json | None:
+    """A hub restored from a backup snapshot to look at locally (COPY.json, written when it was copied: of, snapshot,
+    at). It is not live: nothing pushes to it, so freshness, backup and seal-day checks are off and the UI says so."""
+    p = os.path.join(root, "COPY.json")
+    try:
+        c: Json = rfs.read_json(p)
+        return c
+    except (OSError, ValueError):
+        return None
 
 
 def status(root: str, now: _datetime | None = None) -> Json:
@@ -49,15 +62,19 @@ def status(root: str, now: _datetime | None = None) -> Json:
                 if mv.get("mtime"):
                     at = time.strftime("%FT%T%z", time.localtime(mv["mtime"]))
                     e["pushed_at"] = max(e["pushed_at"] or "", at)
+    from .fts import current, search_dir
+    for name, rel in current(p.root).items():   # a table the index names but lacks (a copy caught mid-publish)
+        if not rfs.isdir(os.path.join(search_dir(p.root), rel)):
+            warnings.append(f"index table {name} is missing ({rel}): run relic5 index")
     for m in p.machines():
-        if not os.path.isfile(os.path.join(p.dir, m, "meta", "sessions.parquet")):
+        if not rfs.isfile(os.path.join(p.dir, m, "meta", "sessions.parquet")):
             warnings.append(f"machine {m}: no meta/sessions.parquet (sessions and repo filters miss it)")
     versions: dict[str, Json] = {}
     for m in p.machines():
         vp = os.path.join(p.dir, m, "_versions.json")
-        if os.path.isfile(vp):
+        if rfs.isfile(vp):
             try:
-                versions[m] = __import__("json").load(open(vp))
+                versions[m] = rfs.read_json(vp)
             except ValueError:
                 warnings.append(f"machine {m}: unreadable _versions.json")
     chained = {m: v for m, v in versions.items() if not m.endswith("-import")}   # an import is a one-off push, not a machine with a chain
@@ -74,7 +91,7 @@ def status(root: str, now: _datetime | None = None) -> Json:
     from .fts import current, search_dir
     import json as _json
     sp = os.path.join(search_dir(p.root), "state.json")
-    fst = _json.load(open(sp)) if os.path.exists(sp) else {}
+    fst = rfs.read_json(sp) if rfs.exists(sp) else {}
     live = current(p.root)
     fts = {"at": max((v["built"] for k, v in fst.items() if k in live), default=None),
            "rows": {k: v["rows"] for k, v in fst.items() if k in live}}
@@ -90,13 +107,27 @@ def status(root: str, now: _datetime | None = None) -> Json:
     vfy = seal_info["verify"]
     for prob in ((vfy.get("problems") if vfy else None) or [])[:3]:
         warnings.append(f"seal: {prob}")
-    backup = last_backup(evs, now)
-    if backup["at"] is None:
+    from . import sealday as SD
+    seal_days = SD.summary(p.root)
+    copy = copy_of(p.root)
+    if not copy:   # a copy gets no pushes, backups or seals of its own: those checks belong to the live hub
+        warnings += SD.overdue(seal_days, now)
+    from .jobs import last_done
+    # the tail (evs) first; a nightly event older than the tail is still the last backup, not "no backup yet"
+    backup = last_backup(evs, now) if any(e.get("verb") == "backup" and e.get("state") == "done" for e in evs) \
+        else last_backup([e for e in [last_done(p.root, "backup")] if e], now)
+    offsite = last_backup(evs, now, "offsite") if any(e.get("verb") == "offsite" and e.get("state") == "done" for e in evs) \
+        else last_backup([e for e in [last_done(p.root, "offsite")] if e], now, "offsite")   # white -> black RustFS bucket relic5-hub (bin/relic5-offsite)
+    if not copy and offsite["age_s"] is not None and offsite["age_s"] > BACKUP_STALE_S:
+        warnings.append(f"last offsite copy {offsite['age_s'] // 3600} h ago, at {offsite['at']} (should run nightly)")
+    if copy:
+        pass
+    elif backup["at"] is None:
         warnings.append("no backup yet (bin/relic5-backup on m5 pulls one; see docs/RESTORE.md)")
     elif backup["age_s"] is not None and backup["age_s"] > BACKUP_STALE_S:
         warnings.append(f"last backup {backup['age_s'] // 3600} h ago, at {backup['at']} (should run nightly)")
     vp = os.path.join(search_dir(p.root), "vectors.json")
-    vs = _json.load(open(vp)) if os.path.exists(vp) else {"at": None, "models": {}}
+    vs = rfs.read_json(vp) if rfs.exists(vp) else {"at": None, "models": {}}
     vectors = {"at": vs["at"], "pending": sum(v["pending"] for w in vs["models"].values() for v in w.values()) if vs["models"] else rows["text"],
                "models": vs["models"], "tables": {k: v["rows"] for k, v in fst.items() if k in live and k.startswith("vec_")}}
     # freshness: how far behind each machine and each index is (relic-chain runs every 10 min on m5, 2026-10-23)
@@ -116,23 +147,23 @@ def status(root: str, now: _datetime | None = None) -> Json:
         fresh["machines"][m] = {"newest_ts": x.get("newest_ts"), "pushed_at": pushed, "lag_s": lag(x.get("newest_ts")),
                                 "push_age_s": lag(pushed.replace("+0700", "+07:00").replace("+0000", "+00:00")) if pushed else None}
         age = fresh["machines"][m]["push_age_s"]
-        if age is not None and age > 1800 and not m.endswith("-import"):
+        if age is not None and age > 1800 and not m.endswith("-import") and not copy:
             warnings.append(f"machine {m}: last push {age // 60} min ago (relic-chain should push every 10 min)")
     for m in p.machines():   # the chain's own verdict (relic-chain SYNC OK / MISMATCH), as last pushed
         sp_ = os.path.join(p.dir, m, "_sync.json")
-        if os.path.isfile(sp_):
+        if rfs.isfile(sp_):
             try:
-                line = __import__("json").load(open(sp_)).get("line", "")
+                line = rfs.read_json(sp_).get("line", "")
             except ValueError:
                 continue
             fresh["machines"].setdefault(m, {})["sync"] = line
             if "MISMATCH" in line:
                 warnings.append(f"machine {m}: {line}")
     ip = os.path.join(p.root, "index", "_search", "current.json")
-    fresh["fts"]["age_s"] = round(t_now - os.path.getmtime(ip)) if os.path.exists(ip) else None
+    fresh["fts"]["age_s"] = round(t_now - rfs.getmtime(ip)) if rfs.exists(ip) else None
     from . import selfknow
     store, res = selfknow.store(p.root), selfknow.resources()
-    warnings += selfknow.warnings(store, res)
+    warnings += [w.replace("on the hub", "on this machine (a copy of the hub)") if copy else w for w in selfknow.warnings(store, res)]
     q = selfknow.queries(p.root)
     cur = this_month(now)
     sealed = [m for m in months if m != "undated" and m < cur]
@@ -154,7 +185,11 @@ def status(root: str, now: _datetime | None = None) -> Json:
                  "tools": rows["tools"], "sessions": None, "files": sum(len(p.files(s)) for s in MONTH_STREAMS)},
         "jobs": {"running": running, "recent": evs[:10], "last_error": last_error},
         "backup": backup,
+        "offsite": offsite,
+        "copy": copy,
         "memory": __import__("relic5.memory", fromlist=["counts"]).counts(p.root),
+        "git": __import__("relic5.gitlog", fromlist=["counts"]).counts(p.root),
         "seals": seal_info,
+        "seal_days": seal_days,
         "warnings": warnings,
     }

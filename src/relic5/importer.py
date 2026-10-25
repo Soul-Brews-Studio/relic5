@@ -21,6 +21,7 @@ import json, os, time
 from typing import TYPE_CHECKING, Callable, Iterable
 
 from .types_ import Json
+from . import store as rfs
 
 if TYPE_CHECKING:
     import duckdb
@@ -33,7 +34,7 @@ SCHEMA = ("s VARCHAR, h BIGINT, idx BIGINT, engine VARCHAR, role VARCHAR, type V
 def live_files(index_dir: str) -> tuple[str, Json, dict[str, list[str]]]:
     """{"events": [...], "tools": [...]}: the parquet files of relic3's current generation."""
     run = open(os.path.join(index_dir, "_manifest", "current")).read().strip()
-    m = json.load(open(os.path.join(index_dir, "_manifest", f"{run}.json")))
+    m = rfs.read_json(os.path.join(index_dir, "_manifest", f"{run}.json"))
     out: dict[str, list[str]] = {"events": [], "tools": []}
     for week, w in m["weeks"].items():
         year = week[:4]
@@ -41,9 +42,9 @@ def live_files(index_dir: str) -> tuple[str, Json, dict[str, list[str]]]:
             for t in out:
                 if f"_{t}__" in f:
                     p = os.path.join(index_dir, year, week, f)
-                    if not os.path.exists(p):
+                    if not rfs.exists(p):
                         p = os.path.join(index_dir, "_quarantine", f)
-                    if os.path.exists(p):
+                    if rfs.exists(p):
                         out[t].append(p)
     return run, m["totals"], out
 
@@ -126,7 +127,7 @@ def convert_truth(con: "duckdb.DuckDBPyConnection", truth_dir: str, out_dir: str
     minus model / msg_id / out_tokens: keep the sessions no live machine holds, add those three as NULL, mark the rows'
     machines ["jsonl-truth-import"] and keep its own sources (agent@machine:path:line). Months are re-derived from ts_th."""
     import glob
-    files = sorted(glob.glob(os.path.join(truth_dir, "*.duckdb")))
+    files = sorted(rfs.glob(os.path.join(truth_dir, "*.duckdb")))
     if known is not None:
         con.execute("CREATE OR REPLACE TEMP TABLE known(sid VARCHAR)")
         con.executemany("INSERT INTO known VALUES (?)", [(s,) for s in known])
@@ -175,5 +176,5 @@ def relic3_links(con: "duckdb.DuckDBPyConnection", index_dir: str, out_path: str
     ) TO '{out_path}.tmp' (FORMAT parquet, COMPRESSION zstd)""")
     os.replace(out_path + ".tmp", out_path)
     n: int = con.execute(f"SELECT count(*) FROM '{out_path}'").fetchone()[0]   # type: ignore[index]  # count() always returns a row
-    log(f"relic3 links: {n:,} uids from run {run} -> {out_path} ({os.path.getsize(out_path) / 1e6:.0f} MB, {time.time() - t:.0f}s)")
+    log(f"relic3 links: {n:,} uids from run {run} -> {out_path} ({rfs.getsize(out_path) / 1e6:.0f} MB, {time.time() - t:.0f}s)")
     return n

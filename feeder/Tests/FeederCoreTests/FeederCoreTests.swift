@@ -109,4 +109,37 @@ final class FeederCoreTests: XCTestCase {
         XCTAssertEqual(s.othersLine("m5"), "mba OK 23:35 · white MISMATCH 23:40")
         XCTAssertEqual(s.diskFreePct, 22.0)
     }
+
+    // relic-scan ops --json (relic4-scan src/ops.rs chain_view), a pass in its push stage
+    static let running = #"{"at":"x","chain":{"state":"running","machine":"m5","started":"2026-10-24 15:18:15","ended":null,"stages":[{"name":"scan","state":"done","secs":147.3,"typical_s":140.0,"detail":"scan 98.6s"},{"name":"extract","state":"done","secs":14.2,"typical_s":14.2,"detail":null},{"name":"push to the hub","state":"running","secs":null,"typical_s":16.0,"detail":null},{"name":"hub index + embed","state":"waiting","secs":null,"typical_s":null,"detail":null},{"name":"sync check","state":"waiting","secs":null,"typical_s":null,"detail":null}],"sync":null,"elapsed_s":180,"typical_total_s":300.0,"eta_s":120.0}}"#
+    static let idle = #"{"chain":{"state":"idle","machine":"m5","stages":[],"sync":"SYNC OK  text|1075420","elapsed_s":null,"typical_total_s":299.0,"eta_s":null,"took_s":285,"next_in_s":217}}"#
+
+    func testChainSnapshotRunning() throws {
+        let s = try ChainSnapshot.decode(Data(Self.running.utf8))
+        XCTAssertTrue(s.running)
+        XCTAssertEqual(s.stages.map(\.mark), ["✓", "✓", "●", "·", "·"])
+        XCTAssertEqual(s.progress ?? 0, 0.6, accuracy: 1e-9)
+        XCTAssertEqual(s.leftLine, "about 2:00 left")
+        XCTAssertEqual(s.stages[0].secs, 147.3)
+    }
+
+    func testChainSnapshotIdleAndClock() throws {
+        let s = try ChainSnapshot.decode(Data(Self.idle.utf8))
+        XCTAssertFalse(s.running); XCTAssertNil(s.progress); XCTAssertNil(s.leftLine)
+        XCTAssertEqual(s.tookS, 285); XCTAssertEqual(s.nextInS, 217); XCTAssertEqual(s.syncOK, true)
+        XCTAssertEqual(clock(105), "1:45"); XCTAssertEqual(clock(3725), "1:02:05"); XCTAssertEqual(clock(0), "0:00")
+        XCTAssertThrowsError(try ChainSnapshot.decode(Data("{}".utf8)))
+    }
+
+    func testChainWatchShowsSyncOnceAfterAPassEnds() throws {
+        var w = ChainWatch(hold: 8)
+        let run = try ChainSnapshot.decode(Data(Self.running.utf8)), idle = try ChainSnapshot.decode(Data(Self.idle.utf8))
+        let t0 = Date()
+        XCTAssertFalse(w.see(idle, now: t0))                     // idle at start: nothing just ended
+        XCTAssertFalse(w.see(run, now: t0))
+        XCTAssertTrue(w.see(idle, now: t0.addingTimeInterval(3)))  // running -> idle
+        XCTAssertEqual(w.justEnded(now: t0.addingTimeInterval(5)), "SYNC OK  text|1075420")
+        XCTAssertNil(w.justEnded(now: t0.addingTimeInterval(12)))
+        XCTAssertFalse(w.see(idle, now: t0.addingTimeInterval(13)))
+    }
 }

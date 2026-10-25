@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, TypedDict
 from .parts import STREAMS, Parts
 from .types_ import Json
 from .window import window
+from . import store as rfs
 
 if TYPE_CHECKING:   # for annotations only: the connection comes from the caller
     import duckdb
@@ -68,13 +69,38 @@ def folded(src: str, where: str = "TRUE") -> str:
                row_number() OVER (PARTITION BY msgkey, chunk ORDER BY machine) AS rn FROM {src} WHERE {where}) WHERE rn = 1)"""
 
 
+def home_kind(home: str | None, agent: str | None = None) -> Json:
+    """Whose a home is and what kind: the owner from the path (the last /Users/<u>/ or /home/<u>/, so a mirror of nat's
+    ~/.claude under beta's folder is nat's), else relic-scan's user@host; the kind: user (~/.claude, ~/.codex), extra
+    (another home of the same user: ~/.claude1, ~/.claude-lean), mirror (a copy: .relic3-mirror, .relic-mirrors),
+    export (/Users/Shared/<u>-export), project (a .claude inside a project or an archive), unknown (no src_path)."""
+    if not home:
+        return {"user": (agent or "").split("@")[0] or None, "kind": "unknown", "label": "unknown (parts before src_path)"}
+    owners = re.findall(r"/(?:Users|home)/([^/]+)/", home + "/")
+    exp = re.search(r"/Users/Shared/([^/]+?)-export/", home + "/")
+    user = (exp.group(1) if exp else None) or next((u for u in reversed(owners) if u != "Shared"), None) or (agent or "").split("@")[0] or None
+    if "/.relic3-mirror/" in home or "/.relic-mirrors/" in home:
+        kind = "mirror"
+    elif exp:
+        kind = "export"
+    elif re.fullmatch(r"/(?:Users|home)/[^/]+/\.(?:claude|codex)", home):
+        kind = "user"
+    elif re.fullmatch(r"/(?:Users|home)/[^/]+/\.(?:claude|codex)[^/]+", home):
+        kind = "extra"
+    else:
+        kind = "project"
+    m = re.match(r"^/(?:Users|home)/([^/]+)/(.*)$", home)
+    label = f"~{'' if m and m.group(1) == user else m.group(1) if m else ''}/{m.group(2)}" if m else home
+    return {"user": user, "kind": kind, "label": label}
+
+
 class Relic5:
     _resolved: str | None   # how show() placed an old relic3 id, set by _parse_id
 
     def __init__(self, root: str, con: "duckdb.DuckDBPyConnection") -> None:
         from .fts import Index
         self.parts = Parts(root)
-        self.con = con
+        self.con = rfs.duck(con, self.parts.root)   # an S3 root: the connection reads s3:// through httpfs
         self.index = Index(root)
 
     def _rows(self, sql: str, params: Sequence[object] = ()) -> list[Json]:
@@ -88,8 +114,11 @@ class Relic5:
         if not fs:
             return None
         lst = ", ".join("'" + f.replace("'", "''") + "'" for f in fs)
-        # one row per sid: a main session over a subagent copy, then the first machine by name
-        return f"""(SELECT * EXCLUDE (rn) FROM (SELECT *, row_number() OVER (PARTITION BY sid ORDER BY tier <> 'main', machine) AS rn
+        # one row per sid: a main session over a subagent copy, then the first machine by name, then the most complete
+        # copy (latest last_ts, most rows, then by file name). Without the last three a sid held twice on one machine
+        # (~/.claude and a mirror) picked a copy at random, and relic_sessions' total moved between calls (2026-10-24).
+        return f"""(SELECT * EXCLUDE (rn) FROM (SELECT *, row_number() OVER (PARTITION BY sid ORDER BY tier <> 'main', machine,
+                   last_ts DESC NULLS LAST, n_rows DESC NULLS LAST, base) AS rn
                    FROM (SELECT regexp_extract(filename, '/parts/([^/]+)/', 1) AS machine, * EXCLUDE (filename)
                    FROM read_parquet([{lst}], union_by_name = true, filename = true))) WHERE rn = 1)"""
 
@@ -104,10 +133,31 @@ class Relic5:
         except Exception:
             return False
 
+    def sessions_of_home(self, home: str) -> list[str]:
+        """Every session whose home holds this (substring, case-blind): names.build_homes."""
+        from .names import homes_path
+        p = homes_path(self.parts.root)
+        if not rfs.exists(p):
+            return []
+        return [r["sid"] for r in self._rows(f"SELECT sid FROM read_parquet('{p}') WHERE lower(home) LIKE ?", ["%" + home.lower() + "%"])]
+
+    def homes(self) -> Json:
+        """Where the history comes from: per machine and home, the user@host, sessions, messages, first and last."""
+        from .names import homes_path
+        p = homes_path(self.parts.root)
+        if not rfs.exists(p):
+            return {"homes": [], "note": "no homes table yet: run relic5 index"}
+        rows = self._rows(f"""SELECT machine, home, mode(agent) AS agent, count(*) AS sessions, sum(messages) AS messages,
+                                     min(first_ts) AS first, max(last_ts) AS last
+                              FROM read_parquet('{p}') GROUP BY machine, home ORDER BY messages DESC""")
+        for r in rows:
+            r.update(home_kind(r["home"], r["agent"]))
+        return {"homes": rows}
+
     def _names(self, sids: Collection[str]) -> dict[str, str]:
         from .names import path
         p = path(self.parts.root)
-        if not sids or not os.path.exists(p):
+        if not sids or not rfs.exists(p):
             return {}
         return {r["sid"]: r["name"] for r in self._rows(f"SELECT sid, name FROM read_parquet('{p}') WHERE sid IN (SELECT unnest(?))", [list(sids)])}
 
@@ -123,7 +173,7 @@ class Relic5:
                with_: str | None = None, limit: int = DEFAULT_LIMIT, cursor: str | None = None,
                vector: Sequence[float] | None = None, model: str | None = None, hybrid: bool = False, sort: str | None = None,
                min_chars: int | None = None, cwd: str | None = None, branch: str | None = None, title: str | None = None,
-               via: str | None = None, chat: str | None = None, from_user: str | None = None) -> Json:
+               via: str | None = None, chat: str | None = None, from_user: str | None = None, home: str | None = None) -> Json:
         """BM25 over the published index (search.py); ILIKE over the parts when none is built or FTS cannot parse
         the query (relic3 falls back the same way, query.ts:127-140)."""
         if query is None or not query.split():   # None or blank
@@ -134,12 +184,12 @@ class Relic5:
             if not self.index.built():
                 raise UsageError("no index published yet")
             from . import search as S
-            return S.search(self, self.index, query, vector=vector, model=model, hybrid=hybrid, sort=sort, min_chars=min_chars, cwd=cwd, branch=branch, title=title, via=via, chat=chat, from_user=from_user, **kw)
+            return S.search(self, self.index, query, vector=vector, model=model, hybrid=hybrid, sort=sort, min_chars=min_chars, cwd=cwd, branch=branch, title=title, via=via, chat=chat, from_user=from_user, home=home, **kw)
         if self.index.built():
             from . import search as S
             try:
                 return S.search(self, self.index, query, sort=sort, cwd=cwd, branch=branch, title=title, via=via, chat=chat,
-                                from_user=from_user, **kw)
+                                from_user=from_user, home=home, **kw)
             except UsageError:
                 raise
             except NotFound:
@@ -236,7 +286,7 @@ class Relic5:
         """An old relic3:// link or 40-hex uid -> (msgkey, how) through resolve/relic3.parquet, or None."""
         m = re.search(r"([0-9a-f]{40})$", ident)
         p = os.path.join(self.parts.root, "resolve", "relic3.parquet")
-        if not m or not os.path.exists(p):
+        if not m or not rfs.exists(p):
             return None
         rows = self._rows(f"SELECT sid, ts, role, layer, msgkey FROM read_parquet('{p}') WHERE uid = ?", [m.group(1)])
         if not rows:
@@ -317,14 +367,16 @@ class Relic5:
             if parts:
                 layer = s
                 break
-        if not parts:   # a memory note (memory.py): its own table, no session neighbours
-            mp = os.path.join(self.parts.root, "index", "_memory", "notes.parquet")
-            if os.path.exists(mp):
-                hit = self._rows(f"SELECT * EXCLUDE (machine) FROM read_parquet('{mp}') WHERE msgkey = ?", [msgkey])
-                if hit:
-                    t = hit[0] | {"link": f"relic5://{hit[0]['month']}/{msgkey}", "uid": msgkey}
-                    return {"link": t["link"], "target": t, "notes": [f"memory note ({t['role']}) from {t['path']}"],
-                            "parts": [t], "before": [], "after": [], "raw": None, "layer": "memory"}
+        # a memory note (memory.py) or a git commit (gitlog.py): its own table, no session neighbours
+        for side, (d, f), what in (("memory", ("_memory", "notes.parquet"), "memory note"), ("git", ("_git", "commits.parquet"), "git commit")):
+            mp = os.path.join(self.parts.root, "index", d, f)
+            if parts or not rfs.exists(mp):
+                continue
+            hit = self._rows(f"SELECT * EXCLUDE (machine) FROM read_parquet('{mp}') WHERE msgkey = ?", [msgkey])
+            if hit:
+                t = hit[0] | {"link": f"relic5://{hit[0]['month']}/{msgkey}", "uid": msgkey}
+                note = f"{what} ({t['role']}) from {t['path']}" + (f", {t['hash']} in {', '.join(t['repos'])}" if side == "git" else "")
+                return {"link": t["link"], "target": t, "notes": [note], "parts": [t], "before": [], "after": [], "raw": None, "layer": side}
         if not parts:
             raise NotFound(f"no message {msgkey}" + (f" in {month}" if month else ""))
         target = next((p for p in parts if p["chunk"] == chunk), parts[0])
@@ -379,7 +431,8 @@ class Relic5:
 
     # ---- sessions ----
     def sessions(self, repo: str | None = None, since: str | None = None, until: str | None = None, limit: int | None = None,
-                 via: str | None = None, chat: str | None = None, from_user: str | None = None) -> Json:
+                 via: str | None = None, chat: str | None = None, from_user: str | None = None, by_repo: bool = False,
+                 home: str | None = None) -> Json:
         meta = self._meta()
         if not meta:
             raise NotFound("no sessions on the hub: push relic-scan's meta/sessions.parquet")
@@ -398,14 +451,37 @@ class Relic5:
             if v:
                 where.append(cond)
                 params.append(v)
+        if home:   # whose .claude: the sessions names.build_homes found in that home
+            from .names import homes_path
+            hp = homes_path(self.parts.root)
+            if not rfs.exists(hp):
+                raise UsageError("home is not in the index yet: run relic5 index")
+            where.append(f"sid IN (SELECT sid FROM read_parquet('{hp}') WHERE lower(home) LIKE ?)")
+            params.append("%" + home.lower() + "%")
         w = " AND ".join(where)
         total, events = self._rows(f"SELECT count(*) AS n, coalesce(sum(n_rows), 0) AS e FROM {meta} WHERE {w}", params)[0].values()
+        # the same window and filters with subagents too: every session once, so "transcript events" is every .jsonl
+        # record (2026-10-24: 7.37M, where top-level alone said 5.23M)
+        w_all = " AND ".join(where[1:]) or "true"
+        a = self._rows(f"""SELECT count(*) AS n, coalesce(sum(n_rows), 0)::BIGINT AS e, count(*) FILTER (parent_sid IS NOT NULL) AS sn,
+                           coalesce(sum(n_rows) FILTER (parent_sid IS NOT NULL), 0)::BIGINT AS se FROM {meta} WHERE {w_all}""", params)[0]
         rows = self._rows(f"""SELECT s.*, (SELECT count(*) FROM {meta} c WHERE c.parent_sid = s.sid) AS children
                               FROM {meta} s WHERE {w} ORDER BY last_ts DESC NULLS LAST LIMIT ?""", params + [limit or DEFAULT_LIMIT])
         names = self._names({r["sid"] for r in rows})
         rows = [r | {"name": names.get(r["sid"])} for r in rows]
-        return {"total": total, "counted": "top-level sessions only (no parent_sid); subagents fold into children",
-                "events": int(events), "sessions": [self._session_row(r) for r in rows]}
+        out: Json = {"total": total, "counted": "top-level sessions only (no parent_sid); subagents fold into children",
+                     "events": int(events), "sessions": [self._session_row(r) for r in rows],
+                     "all": {"sessions": a["n"], "events": int(a["e"]), "subagents": a["sn"], "subagent_events": int(a["se"])}}
+        if by_repo:   # the same window and filters, counted per repo; a session with no repo (Codex) counts by its tenant
+            repos = self._rows(f"""SELECT coalesce(proj, '(no repo) ' || coalesce(cat, '?')) AS repo, count(*) AS sessions,
+                                      coalesce(sum(n_rows), 0)::BIGINT AS events FROM {meta} WHERE {w}
+                                      GROUP BY 1 ORDER BY sessions DESC, repo""", params)
+            top, rest = repos[:200], repos[200:]
+            if rest:   # the long tail as one row, so the counts always add up to total
+                top.append({"repo": f"(other {len(rest)} repos)", "sessions": sum(r["sessions"] for r in rest),
+                            "events": sum(r["events"] for r in rest)})
+            out["repos"] = top
+        return out
 
     def _session_row(self, r: Json) -> Json:
         return {"uuid": r["sid"], "name": r.get("name"), "home": r["machine"], "tenant": r["cat"], "source": r["engine"],

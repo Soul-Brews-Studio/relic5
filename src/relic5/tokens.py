@@ -15,6 +15,7 @@ tailnet nodes); a token is for scripts and for nodes outside follow-rankine.
 import hashlib, hmac, json, os, re, secrets, time
 
 from .types_ import Json
+from . import store as rfs
 
 PATH = os.environ.get("RELIC5_TOKENS_JSON", "~/.config/relic5/tokens.json")
 LEGACY = os.environ.get("RELIC5_TOKENS", "~/.config/relic5/tokens")
@@ -42,7 +43,7 @@ class Tokens:
         self.path, self.legacy = os.path.expanduser(path), os.path.expanduser(legacy)
 
     def load(self) -> dict[str, Json]:
-        return json.load(open(self.path)) if os.path.exists(self.path) else {}
+        return rfs.read_json(self.path) if rfs.exists(self.path) else {}
 
     def _save(self, d: dict[str, Json]) -> None:
         os.makedirs(os.path.dirname(self.path), mode=0o700, exist_ok=True)
@@ -53,7 +54,7 @@ class Tokens:
         os.replace(tmp, self.path)
 
     def legacy_tokens(self) -> dict[str, str]:
-        if not os.path.exists(self.legacy):
+        if not rfs.exists(self.legacy):
             return {}
         return {p[0]: p[1] for p in (l.split() for l in open(self.legacy) if not l.startswith("#")) if len(p) == 2}
 

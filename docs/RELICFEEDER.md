@@ -26,6 +26,12 @@ until the app has worked for a day, then that job is unloaded (asked first).
 - The hub's warnings (none / disk / version / sync).
 - The last 5 jobs of this machine from `/api/log` (push, index, embed), with rc.
 - Vectors pending for this machine.
+- Activity: the pass in flight, from `relic-scan ops --json --no-hub` (relic4-scan `src/ops.rs`, the same snapshot as
+  its page's /ops and `relic-scan tui` tab 6), polled every 3 s while a pass runs and every 15 s when idle. Shows the
+  stages marked ✓ done, ● running, · waiting, each with its time and typical time; a bar of elapsed over
+  `typical_total_s`; "about M:SS left". When idle: how long the last pass took and when the next one starts.
+- The menu-bar icon turns while a pass runs and shows the time left next to it. When the pass ends it shows ✓ (SYNC OK)
+  or ✗ (MISMATCH) for 8 seconds, and the panel shows the SYNC line for those 8 seconds too.
 - Buttons: "Run now" (one chain pass), "Open hub UI" (http://white.follow-rankine.ts.net:8795/), "Open log".
 
 ## The loop

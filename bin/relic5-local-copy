@@ -1,0 +1,30 @@
+#!/bin/sh
+# relic5 local copy: a hub on this Mac from the newest backup snapshot, to search locally while white stays the hub.
+#
+#   bin/relic5-local-copy                 refresh ~/relic5 from ~/relic5-backup/white/latest and index it
+#   bin/relic5-local-copy serve           then serve it on 127.0.0.1:8799 (port 8795 is relic4-scan's site on m5)
+#
+# The snapshot is cloned (APFS clonefile, cp -c: no extra space) into a fresh dir and swapped in, the old copy kept
+# as ~/relic5.prev until the next refresh. COPY.json marks it a copy (of, snapshot, at): relic_status and the UI turn
+# off the live checks (pushes, backup, seal day) and say "a copy of white's hub, as of ...". Swap back = stop using
+# it; white is untouched. To point the MCP at it: in ~/.claude.json, relic5 -> "env": {"RELIC5_URL": "http://127.0.0.1:8799"}.
+set -eu
+REPO=$(cd "$(dirname "$0")/.." && pwd)
+SNAP=$(cd "${RELIC5_BACKUP_DIR:-$HOME/relic5-backup/white}/latest" && pwd -P)
+DEST="${RELIC5_ROOT:-$HOME/relic5}"
+PORT="${RELIC5_LOCAL_PORT:-8799}"
+NEW="$DEST.new"
+rm -rf "$NEW" && mkdir -p "$NEW"
+for d in parts vectors resolve logs; do
+  [ -d "$SNAP/$d" ] && { cp -c -R "$SNAP/$d" "$NEW/$d" 2>/dev/null || cp -R "$SNAP/$d" "$NEW/$d"; }
+done
+n=$(basename "$SNAP")                                   # 20261024-014647: the snapshot's UTC time
+at=$(printf '%s' "$n" | sed -E 's/^([0-9]{4})([0-9]{2})([0-9]{2})-([0-9]{2})([0-9]{2})([0-9]{2})$/\1-\2-\3T\4:\5:\6Z/')
+printf '{"of": "white", "snapshot": "%s", "at": "%s"}\n' "$n" "$at" > "$NEW/COPY.json"
+"$REPO/.venv/bin/relic5" index --root "$NEW" >/dev/null
+"$REPO/.venv/bin/relic5" index --vectors --root "$NEW" >/dev/null
+[ -d "$DEST" ] && { rm -rf "$DEST.prev"; mv "$DEST" "$DEST.prev"; }
+mv "$NEW" "$DEST"
+echo "local copy of white: $(basename "$SNAP") -> $DEST"
+[ "${1:-}" = serve ] && exec "$REPO/.venv/bin/relic5" serve --root "$DEST" --host 127.0.0.1 --port "$PORT"
+exit 0

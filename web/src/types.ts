@@ -46,6 +46,9 @@ export interface Status {
   jobs: { running: JobEvent[]; recent: JobEvent[]; last_error: JobEvent | null };
   backup?: { at: string | null; bytes: number | null; message: string | null; age_s: number | null; host: string | null };
   memory?: Record<string, number>;
+  copy?: { of: string; snapshot: string; at: string } | null;
+  seal_days?: { month: string; state: "reconciled" | "sealing" | "blocked" | "open"; waiting: string[]; problems: string[];
+                 fingerprint: string | null; reconciled_at: string | null; amendments: number; recap?: boolean }[];
   seals?: { machines: Record<string, { sealed: number; newest_sealed_at: string | null; resealed: number; months: string[] }>;
             verify: { at: string; checked: number; problems: string[] } | null };
   warnings: string[];
@@ -54,26 +57,55 @@ export interface Status {
 export interface Hit {
   uid: string; partition: string; session_uuid: string; role: string; ts: string; repo_key?: string;
   session_name?: string | null; title?: string | null; text_snippet: string; score: number; layer: string;
-  machines: string[]; link: string;
+  machines: string[]; link: string; matched?: string[] | null; home?: string | null; homes?: string[] | null; agent?: string | null;
 }
 
-export interface SearchResult {
+export interface HomeRow { machine: string; home: string | null; agent: string | null; user: string | null; kind: "user" | "extra" | "project" | "mirror" | "export" | "unknown"; label: string; sessions: number; messages: number; first: string; last: string }
+
+export interface Explain {
+  query: string; tokens: string[]; layers: string[]; rows: number; phrase_rows: number | null; tokenizer: string; ms: number;
+  terms: { token: string; rows: number; capped: boolean; idf: number | null }[];
+}
+
+export interface TraceRef { id: string; root: string; parent: string | null }
+export interface SearchResult { older_hits?: number; trace?: TraceRef;
   hits: Hit[]; horizon: string; horizons_tried: string[]; searched_months: string[]; widened?: boolean; fallback?: string;
 }
 
 export interface Msg { ts: string; role: string; text: string; machines?: string[]; sid?: string }
-export interface ShowResult { before: Msg[]; target: Msg; after: Msg[]; link: string }
+export interface ShowResult { before: Msg[]; target: Msg; after: Msg[]; link: string; trace?: TraceRef }
 
-export interface TailRow { ts_th?: string; machines?: string[]; role: string; session_name?: string; sid?: string; text?: string; uid?: string }
+export interface TailRow { ts_th?: string; machines?: string[]; role: string; session_name?: string; sid?: string; cat?: string; link?: string; text?: string; uid?: string }
 export interface TailResult { rows: TailRow[]; newest?: string }
 
 export interface QueryRow {
+  id?: string; parent?: string | null; root?: string; n?: number;
   at: string; door: string; tool: string; query: string; client?: string; ms?: number; hits?: number | null;
   mode?: string | null; horizon?: string | null; vector?: boolean; error?: string | null; for_s?: number;
 }
 export interface Queries {
   running: QueryRow[]; last: QueryRow[]; per_hour: Record<string, { n: number; p50_ms: number; p95_ms: number }>;
   top: { query: string; n: number }[]; zero_hits: QueryRow[];
+  searches?: { at: string; query: string; hits?: number | null; client?: string | null }[];
+}
+
+export interface TopHit { link: string; session?: string; repo?: string | null; role?: string; ts?: string; score?: number }
+export interface TraceStep {
+  id: string; parent: string | null; at: string; door?: string; client?: string; tool: string; query?: string;
+  args?: Record<string, unknown>; hits?: number | null; ms?: number; mode?: string | null; error?: string | null; top?: TopHit[]; depth: number;
+}
+export interface FoundNote { at: string; client?: string; goal?: string; how?: string; found?: string; links?: string[] }
+export interface TraceChain { root: string; id: string; steps: TraceStep[]; found: FoundNote[]; searches: number; opened: number; first: string; last: string }
+export interface ChainRow { root: string; steps: number; searches: number; opened: number; query: string | null; first: string; last: string; clients: string[]; goal: string | null; found: string | null }
+export interface AccessPage { rows: QueryRow[]; total: number; next_before: number | null }
+export interface AskedStats {
+  hours: { hour: string; n: number; searches: number; zero: number; p50_ms: number | null; p95_ms: number | null }[];
+  window_h: number; calls: number; searches: number; zero: number; zero_share: number | null;
+  by_client: { client: string; n: number }[]; by_tool: { tool: string; n: number }[];
+}
+export interface SavedSearch {
+  id: string; name: string; args: Record<string, unknown>; every: number; from: string | null; door?: string | null; created: string;
+  runs: number; last_run: string | null; last_hits: number | null; last_new: number | null; last_record: string | null; last_error?: string | null; seen: number;
 }
 
 export interface EvalRow {

@@ -12,6 +12,7 @@ import json, os, sys, urllib.request
 from typing import Callable, TextIO
 
 from .types_ import Json
+from . import store as rfs
 
 Encoder = Callable[[list[str], str], list[list[float]]]
 """encode.encode's shape as add_vector calls it: (texts, model) -> unit vectors."""
@@ -22,7 +23,7 @@ MODEL = os.environ.get("RELIC5_MODEL", "unsloth--embeddinggemma-300m@806f5f90")
 def forward(url: str, msg: object) -> object:
     req = urllib.request.Request(f"{url}/mcp", data=json.dumps(msg).encode(), headers={"Content-Type": "application/json"})
     tok = os.path.expanduser(os.environ.get("RELIC5_TOKEN_FILE", "~/.config/relic5/token"))
-    if os.environ.get("RELIC5_USE_TOKEN") and os.path.exists(tok):
+    if os.environ.get("RELIC5_USE_TOKEN") and rfs.exists(tok):
         req.add_header("Authorization", "Bearer " + open(tok).read().strip())
     with urllib.request.urlopen(req, timeout=180) as r:
         body = r.read()
@@ -36,6 +37,7 @@ def add_vector(msg: Json, encode: Encoder | None = None) -> Json:
     if msg.get("method") != "tools/call" or p.get("name") != "relic_search" or not a.get("semantic") or "vector" in a:
         return msg
     vec = None
+    failed: list[str] = []
     if encode is not None:
         vec = encode([a.get("query", "")], a.get("model") or MODEL)[0]
     else:   # query engines in policy order (Nat: "can we do query embed ane too?"): ANE, then MPS, then keyword
@@ -46,11 +48,24 @@ def add_vector(msg: Json, encode: Encoder | None = None) -> Json:
                 vec = enc([a.get("query", "")], a.get("model") or MODEL, engine=eng)[0]
                 break
             except Exception as ex:
+                failed.append(f"{eng}: {type(ex).__name__}: {str(ex)[:120]}")
                 print(f"relic5 mcp: query embedding on {eng} failed ({type(ex).__name__}: {ex})", file=sys.stderr)
-    if vec is None:   # no engine answered: the hub answers by keyword and says so in `note`
-        return msg
+    if vec is None:   # no engine answered: the hub answers by keyword; the reply says why (issue #25 follow-up)
+        return msg | {"_embed_failed": failed or ["no query engine"]}
     a = {k: v for k, v in a.items() if k != "model"} | {"vector": vec}
     return msg | {"params": p | {"arguments": a}}
+
+
+def with_note(out: Json, note: str) -> Json:
+    """Prepend a note to a tools/call reply's JSON text (the hub's own notes stay after it)."""
+    try:
+        c = out["result"]["content"][0]
+        body = json.loads(c["text"])
+        body["note"] = note + (f" · {body['note']}" if body.get("note") else "")
+        c["text"] = json.dumps(body, ensure_ascii=False)
+    except (KeyError, IndexError, TypeError, ValueError):
+        pass
+    return out
 
 
 def serve(url: str, stdin: TextIO = sys.stdin, stdout: TextIO = sys.stdout, encode: Encoder | None = None) -> None:
@@ -64,7 +79,11 @@ def serve(url: str, stdin: TextIO = sys.stdin, stdout: TextIO = sys.stdout, enco
             stdout.flush()
             continue
         try:
-            out = forward(url, add_vector(msg, encode) if isinstance(msg, dict) else msg)
+            sent = add_vector(msg, encode) if isinstance(msg, dict) else msg
+            failed = sent.pop("_embed_failed", None) if isinstance(sent, dict) else None
+            out = forward(url, sent)
+            if failed and isinstance(out, dict):
+                out = with_note(out, "query embedding failed on this Mac (" + "; ".join(failed) + "): keyword hits")
         except Exception as ex:
             out = None if isinstance(msg, dict) and "id" not in msg else \
                 {"jsonrpc": "2.0", "id": msg.get("id") if isinstance(msg, dict) else None, "error": {"code": -32603, "message": f"hub unreachable: {ex}"}}

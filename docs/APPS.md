@@ -27,7 +27,7 @@ repo.
 
 | fact | evidence |
 |---|---|
-| Agents still search through **relic3**, not relic5 | MCP tool calls since 09-24: relic3 **727** (664 `relic_search`), session-viewer 75, session-search 23, **relic5 15** (all from the relic5 and relic4-scan repos), jsonl-indexer 3, session-dream 1 |
+| Agents still searched through **relic3**, not relic5 (switched 2026-10-24, see (d)) | MCP tool calls since 09-24: relic3 **727** (664 `relic_search`), session-viewer 75, session-search 23, **relic5 15** (all from the relic5 and relic4-scan repos), jsonl-indexer 3, session-dream 1 |
 | relic3's local index is stale | `~/.relic3/index` mtime 2026-10-15. BRIEF.md says the `relic_search` MCP reads this one |
 | Skills hard-code the old servers | `~/.claude/skills/relic3/SKILL.md` and `ralph-dig/SKILL.md` call relic3. `day-diary/SKILL.md` calls `mcp__session-viewer`. No skill names relic5 |
 | Legacy MCP servers cost memory in every session | resident right now: jsonl-indexer 82 procs / 2,252 MB, relic3 43 / 1,969 MB, session-search 44 / 1,115 MB, session-dream 37 / 427 MB, session-viewer 44 / 308 MB. About 6 GB in total. `relic5 mcp` had 0 processes |
@@ -100,13 +100,52 @@ LESSONS.md). It is not an app. **KEEP** it as the reference.
 
 | app | what it is | last commit | commits 30d | sessions 30d | in use now? | verdict |
 |---|---|---|---|---|---|---|
-| **relic5 MCP** (`relic5 mcp` stdio shim → hub `POST /mcp`) | the five relic3 tools on the hub, month store, 3 machines | 2026-10-24 | 61 | 1 | registered top-level. **15 calls**, 0 resident procs | **KEEP** (the one), but it is not yet the one agents use |
-| relic3 MCP (agent-relic-v3 `src/`) | the same five tools over the relic3 index | 2026-10-07 | 335 (src) | 22 | **727 calls**, 43 procs / 1.97 GB. Index stale since 10-15 | **MERGE into relic5**: the 5 gaps below, then switch the skills, then RETIRE |
-| session-viewer MCP (digger-oracle lab binary) | FTS5 trigram search, read_context, topics, graph | 2026-08-28 | 0 | 7 (digger-oracle) | **75 calls** from other oracles (floodboy-ios, herald, pigment, DustBoy). Index `sessions.db` touched 10-21. `day-diary` skill depends on it | **MERGE into relic5** (Thai-substring check), then RETIRE |
-| session-search MCP (digger-oracle lab, bun) | horizon buckets over session-viewer's index | 2026-08-28 | 0 | (above) | 23 calls, last 10-14. 44 procs / 1.1 GB | **RETIRE** (relic5 has horizons and widening) |
-| session-dream MCP (2sep lab 05) | LanceDB + Apple NLContextualEmbedding, `dream`, `compare_horizons` | 2026-09-02 | 0 | 0 | 1 call (10-05). Index frozen 2026-09-02. 37 procs / 427 MB | **RETIRE** |
-| jsonl-indexer MCP (4sep lab 01) | LanceDB + nlembed lab server | 2026-09-03 | 0 | 0 | 3 calls (last 10-05, `.mcp-calls.jsonl` same date). **82 procs / 2.25 GB** | **RETIRE first**: heaviest, least used |
+| **relic5 MCP** (`relic5 mcp` stdio shim → hub `POST /mcp`) | the five relic3 tools on the hub, month store, 3 machines | 2026-10-24 | 61 | 1 | registered top-level. **15 calls**, 0 resident procs | **KEEP** (the one). Since 2026-10-24 the only session-history MCP in `~/.claude.json` on m5 |
+| relic3 MCP (agent-relic-v3 `src/`) | the same five tools over the relic3 index | 2026-10-07 | 335 (src) | 22 | **727 calls**, 43 procs / 1.97 GB. Index stale since 10-15 | **SWITCHED 2026-10-24**: entry removed from `~/.claude.json`, skills point at relic5. Index kept as a record |
+| session-viewer MCP (digger-oracle lab binary) | FTS5 trigram search, read_context, topics, graph | 2026-08-28 | 0 | 7 (digger-oracle) | **75 calls** from other oracles (floodboy-ios, herald, pigment, DustBoy). Index `sessions.db` touched 10-21. `day-diary` skill depends on it | **REMOVED from `~/.claude.json` 2026-10-24**: Thai inside-word check passes in relic5 (below); `day-diary` points at relic5 |
+| session-search MCP (digger-oracle lab, bun) | horizon buckets over session-viewer's index | 2026-08-28 | 0 | (above) | 23 calls, last 10-14. 44 procs / 1.1 GB | **REMOVED 2026-10-24** (relic5 has horizons and widening) |
+| session-dream MCP (2sep lab 05) | LanceDB + Apple NLContextualEmbedding, `dream`, `compare_horizons` | 2026-09-02 | 0 | 0 | 1 call (10-05). Index frozen 2026-09-02. 37 procs / 427 MB | **REMOVED 2026-10-24** |
+| jsonl-indexer MCP (4sep lab 01) | LanceDB + nlembed lab server | 2026-09-03 | 0 | 0 | 3 calls (last 10-05, `.mcp-calls.jsonl` same date). **82 procs / 2.25 GB** | **REMOVED 2026-10-24**: heaviest, least used |
 | agent-relic-v4 `mcp_server.py` / `relic4 serve` | relic4 core + API + MCP | 2026-10-23 | 26 | 1 | `relic4 serve` up on 127.0.0.1 + 100.111.101.21, ports 8791/8792, since 10-23 12:02. Not in `~/.claude.json` | **MERGE into relic5** (embed, see e), then RETIRE and stop the serve |
+
+### Head to head, 2026-10-24 (the same probes on every MCP)
+
+| server | data as of | what it holds | semantic | Thai inside a word |
+|---|---|---|---|---|
+| **relic5** | live (BM25 index built 04:52Z, 0 vectors pending) | 74k sessions, 5.02M transcript events, m5 + mba + white + jsonl-truth import, 55k ψ notes, 2,969 memory notes | every message (embeddinggemma) | yes (ICU) |
+| relic3 | 2026-10-15 (214 h stale) | 151,792 sessions, 2.07M events, week units, ψ vault bank | 72k events still unembedded | yes |
+| session-viewer | 2026-09-13 (41 days; 6,649 files never imported) | 36,433 files, 3.58M events, m5 only | 32k of 872k events (4%) | yes (trigram) |
+| session-search | session-viewer's database, read-only | the same | none | yes |
+| jsonl-indexer | 2026-09-03 | 26,947 rows, 14 projects | bge-small 384-d | no |
+| session-dream | 2026-09-02 | ~92k rows in 3 databases | Apple NL + FTS (RRF) | partly |
+
+Probes:
+
+- a phrase said that morning ("Garage is running on odin"): session-viewer 0 hits (not imported); relic3 near
+  misses only.
+- "ตั้งอยู่ ดับไป": session-search reaches August, relic3 stops at 10-15, relic5 has today's trinity messages and 16
+  older hits. "ดับไป" alone (relic5, role user) matches inside "…เกิดขึ้นตั้งอยู่ดับไปครับ" and "เครื่องดับไปครับ": the
+  Thai inside-word check of the merge table passes, so no trigram fallback is needed.
+- a paraphrase ("remove it and rely on git to restore, no separate backup"): session-viewer semantic, jsonl-indexer
+  and session-dream all returned unrelated rows; jsonl-indexer returned one copy script three times. The measured
+  eval (issue #29, 20 queries, recall@10 / MRR): relic5 semantic 0.90 / 0.76, relic4 vector 0.85 / 0.68, relic3 BM25
+  0.55 / 0.40, relic5 BM25 0.50 / 0.34.
+
+ψ vault notes reached relic5 without their oracle: a hit said `session_uuid: "vault:3"`, `repo_key: null`. The id is
+relic-scan's, per machine, explained in its `meta/vaults.json`, which relic5-push did not send. It does now, and a
+vault hit carries the oracle's repo folder as `repo_key` and its name as `session_name` (`src/relic5/vaults.py`).
+
+### The switch, 2026-10-24 (Nat: "sure")
+
+- `~/.claude.json` (m5, beta): `relic3`, `session-viewer`, `session-search`, `session-dream` and `jsonl-indexer`
+  removed with `claude mcp remove -s user`. Their entries are saved in `~/.config/relic5/legacy-mcp-servers-20261024.json`
+  (re-add one: `claude mcp add-json -s user <name> "$(jq -c .<name> that-file)"`). Processes already running in open
+  sessions were not killed; they end with their sessions.
+- Skills: new `~/.claude/skills/relic5/SKILL.md`. `relic3/SKILL.md` is now a redirect to it. `ralph-dig` (Step 0.9,
+  4.5), `day-diary`, `oracle-recap-day`, `jsonl-truth`, `sonnet-scout`, `herdr-lead-scouts` name relic5. Every
+  changed file has a `SKILL.md.bak-20261024-relic5` beside it.
+- Kept as a record, untouched: `~/.relic3`, `~/.relic3-gens`, session-viewer's `sessions.db`, the lab checkouts.
+- Not done here: mba and white have their own `~/.claude.json`; the README archive notices of "Retire" steps 2 and 3.
 
 ## (e) Embed
 
@@ -201,3 +240,17 @@ relic-extract, relic-lessons (docs).
   shares the hub's port number, so a local test of `relic5 serve` on 8795 would collide with it.
 - Hub session counts skip Codex sessions (`repo` was null on all 161 Codex sessions among the 500 newest the hub returned for the window). A
   `repo` derived from Codex's `session_meta.cwd` in relic-scan meta would fix that.
+
+## Disk neighbours on white (2026-10-24)
+
+What fills white's disk besides relic5 itself, for Nat to decide on; relic5 never touches them (`relic5 gc` lists them
+with sizes, including the build cache per buildx builder):
+
+- `~/.relic3-gens` (81 GB): relic3's index generations. Frozen since its push/indexer agents were unloaded (09:25).
+- Docker images and volumes of other services (kestra, apisix, kafka, esphome-build-server...): not relic5's.
+- buildx builder `mybuilder` (48 GB of build cache): white's *current* builder for user nat, so every
+  `docker compose build` lands there, relic5's `just up` included. Part of its growth on 2026-10-24 was relic5's:
+  the Dockerfile reinstalled all dependencies and ran `chown -R` over the venv on every deploy. Fixed: dependencies
+  are their own layer and nothing is chowned after install, so a deploy now adds only the small source layer. The
+  rest of that cache is other builds'. It is all reclaimable cache; pruning a shared builder is Nat's call.
+- relic4-scan's release builds use their own context builder (`white`) and the default cache, which relic4-scan prunes.

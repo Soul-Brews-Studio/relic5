@@ -1,0 +1,311 @@
+<!doctype html>
+<!-- relic5's public page (relic5.buildwithoracle.com). Static, no JavaScript, no network calls, fonts self-hosted
+     (Bricolage Grotesque, JetBrains Mono: SIL OFL). Nothing on it comes from a real hub: no counts, machine names,
+     session titles or addresses. The pictures are drawn by hand in SVG with made-up points. Deploy: see site/README.md. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>relic5 — every agent session, from every machine, in one place you can ask</title>
+<meta name="description" content="relic5 is a small self-hosted hub. Every machine pushes its Claude Code and Codex history; you and your agents search it by keyword or meaning, see it as a map, and read the notes agents keep. It runs on your own server, on your own private network.">
+<meta property="og:title" content="relic5 — one hub for every agent session">
+<meta property="og:description" content="Self-hosted. Keyword and semantic search, a map of every session, memory notes as pages, and MCP so agents can ask it too.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://relic5.buildwithoracle.com/">
+<meta name="theme-color" content="#0a0a0f">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Ccircle cx='20' cy='20' r='18' fill='%2364b5f6'/%3E%3Ctext x='19' y='27.5' text-anchor='middle' font-size='22' font-family='Georgia,serif' fill='%2306121f'%3E%CE%A8%3C/text%3E%3C/svg%3E">
+<style>
+  @font-face { font-family: "Bricolage"; src: url("fonts/BricolageGrotesque.woff2") format("woff2"); font-weight: 200 800; font-display: swap; }
+  @font-face { font-family: "JBM"; src: url("fonts/JetBrainsMono.woff2") format("woff2"); font-weight: 100 800; font-display: swap; }
+  :root {
+    --bg: #0a0a0f; --panel: #0f0f14; --raised: #181820; --deep: #08080c;
+    --line: rgb(255 255 255 / .11); --line-strong: rgb(255 255 255 / .19);
+    --text: #f0f2f7; --soft: #d6dbe5; --muted: #aab2c3; --faint: #9099ac;
+    --accent: #64b5f6; --on-accent: #06121f; --accent-wash: rgb(100 181 246 / .10);
+    --amber: #f5b73b; --ok: #6fd6a0; --violet: #b79bf0; --rose: #f28fad;
+    --display: "Bricolage", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --body: ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Noto Sans Thai", sans-serif;
+    --mono: "JBM", ui-monospace, "SF Mono", Menlo, monospace;
+    --wrap: 1120px;
+  }
+  * { box-sizing: border-box; }
+  html, body { overflow-x: clip; }
+  body { margin: 0; background: var(--bg); color: var(--soft); font: 17px/1.65 var(--body); -webkit-font-smoothing: antialiased; }
+  a { color: var(--accent); text-underline-offset: 3px; }
+  a:focus-visible, .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 8px; }
+  code, pre, .mono { font-family: var(--mono); }
+  code { font-size: .88em; color: var(--text); background: var(--raised); padding: .1em .4em; border-radius: 5px; }
+  .wrap { max-width: var(--wrap); margin: 0 auto; padding: 0 24px; }
+  h1, h2, h3 { font-family: var(--display); color: var(--text); font-style: normal; letter-spacing: -.02em; margin: 0; min-width: 0; overflow-wrap: anywhere; }
+
+  header.top { position: sticky; top: 0; z-index: 5; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--panel) 90%, transparent); backdrop-filter: blur(10px); }
+  header.top .wrap { display: flex; align-items: center; gap: 20px; height: 64px; }
+  .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; }
+  .brand b { font: 700 22px/1 var(--display); color: var(--accent); }
+  .brand .v { font: 12px var(--mono); color: var(--muted); background: var(--raised); padding: 3px 7px; border-radius: 5px; }
+  nav.links { margin-left: auto; display: flex; gap: 4px; }
+  nav.links a { color: var(--soft); text-decoration: none; font-size: 15px; padding: 8px 12px; border-radius: 8px; white-space: nowrap; }
+  nav.links a:hover { background: var(--raised); color: var(--text); }
+  @media (max-width: 720px) { nav.links { display: none; } .brand .v { display: none; } }
+
+  .hero { padding: 88px 0 56px; }
+  .hero .grid { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 56px; align-items: center; }
+  .hero h1 { font-size: clamp(40px, 5.4vw, 66px); line-height: 1.02; font-weight: 750; }
+  .hero h1 .accent { color: var(--accent); }
+  .hero p.lede { font-size: 20px; color: var(--soft); max-width: 34em; margin: 24px 0 0; }
+  .cta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 32px; }
+  .btn { display: inline-flex; align-items: center; min-height: 48px; padding: 0 20px; border-radius: 10px; font-weight: 650; font-size: 16px; text-decoration: none; white-space: nowrap; border: 1px solid var(--line-strong); color: var(--text); background: var(--raised); }
+  .btn:hover { border-color: var(--muted); }
+  .btn.primary { background: var(--accent); color: var(--on-accent); border-color: transparent; }
+  .btn.primary:hover { filter: brightness(1.08); }
+  .note { margin-top: 18px; font-size: 14px; color: var(--muted); }
+  @media (max-width: 900px) { .hero { padding: 56px 0 32px; } .hero .grid { grid-template-columns: minmax(0, 1fr); gap: 36px; } }
+
+  figure.shot { margin: 0; border: 1px solid var(--line); border-radius: 18px; background: radial-gradient(ellipse at 50% 40%, var(--raised) 0%, var(--deep) 75%); overflow: hidden; }
+  figure.shot svg { display: block; width: 100%; height: auto; }
+  figure.shot figcaption { border-top: 1px solid var(--line); padding: 10px 16px; font: 12px var(--mono); color: var(--faint); }
+
+  section.band { padding: 72px 0; border-top: 1px solid var(--line); }
+  section.band h2 { font-size: clamp(30px, 3.6vw, 42px); line-height: 1.1; font-weight: 700; max-width: 20em; }
+  section.band p.sub { font-size: 18px; max-width: 40em; margin: 14px 0 0; color: var(--muted); }
+
+  .flow { margin-top: 40px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; counter-reset: s; }
+  .flow li { list-style: none; border: 1px solid var(--line); border-radius: 16px; background: var(--panel); padding: 20px; position: relative; }
+  .flow li::before { counter-increment: s; content: counter(s); font: 600 13px var(--mono); color: var(--accent); }
+  .flow h3 { font-size: 19px; margin: 8px 0 6px; }
+  .flow p { margin: 0; font-size: 15.5px; color: var(--muted); }
+  .flow { padding: 0; }
+  @media (max-width: 900px) { .flow { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+  @media (max-width: 560px) { .flow { grid-template-columns: minmax(0, 1fr); } }
+
+  .feat { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 48px; align-items: center; margin-top: 56px; }
+  .feat.flip > :first-child { order: 2; }
+  .feat h3 { font-size: 26px; font-weight: 700; }
+  .feat p { margin: 12px 0 0; color: var(--muted); }
+  .feat ul { margin: 16px 0 0; padding-left: 20px; color: var(--soft); }
+  .feat li { margin: 6px 0; }
+  .feat li::marker { color: var(--accent); }
+  @media (max-width: 900px) { .feat, .feat.flip { grid-template-columns: minmax(0, 1fr); gap: 24px; } .feat.flip > :first-child { order: 0; } }
+
+  pre.call { margin: 0; padding: 20px 22px; background: var(--deep); border: 1px solid var(--line); border-radius: 16px; overflow-x: auto; font-size: 14px; line-height: 1.7; color: var(--soft); }
+  pre.call .k { color: var(--accent); } pre.call .s { color: var(--ok); } pre.call .c { color: var(--faint); }
+
+  .tools { margin-top: 24px; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+  .tools div { border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; background: var(--panel); }
+  .tools b { display: block; font: 600 15px var(--mono); color: var(--text); }
+  .tools span { font-size: 15px; color: var(--muted); }
+
+  .priv { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 36px; }
+  .priv div { border-left: 2px solid var(--accent); padding: 4px 0 4px 18px; }
+  .priv b { display: block; color: var(--text); font-size: 17px; }
+  .priv span { font-size: 15.5px; color: var(--muted); }
+  @media (max-width: 800px) { .priv { grid-template-columns: minmax(0, 1fr); } }
+
+  .status { margin-top: 32px; border: 1px solid var(--line-strong); border-radius: 18px; background: var(--panel); padding: 28px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 24px; align-items: center; }
+  .status p { margin: 8px 0 0; color: var(--muted); }
+  @media (max-width: 720px) { .status { grid-template-columns: minmax(0, 1fr); } }
+
+  footer { border-top: 1px solid var(--line); padding: 36px 0 48px; font-size: 14px; color: var(--faint); }
+  footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: space-between; }
+  footer a { color: var(--muted); }
+  @media (prefers-reduced-motion: no-preference) { .orbit { animation: spin 90s linear infinite; transform-origin: 300px 210px; } @keyframes spin { to { transform: rotate(360deg); } } }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="#top" aria-label="relic5, top of the page">
+      <svg width="30" height="30" viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="18" fill="#64b5f6"/><text x="19" y="27.5" text-anchor="middle" font-size="22" font-family="Georgia, serif" fill="#06121f">Ψ</text><text x="29.5" y="31" text-anchor="middle" font-size="9" font-weight="700" font-family="system-ui, sans-serif" fill="#06121f">5</text></svg>
+      <b>relic5</b><span class="v">26.10.24-alpha.2308</span>
+    </a>
+    <nav class="links" aria-label="On this page">
+      <a href="#how">How it works</a><a href="#search">Search</a><a href="#map">Map</a><a href="#agents">For agents</a><a href="#private">Private</a>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+  <section class="hero">
+    <div class="wrap grid">
+      <div>
+        <h1>Every agent session, from every machine, <span class="accent">in one place you can ask.</span></h1>
+        <p class="lede">relic5 is a small hub you run yourself. Each machine sends it the Claude Code and Codex history it holds. You, and your agents, search it by the words or by the meaning, see it as a map, and read the notes your agents keep.</p>
+        <div class="cta">
+          <a class="btn primary" href="#how">How it works</a>
+          <a class="btn" href="https://github.com/Soul-Brews-Studio/relic5">Get relic5 on GitHub</a>
+        </div>
+        <p class="note">Open source (AGPL-3.0) · alpha · self-hosted · one server, your private network</p>
+      </div>
+      <figure class="shot">
+        <svg viewBox="0 0 600 420" role="img" aria-labelledby="t-hero">
+          <title id="t-hero">An illustration: three machines send their sessions to one hub, which a person and an agent both ask.</title>
+          <defs><linearGradient id="wire" x1="0" x2="1"><stop offset="0" stop-color="#64b5f6" stop-opacity=".15"/><stop offset="1" stop-color="#64b5f6" stop-opacity=".8"/></linearGradient></defs>
+          <g font-family="JBM, monospace" font-size="13" fill="#d6dbe5">
+            <g><rect x="28" y="52" width="150" height="62" rx="12" fill="#0f0f14" stroke="rgb(255 255 255 / .19)"/><text x="46" y="80">laptop</text><text x="46" y="100" fill="#9099ac" font-size="11">claude · codex</text></g>
+            <g><rect x="28" y="178" width="150" height="62" rx="12" fill="#0f0f14" stroke="rgb(255 255 255 / .19)"/><text x="46" y="206">desktop</text><text x="46" y="226" fill="#9099ac" font-size="11">claude · codex</text></g>
+            <g><rect x="28" y="304" width="150" height="62" rx="12" fill="#0f0f14" stroke="rgb(255 255 255 / .19)"/><text x="46" y="332">build box</text><text x="46" y="352" fill="#9099ac" font-size="11">claude</text></g>
+            <path d="M178 83 C 240 83, 230 210, 262 210" stroke="url(#wire)" stroke-width="2" fill="none"/>
+            <path d="M178 209 L 262 210" stroke="url(#wire)" stroke-width="2" fill="none"/>
+            <path d="M178 335 C 240 335, 230 210, 262 210" stroke="url(#wire)" stroke-width="2" fill="none"/>
+            <circle class="orbit" cx="300" cy="210" r="0"/>
+            <g><circle cx="320" cy="210" r="58" fill="#64b5f6" fill-opacity=".10" stroke="#64b5f6"/><text x="320" y="206" text-anchor="middle" fill="#f0f2f7" font-size="15" font-weight="700">hub</text><text x="320" y="226" text-anchor="middle" fill="#aab2c3" font-size="11">relic5</text></g>
+            <path d="M378 196 C 430 196, 430 120, 470 120" stroke="#64b5f6" stroke-opacity=".6" stroke-width="2" fill="none" stroke-dasharray="4 5"/>
+            <path d="M378 224 C 430 224, 430 300, 470 300" stroke="#64b5f6" stroke-opacity=".6" stroke-width="2" fill="none" stroke-dasharray="4 5"/>
+            <g><rect x="470" y="92" width="110" height="56" rx="12" fill="#0f0f14" stroke="rgb(255 255 255 / .19)"/><text x="488" y="118">you</text><text x="488" y="136" fill="#9099ac" font-size="11">web page</text></g>
+            <g><rect x="470" y="272" width="110" height="56" rx="12" fill="#0f0f14" stroke="rgb(255 255 255 / .19)"/><text x="488" y="298">agents</text><text x="488" y="316" fill="#9099ac" font-size="11">MCP</text></g>
+          </g>
+        </svg>
+        <figcaption>illustration · not a real hub</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="band" id="how">
+    <div class="wrap">
+      <h2>Four steps, all on machines you own.</h2>
+      <p class="sub">Nothing goes to a cloud service. The machines talk to the hub over your own private network.</p>
+      <ol class="flow">
+        <li><h3>Find</h3><p><a href="https://relic.buildwithoracle.com/scan/">Relic Scan</a> finds every transcript on a machine, in every home, mirror and archive.</p></li>
+        <li><h3>Push</h3><p>Each machine sends its messages, tool calls and thinking to the hub, one file per month, and only what changed.</p></li>
+        <li><h3>Index</h3><p>The hub folds a message pushed by two machines into one, builds a keyword index, and stores a vector for each message.</p></li>
+        <li><h3>Ask</h3><p>Search in the web page, from the command line, or let an agent call the hub's tools while it works.</p></li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="band" id="search">
+    <div class="wrap">
+      <h2>Find what was said, even when you forgot the words.</h2>
+      <div class="feat">
+        <div>
+          <h3>Search that suggests</h3>
+          <p>Before you type, the page shows what you searched lately, what is asked most and which repos were busy. After, the sessions behind the hits sit on the left and the message, in its conversation, on the right.</p>
+          <ul>
+            <li>Keyword search where every word must appear, and Thai works inside words</li>
+            <li>Semantic search by meaning, or both blended</li>
+            <li>Narrow by time, who spoke, machine, repo or one session</li>
+            <li>Tool calls, thinking, memory notes and git commits as their own layers</li>
+          </ul>
+        </div>
+        <figure class="shot">
+          <svg viewBox="0 0 560 330" role="img" aria-labelledby="t-search">
+            <title id="t-search">An illustration of the search page: a query box, filter tabs, a list of hits and a reader pane.</title>
+            <g font-family="JBM, monospace" font-size="12">
+              <rect x="20" y="20" width="520" height="40" rx="10" fill="#0f0f14" stroke="rgb(255 255 255 / .19)"/><text x="40" y="45" fill="#f0f2f7">why did the backup move</text>
+              <g fill="#aab2c3"><text x="24" y="86" fill="#f0f2f7">Talk</text><text x="76" y="86">+ tools</text><text x="146" y="86">+ thinking</text><text x="232" y="86">notes</text><text x="288" y="86">commits</text></g>
+              <rect x="20" y="92" width="36" height="2" fill="#64b5f6"/>
+              <g><rect x="20" y="112" width="300" height="62" rx="10" fill="#181820"/><circle cx="36" cy="132" r="4" fill="#f5b73b"/><text x="46" y="136" fill="#d6dbe5">assistant · home-server</text><text x="36" y="158" fill="#aab2c3">…moved the <tspan fill="#f5b73b">backup</tspan> to the NAS so…</text></g>
+              <g><rect x="20" y="184" width="300" height="62" rx="10" fill="#0f0f14"/><circle cx="36" cy="204" r="4" fill="#64b5f6"/><text x="46" y="208" fill="#d6dbe5">human · notes-app</text><text x="36" y="230" fill="#aab2c3">keep the <tspan fill="#f5b73b">backup</tspan> off the laptop</text></g>
+              <g><rect x="20" y="256" width="300" height="56" rx="10" fill="#0f0f14"/><circle cx="36" cy="276" r="4" fill="#f5b73b"/><text x="46" y="280" fill="#d6dbe5">assistant · home-server</text><text x="36" y="300" fill="#aab2c3">+3 more in this session</text></g>
+              <rect x="336" y="112" width="204" height="200" rx="12" fill="#0f0f14" stroke="rgb(255 255 255 / .11)"/>
+              <text x="352" y="136" fill="#f0f2f7">the conversation</text>
+              <rect x="352" y="150" width="172" height="8" rx="4" fill="#181820"/><rect x="352" y="166" width="140" height="8" rx="4" fill="#181820"/>
+              <rect x="348" y="186" width="180" height="44" rx="8" fill="#f5b73b" fill-opacity=".12"/><rect x="356" y="198" width="150" height="8" rx="4" fill="#f5b73b" fill-opacity=".5"/><rect x="356" y="212" width="110" height="8" rx="4" fill="#f5b73b" fill-opacity=".35"/>
+              <rect x="352" y="244" width="160" height="8" rx="4" fill="#181820"/><rect x="352" y="260" width="120" height="8" rx="4" fill="#181820"/>
+            </g>
+          </svg>
+          <figcaption>illustration · made-up sessions</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <section class="band" id="map">
+    <div class="wrap">
+      <h2>See your work as a map.</h2>
+      <div class="feat flip">
+        <div>
+          <h3>Sessions placed by meaning</h3>
+          <p>Every session becomes one point, placed by the average of its messages' vectors, so sessions about the same thing sit together. Colour is the repo.</p>
+          <ul>
+            <li>3D you can turn and zoom, or a flat 2D view</li>
+            <li>Hover to name a point; click to read it or search inside it</li>
+            <li>Light up sessions by name or repo; the rest dims</li>
+          </ul>
+        </div>
+        <figure class="shot">
+          <svg viewBox="0 0 560 330" role="img" aria-labelledby="t-map">
+            <title id="t-map">An illustration of the map: clusters of coloured points, one cluster per topic.</title>
+            <g fill-opacity=".9">
+              <g fill="#64b5f6"><circle cx="150" cy="120" r="4"/><circle cx="168" cy="104" r="3"/><circle cx="134" cy="138" r="3.5"/><circle cx="176" cy="132" r="4"/><circle cx="158" cy="150" r="3"/><circle cx="122" cy="112" r="3"/><circle cx="190" cy="114" r="2.5"/><circle cx="142" cy="96" r="2.5"/></g>
+              <g fill="#f5b73b"><circle cx="360" cy="90" r="4"/><circle cx="380" cy="104" r="3"/><circle cx="344" cy="108" r="3.5"/><circle cx="392" cy="84" r="2.5"/><circle cx="368" cy="122" r="3"/><circle cx="336" cy="80" r="2.5"/></g>
+              <g fill="#6fd6a0"><circle cx="300" cy="230" r="4"/><circle cx="320" cy="246" r="3"/><circle cx="284" cy="250" r="3.5"/><circle cx="312" cy="214" r="3"/><circle cx="332" cy="226" r="2.5"/><circle cx="270" cy="230" r="2.5"/><circle cx="298" cy="268" r="3"/></g>
+              <g fill="#b79bf0"><circle cx="452" cy="232" r="3.5"/><circle cx="470" cy="248" r="3"/><circle cx="440" cy="252" r="2.5"/><circle cx="466" cy="220" r="2.5"/></g>
+              <g fill="#f28fad"><circle cx="110" cy="250" r="3"/><circle cx="128" cy="262" r="3.5"/><circle cx="96" cy="270" r="2.5"/></g>
+              <g fill="#9099ac" fill-opacity=".35"><circle cx="230" cy="170" r="2"/><circle cx="250" cy="120" r="2"/><circle cx="410" cy="170" r="2"/><circle cx="200" cy="230" r="2"/><circle cx="380" cy="280" r="2"/><circle cx="480" cy="140" r="2"/></g>
+            </g>
+            <circle cx="176" cy="132" r="9" fill="none" stroke="#fff" stroke-width="2"/>
+            <g font-family="JBM, monospace" font-size="12"><rect x="192" y="140" width="186" height="44" rx="9" fill="#0f0f14" stroke="rgb(255 255 255 / .19)"/><text x="204" y="158" fill="#f0f2f7">tune the search index</text><text x="204" y="174" fill="#aab2c3">search-app · 2 h ago</text></g>
+          </svg>
+          <figcaption>illustration · made-up points</figcaption>
+        </figure>
+      </div>
+      <div class="feat">
+        <div>
+          <h3>The notes your agents keep, as pages</h3>
+          <p>Agents write one-fact memory notes: rules you set, decisions made, where things live. relic5 shows them as a feed you can filter by kind and project. Each note opens as a page with its repo, the session that wrote it, and the real file it lives in, line by line.</p>
+        </div>
+        <div>
+          <h3>And the rest of the hub</h3>
+          <ul>
+            <li><b>Live</b>: the newest messages from every machine as they arrive</li>
+            <li><b>Jobs</b>: every push, index and embed, failures and recoveries</li>
+            <li><b>Asked</b>: what people and agents searched, and what found nothing</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band" id="agents">
+    <div class="wrap">
+      <h2>Your agents can ask it too.</h2>
+      <p class="sub">relic5 speaks MCP. Register it once on a machine, and an agent can look up what was decided last week before it starts again.</p>
+      <div class="feat">
+        <pre class="call" aria-label="An example MCP call"><span class="c"># what an agent sends</span>
+<span class="k">relic_search</span> {
+  <span class="s">"query"</span>: "why did the backup move",
+  <span class="s">"semantic"</span>: true,
+  <span class="s">"horizon"</span>: "1m"
+}
+<span class="c"># → hits with the session, time, repo and a link</span>
+<span class="k">relic_show</span> { <span class="s">"id"</span>: "relic5://2026-10/…", <span class="s">"before"</span>: 3 }</pre>
+        <div class="tools">
+          <div><b>relic_search</b><span>words or meaning, with filters</span></div>
+          <div><b>relic_show</b><span>one message and its neighbours</span></div>
+          <div><b>relic_sessions</b><span>sessions by repo and time</span></div>
+          <div><b>relic_session</b><span>one session's turns</span></div>
+          <div><b>relic_status</b><span>what the hub holds, how fresh</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band" id="private">
+    <div class="wrap">
+      <h2>Private by how it is built.</h2>
+      <div class="priv">
+        <div><b>On your server</b><span>The hub runs on one machine you own. There is no hosted version and no account.</span></div>
+        <div><b>On your network</b><span>Machines reach it over your own private network. A token is asked on every request from anywhere else.</span></div>
+        <div><b>Nothing leaves</b><span>No analytics, no third-party calls. Vectors are made on your own machines.</span></div>
+      </div>
+      <div class="status">
+        <div>
+          <h3>relic5 is open source, in alpha.</h3>
+          <p>The hub's code is on GitHub under the GNU AGPL v3. Start with Relic Scan on each machine, then run the hub on one server you own; the README has the steps.</p>
+        </div>
+        <div class="cta" style="margin-top:0"><a class="btn primary" href="https://github.com/Soul-Brews-Studio/relic5">relic5 on GitHub</a><a class="btn" href="https://relic.buildwithoracle.com/scan/">Relic Scan</a></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>relic5 · Soul Brews Studio · 26.10.24-alpha.2308 · AGPL-3.0</span>
+    <span>The pictures on this page are illustrations with made-up data, not a real hub.</span>
+    <span><a href="https://github.com/Soul-Brews-Studio/relic5">GitHub</a> · <a href="https://relic.buildwithoracle.com/scan/">Relic Scan</a></span>
+  </div>
+</footer>
+</body>
+</html>

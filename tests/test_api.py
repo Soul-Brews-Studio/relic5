@@ -37,7 +37,7 @@ def test_mcp_initialize_and_list(client):
     r = rpc(client, "initialize", {"protocolVersion": "2025-06-18"}).json()
     assert r["result"]["protocolVersion"] == "2025-06-18" and r["result"]["serverInfo"]["name"] == "relic5"
     names = [t["name"] for t in rpc(client, "tools/list").json()["result"]["tools"]]
-    assert names == ["relic_search", "relic_show", "relic_sessions", "relic_session", "relic_status"]
+    assert names == ["relic_search", "relic_show", "relic_sessions", "relic_session", "relic_trace", "relic_saved", "relic_asked", "relic_tag", "relic_tags", "relic_found", "relic_homes", "relic_status", "relic_artifact_put", "relic_artifacts"]
     assert rpc(client, "notifications/initialized", i=None).status_code == 202
 
 
@@ -50,7 +50,7 @@ def test_mcp_call(client):
     assert "keyword hits" in json.loads(sem["content"][0]["text"])["note"]          # no vector: keyword, said out loud
     bad = rpc(client, "tools/call", {"name": "relic_search", "arguments": {"query": "x", "vector": [1, 0]}}).json()["result"]
     assert bad["isError"] and "only apply with semantic" in bad["content"][0]["text"]
-    gone = rpc(client, "tools/call", {"name": "relic_trace", "arguments": {}}).json()["result"]
+    gone = rpc(client, "tools/call", {"name": "relic_chain", "arguments": {}}).json()["result"]
     assert gone["isError"]
     assert rpc(client, "tools/call", {"name": "nope"}).json()["error"]["code"] == -32602
     assert rpc(client, "nope/nope").json()["error"]["code"] == -32601
@@ -115,3 +115,57 @@ def test_status_says_which_door(client):
     assert client.get("/api/status", headers={"Authorization": "Bearer tok-mba"}).json()["you"] == "token:mba"
     r = rpc(client, "tools/call", {"name": "relic_status", "arguments": {}}).json()["result"]
     assert json.loads(r["content"][0]["text"])["you"] == "token:m5"
+
+
+def test_connected_devices(client):
+    """/api/clients: each door + client that called, with its tools; the client is the header, else the User-Agent."""
+    client.get("/login", params={"t": "tok-mba"})
+    client.get("/api/status", headers={"X-Relic5-Client": "relic-feeder"})
+    client.get("/api/search", params={"q": "hub"}, headers={"User-Agent": "claude-code/2.1.308 (darwin)"})
+    rpc(client, "tools/call", {"name": "relic_status", "arguments": {}})
+    devs = {(d["door"], d["client"]): d for d in client.get("/api/clients").json()["devices"]}
+    assert devs[("token:mba", "relic-feeder (http)")]["tools"] == {"relic_status": 1}
+    assert devs[("token:mba", "claude-code (http)")]["tools"] == {"relic_search": 1}
+    assert any(door == "token:m5" and c.endswith("(mcp)") for door, c in devs)
+    assert all(d["calls_24h"] >= 1 and d["last"] for d in devs.values())
+
+
+@pytest.fixture
+def hub_with_tokens(root, tmp_path):
+    from relic5.tokens import Tokens
+    t = Tokens(str(tmp_path / "tokens.json"), str(tmp_path / "legacy"))
+
+    class Local(Doors):        # the test client is not 127.0.0.1: no bearer = the loopback door; tokens checked for real
+        def door(self, server, client, host, bearer):
+            return super().door(server, client, host, bearer) if bearer else "loopback"
+    return TestClient(make_app(root, t, Local(t, enabled=False))), t
+
+
+def test_tokens_from_the_ui(hub_with_tokens):
+    c, t = hub_with_tokens
+    J = {"X-Relic5-Request": "1", "Host": "127.0.0.1"}
+    assert c.get("/api/tokens", headers={"Host": "127.0.0.1"}).json() == []            # loopback door: allowed
+    r = c.post("/api/tokens", json={"action": "new", "name": "phone", "expires": "90d"}, headers=J).json()
+    secret = r["token"]
+    assert r["name"] == "phone" and len(secret) > 30 and t.check(secret) == "phone"   # works as a token at once
+    assert [x["name"] for x in c.get("/api/tokens", headers={"Host": "127.0.0.1"}).json()] == ["phone"]
+    assert secret not in open(t.path).read()                                          # stored hashed only
+    # a token never mints a token
+    assert c.post("/api/tokens", json={"action": "new", "name": "x"}, headers={"Authorization": f"Bearer {secret}", "X-Relic5-Request": "1"}).status_code == 403
+    # a cross-site form post (no header, not JSON) is refused
+    assert c.post("/api/tokens", data="action=new&name=evil", headers={"Host": "127.0.0.1", "Content-Type": "text/plain"}).status_code == 400
+    assert c.post("/api/tokens", json={"action": "new", "name": "phone"}, headers=J).status_code == 400   # exists
+    new = c.post("/api/tokens", json={"action": "rotate", "name": "phone", "grace": "1h"}, headers=J).json()["token"]
+    assert t.check(new) == "phone" and t.check(secret) == "phone"                     # the old one lasts the grace hour
+    assert c.post("/api/tokens", json={"action": "revoke", "name": "phone"}, headers=J).json() == {"name": "phone", "action": "revoke"}
+    assert t.check(new) is None and c.get("/api/tokens", headers={"Host": "127.0.0.1"}).json() == []
+
+
+def test_big_answers_are_gzipped(client):
+    import glob, os
+    import relic5
+    js = sorted(glob.glob(os.path.join(os.path.dirname(relic5.__file__), "web", "assets", "index-*.js")))[0]
+    r = client.get("/assets/" + os.path.basename(js), headers={**H, "Accept-Encoding": "gzip"})
+    assert r.status_code == 200 and r.headers.get("content-encoding") == "gzip"     # the page's JS: gzipped
+    small = client.get("/health", headers={**H, "Accept-Encoding": "gzip"})
+    assert small.headers.get("content-encoding") is None                            # under 1 KB: as it is

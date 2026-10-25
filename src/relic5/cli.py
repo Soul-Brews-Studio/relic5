@@ -5,6 +5,8 @@
   relic5 index [--root ~/relic5] [--force] [YYYY-MM ...]   on the hub: month manifests, BM25 tables, names (fast lane)
   relic5 index --vectors                     on the hub: vector tables and watermarks only (slow lane, after shards land)
   relic5 seals [--verify]                    on the hub: each machine's sealed months as the hub holds them (exit 1: a seal broke)
+  relic5 seals --retire <machine> --succeeded-by S [--why W]   on the hub: a machine moved to the attic (docs/RETIRED.md)
+  relic5 seal-day [YYYY-MM]                  on the hub: reconcile closed months end to end (exit 1: one is blocked)
   relic5 import relic3 [--weeks 2026W40-2026-09-28,...] [--all] [--out ~/.relic-import/relic3]
                                   old relic3 weeks -> relic-scan month files of the sessions no machine holds
   relic5 tui [--token]            the hub in a terminal: status, live, search (+ show), jobs, queries
@@ -29,6 +31,7 @@ import json, os, re, secrets, sys, time, urllib.error, urllib.parse, urllib.requ
 from typing import overload
 
 from .types_ import Json
+from . import store as rfs
 
 ROOT = os.environ.get("RELIC5_ROOT", "~/relic5")
 TOKENS = os.environ.get("RELIC5_TOKENS", "~/.config/relic5/tokens")
@@ -52,7 +55,7 @@ def _opt(args: list[str], name: str, default: str | None = None) -> str | None:
 
 def read_tokens(path: str = TOKENS) -> dict[str, str]:
     p = os.path.expanduser(path)
-    if not os.path.exists(p):
+    if not rfs.exists(p):
         return {}
     out: dict[str, str] = {}
     for line in open(p):
@@ -83,6 +86,16 @@ def serve(args: list[str]) -> None:
     import uvicorn
     from .api import make_app
     root = os.path.expanduser(_opt(args, "--root", ROOT))
+    from . import mirror
+    # storage.json is the hub's own choice of home and wins over --root (the container always passes --root /data):
+    # a switch set on the Storage page takes effect at this start, and the old home becomes the mirror (mirror.py)
+    sw = mirror.config().get("switch_to")
+    if sw:
+        print(f"relic5 serve: switching from {root} to {sw} (storage.json switch_to); {root} stays as the mirror", flush=True)
+        mirror.set_config(switched_from=root, switch_to=None, root=sw, mirror=root, verify=None)
+        root = sw
+    elif mirror.config().get("root"):
+        root = mirror.config()["root"]
     hosts = _opt(args, "--host", "127.0.0.1").split(",")
     port = int(_opt(args, "--port", str(PORT)))
     from .doors import Doors
@@ -169,13 +182,16 @@ def _main(argv: list[str] | None = None) -> None:
         import fcntl
         # one index at a time, both lanes (relic3 hub/README.md:76: run one indexer at a time). A kernel flock: it goes
         # away with the process, so a dead run never blocks the next one (relic4-scan LEARNED.md:53). Exit 75 = locked.
-        os.makedirs(fts.search_dir(root), exist_ok=True)
-        lockf = open(os.path.join(fts.search_dir(root), ".lock"), "w")
+        # the lock is a local file: beside the index on a disk, in the local cache for an S3 root (one indexer per
+        # hub machine; a bucket has no locks)
+        lock_dir = rfs.cache_dir(rfs.root_of(root), "index") if rfs.is_s3(root) else fts.search_dir(root)
+        os.makedirs(lock_dir, exist_ok=True)
+        lockf = open(os.path.join(lock_dir, ".lock"), "w")
         try:
             fcntl.flock(lockf, fcntl.LOCK_EX | (0 if wait else fcntl.LOCK_NB))
         except BlockingIOError:
             sys.exit(print("relic5 index: another index is running (exit 75; --wait to queue)", file=sys.stderr) or 75)
-        con = duckdb.connect()
+        con = rfs.duck(duckdb.connect(), rfs.root_of(root))
         if vectors:   # the slow lane, on its own: vector tables and watermarks only
             with job(root, "index-vectors") as j:
                 def echo(m: str) -> None:   # each line printed and kept as the job's progress
@@ -184,11 +200,7 @@ def _main(argv: list[str] | None = None) -> None:
                 tabs = fts.build(root, con, force=force, lane="vectors", log=echo)
                 j.progress(done=len(tabs), unit="tables", message="vectors: " + (",".join(tabs) or "none changed"))
                 from . import vec as V
-                marks = {m: V.watermarks(root, con, m) for m in V.models(root)}
-                p = os.path.join(fts.search_dir(root), "vectors.json")
-                with open(p + ".tmp", "w") as f:
-                    json.dump({"at": time.strftime("%FT%T%z"), "models": marks}, f, indent=1)
-                os.replace(p + ".tmp", p)
+                marks = V.write_marks(root, con, published=True)
                 for m, w in marks.items():
                     print(f"vectors {m}: " + ", ".join(f"{k} pending {v['pending']:,} at {v['at']}" for k, v in sorted(w.items())))
             return
@@ -203,14 +215,22 @@ def _main(argv: list[str] | None = None) -> None:
             from . import names as NM
             j.progress(done=NM.build(root, con, Parts(root)), unit="sessions", message="names")
             from . import seals
-            _, v = seals.update(os.path.abspath(root))
+            _, v = seals.update(rfs.root_of(root))
             j.progress(done=v["checked"], unit="seals", message=f"seals: {v['checked']} checked, {len(v['problems'])} problems")
+            from . import sealday
+            days = sealday.run(rfs.root_of(root))
+            j.progress(done=sum(d["state"] == "reconciled" for d in days), unit="months",
+                       message="seal day: " + ", ".join(f"{d['month']} {d['state']}" for d in days if d["state"] != "open")[-300:])
+            from . import vec as V
+            if V.models(root):   # recount what still waits for a vector (the vector lane alone left it stale for hours)
+                marks = V.write_marks(root, con, published=False)
+                j.progress(done=sum(v["pending"] for w in marks.values() for v in w.values()), unit="pending", message="vectors pending recounted")
             from . import selfknow
             selfknow.record_size(root)
     elif cmd == "tui":
         from .tui import main as tui
         tok = os.path.expanduser(TOKEN_FILE)
-        tui(URL, open(tok).read().strip() if "--token" in rest and os.path.exists(tok) else None)
+        tui(URL, open(tok).read().strip() if "--token" in rest and rfs.exists(tok) else None)
     elif cmd == "mcp":
         from .shim import serve as shim
         shim(URL)
@@ -320,9 +340,27 @@ def _main(argv: list[str] | None = None) -> None:
             if not follow:
                 break
             _t.sleep(30)
+    elif cmd == "seal-day":   # on the hub: reconcile closed months (sealday.py); every index runs it too
+        from . import sealday
+        root = os.path.abspath(os.path.expanduser(_opt(rest, "--root", ROOT)))
+        want = [a for a in rest if len(a) == 7 and a[4] == "-"]
+        states = [sealday.reconcile(root, m) for m in want] if want else sealday.run(root)
+        for d in states:
+            if d["state"] == "open":
+                continue
+            extra = d["fingerprint"] or "; ".join((d["problems"] or d["waiting"])[:3])
+            print(f"{d['month']}  {d['state']:<10} {extra}" + (f"  ({d['amendments']} amendment(s))" if d["amendments"] else ""))
+        sys.exit(1 if any(d["state"] == "blocked" for d in states) else 0)
     elif cmd == "seals":   # on the hub: the machines' month seals as the hub holds them; --verify exits 1 on a difference
         from . import seals
         root = os.path.abspath(os.path.expanduser(_opt(rest, "--root", ROOT)))
+        if "--retire" in rest:   # relic5 seals --retire <machine> --why "..."  (after its parts went to the attic)
+            m = _opt(rest, "--retire", "")
+            by = _opt(rest, "--succeeded-by", "")
+            if not by:
+                sys.exit(print("relic5 seals --retire needs --succeeded-by <machine | 'nothing: reason'> (docs/RETIRED.md)", file=sys.stderr) or 2)
+            n = seals.retire(root, m, _opt(rest, "--why", "parts moved to the attic"), by)
+            sys.exit(print(f"{m}: {n} sealed months moved to index/_seals/retired.json") if n else print(f"{m}: no seal records", file=sys.stderr) or 1)
         vf = seals.verify(root) if "--verify" in rest else None
         for m, x in seals.summary(root)["machines"].items():
             print(f"{m:<20} {x['sealed']:>3} sealed months · newest seal {x['newest_sealed_at'] or 'none'} · resealed {x['resealed']}")

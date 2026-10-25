@@ -17,6 +17,7 @@ from typing import Callable, TypedDict
 
 from .encode import encode
 from .types_ import Json
+from . import store as rfs
 
 HUB = os.environ.get("RELIC5_HUB_SSH", "nat@white.follow-rankine.ts.net")
 RELIC4 = os.environ.get("RELIC5_RELIC4", "/opt/Code/github.com/Soul-Brews-Studio/agent-relic-v4")
@@ -42,7 +43,7 @@ POLICY: Policy = {"backlog_gb300": 50000, "small": "ane", "big": "gb300", "query
 
 def policy() -> Policy:
     p = POLICY.copy()
-    if os.path.exists(CONFIG):
+    if rfs.exists(CONFIG):
         import tomllib
         p |= tomllib.load(open(CONFIG, "rb")).get("embed", {})
     return p
@@ -91,6 +92,31 @@ def probe(url: str, model: str, n: int = 200, engine: str = "mps") -> Probe:
             "texts_per_s": round(len(cos) / secs, 1) if secs else None}
 
 
+PARITY = os.path.expanduser("~/.cache/relic5/parity.json")
+PARITY_TTL_S = 86400
+
+
+def parity_fresh(model: str, engine: str, now: float | None = None) -> bool:
+    """A passed parity probe for this engine and model in the last day (the probe cost 6 s of every embed)."""
+    try:
+        at = float(rfs.read_json(PARITY)[f"{model}|{engine}"]["at"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+    return (now or time.time()) - at < PARITY_TTL_S
+
+
+def parity_ok(model: str, engine: str, p05: float) -> None:
+    try:
+        d: dict[str, Json] = rfs.read_json(PARITY)
+    except (OSError, ValueError):
+        d = {}
+    d[f"{model}|{engine}"] = {"at": time.time(), "p05": p05}
+    os.makedirs(os.path.dirname(PARITY), exist_ok=True)
+    with open(PARITY + ".tmp", "w") as f:
+        json.dump(d, f)
+    os.replace(PARITY + ".tmp", PARITY)
+
+
 def note(state: str, message: str, **kw: object) -> None:
     """One JobEvent in the hub's logs/jobs.jsonl: the policy decision and the outcome."""
     ev = {"job": f"embed-{socket.gethostname().split('.')[0].lower()}-{os.getpid()}", "verb": "embed", "state": state,
@@ -100,12 +126,13 @@ def note(state: str, message: str, **kw: object) -> None:
 
 
 def run(url: str, model: str, limit: int = 5000, prefixes: str = "", engine: str = "mps",
-        log: Callable[[str], object] = print) -> int:
+        log: Callable[[str], object] = print, rows: list[Json] | None = None) -> int:
     import pyarrow as pa, pyarrow.parquet as pq
     t0 = time.time()
-    rows: list[Json] = []
-    for p in (prefixes.split(",") if prefixes else [""]):
-        rows += _get(url, "/api/missing", model=model, limit=limit, prefix=p)["rows"]
+    if rows is None:
+        rows = []
+        for p in (prefixes.split(",") if prefixes else [""]):
+            rows += _get(url, "/api/missing", model=model, limit=limit, prefix=p)["rows"]
     rows = rows[:limit]
     if not rows:
         log("embed: nothing missing")
@@ -122,8 +149,12 @@ def run(url: str, model: str, limit: int = 5000, prefixes: str = "", engine: str
     dest = f"relic5/vectors/{model}/"
     subprocess.run(["rsync", "-a", "--timeout=120", tmp, f"{HUB}:{dest}.{name}"], check=True)
     # publish by rename on the hub, so the index never reads half a shard
-    subprocess.run(["ssh", "-o", "BatchMode=yes", HUB, f"mv ~/{dest}.{name} ~/{dest}{name} && "
-                    f"cd ~/relic5/app && docker compose run --rm index relic5 index --root /data --vectors >/dev/null 2>&1"], check=True)
+    # the vector tables rebuild on the hub after this returns (index --wait queues behind a running one); waiting
+    # here made a 100-chunk embed a 60 s step (2026-10-24). RELIC5_EMBED_WAIT=1 keeps the old, blocking behaviour.
+    index = "cd ~/relic5/app && docker compose run --rm index relic5 index --root /data --vectors --wait >/dev/null 2>&1"
+    if os.environ.get("RELIC5_EMBED_WAIT") != "1":
+        index = f"nohup sh -c '{index}' >/dev/null 2>&1 </dev/null &"
+    subprocess.run(["ssh", "-o", "BatchMode=yes", HUB, f"mv ~/{dest}.{name} ~/{dest}{name} && {index}"], check=True)
     os.remove(tmp)
     log(f"embed: {len(rows):,} chunks on {engine} in {time.time() - t0:.0f}s -> {dest}{name}")
     return len(rows)
@@ -140,23 +171,31 @@ def main(args: list[str]) -> None:
               f"({'OK, > 0.99' if r['p05'] > 0.99 else 'NOT OK: these vectors need their own model@hash'})")
         return
     limit = int(_opt(args, "--limit", "5000"))
+    prefix = _opt(args, "--prefix", "")
     why = None
+    first: Json | None = None
     if engine == "auto":
-        pending = _get(URL, "/api/missing", model=model, limit=1)["pending"]
+        first = _get(URL, "/api/missing", model=model, limit=limit)    # the count and the rows in one call
+        pending = int(first["pending"])
+        if not pending:
+            print("embed: nothing missing")
+            return
         engine, why = choose(pending)
         print(f"embed policy: {why}")
         if engine == policy()["big"]:
-            limit = max(limit, pending)
+            limit, first = max(limit, pending), None
     note("start", why or f"engine {engine} (asked)", engine=engine)
     # an engine ships into a model@hash folder only when its vectors match the ones there (relic3 6a6d9d8: an --also
     # engine is admitted at cos median >= 0.998, min >= 0.99); exit 3 = parity refused, as relic3 embed
-    if engine != "gb300":   # gb300 made the stored vectors: its parity is the reference
+    if engine != "gb300" and not parity_fresh(model, engine):   # gb300 made the stored vectors: it is the reference
         r = probe(URL, model, 50, engine)
+        if r["n"] and r["p05"] > 0.99:
+            parity_ok(model, engine, r["p05"])
         if r["n"] and r["p05"] <= 0.99:
             note("error", f"parity refused on {engine}: p05 {r['p05']}", rc=3)
             sys.exit(print(f"parity refused: {model} here p05={r['p05']} (want > 0.99); use a model@hash of its own", file=sys.stderr) or 3)
     try:
-        n = run(URL, model, limit, _opt(args, "--prefix", ""), engine)
+        n = run(URL, model, limit, prefix, engine, rows=first["rows"] if first is not None and not prefix else None)
     except Exception as ex:
         note("error", f"{engine}: {type(ex).__name__}: {ex}"[:300], rc=1)
         raise

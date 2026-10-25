@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, TypedDict
 
 from .parts import Parts, sql_list, this_month
 from .types_ import Json
+from . import store as rfs
 
 if TYPE_CHECKING:   # for annotations only: duckdb and lancedb are loaded where they are used
     import duckdb
@@ -38,45 +39,108 @@ class FtsSettings(TypedDict):
 
 FTS_SETTINGS = FtsSettings(base_tokenizer="icu", stem=False, remove_stop_words=False, max_token_length=128,
                     with_position=True)   # positions: exact-phrase hits rank first (eval 2026-10-23: common-word misses)
-LAYERS = {"prose": ("text", "vault"), "tools": ("tools",), "thinking": ("thinking",), "memory": ("memory",)}
+LAYERS = {"prose": ("text", "vault"), "tools": ("tools",), "thinking": ("thinking",), "memory": ("memory",), "git": ("git",)}
+SIDE = {"memory": ("_memory", "notes.parquet"), "git": ("_git", "commits.parquet")}
+"""Layers built from a table the hub folds itself (memory.py, gitlog.py), not from month parts: history only."""
 COLS = ["uid", "msgkey", "chunk", "key", "month", "sid", "ts", "ts_th", "role", "engine", "cat", "layer", "machines", "text", "title"]
+HOME_COLS = ["home", "homes", "agent"]
+"""Which .claude (or .codex) a row came from (Nat, 2026-10-25: "can we separate like .claude from user nat / .claude
+from user beta or .claude project of some project"): home is the last .claude*/.codex* folder before projects*,
+sessions or backups in relic-scan's src_path (/Users/beta/.claude, /Users/nat/.claude1, a project's own
+.../exp/.claude-hello/.claude); homes, every home that holds the message (a copy lives in several), newline-joined;
+agent, relic-scan's user@host. Tables built before this have none of them (index --force adds them)."""
+HOME_SQL = r"nullif(regexp_extract(src_path, '^(.*/\.(?:claude|codex)[^/]*)/(?:projects|sessions|backups|archived)', 1), '')"
 KEEP = 3
 
 
+def tokens(text: str) -> list[str]:
+    """The words the BM25 index sees in a text: lance's own query tokenizer with the index's settings (ICU, so Thai
+    splits into words; lower case; no stemming, no stop words). The Search page shows a query this way."""
+    import lance
+    return [t.text for t in lance.tokenize(text, base_tokenizer=FTS_SETTINGS["base_tokenizer"], stem=FTS_SETTINGS["stem"],
+                                            remove_stop_words=FTS_SETTINGS["remove_stop_words"],
+                                            max_token_length=FTS_SETTINGS["max_token_length"])]
+
+
 def search_dir(root: str) -> str:
+    """Where the search index lives. On a disk: <root>/index/_search. On an S3 root: the local cache, because the index
+    is derived (rebuilt from the parts) and every query reads it: from the bucket a search took 1.2-1.6 s where the
+    disk hub took 0.3 s (2026-10-25). RELIC5_INDEX_LOCAL=0 keeps it in the bucket."""
+    root = str(root)
+    if rfs.is_s3(root) and os.environ.get("RELIC5_INDEX_LOCAL", "1") != "0":
+        return rfs.cache_dir(root.rstrip("/"), "index", "_search")
     return os.path.join(root, "index", "_search")
+
+
+def seed_local(root: str, log: Callable[[str], object] = print) -> int:
+    """An S3 hub with no local index yet: copy the bucket's index/_search down (a mirror of a disk hub carries one), the
+    pointers last, so it can search at once. -> files copied (0: nothing to seed, or already seeded)."""
+    root = str(root).rstrip("/")
+    if not rfs.is_s3(root) or os.environ.get("RELIC5_INDEX_LOCAL", "1") == "0":
+        return 0
+    local, remote = search_dir(root), os.path.join(root, "index", "_search")
+    if os.path.exists(os.path.join(local, "current.json")) or not rfs.isfile(os.path.join(remote, "current.json")):
+        return 0
+    from .mirror import _copy_one
+    cur = rfs.read_json(os.path.join(remote, "current.json"))
+    gens = {v.split("/")[0] for v in cur.values()}
+    todo = [p for g in sorted(gens) for p, _, _ in rfs.files(os.path.join(remote, g))]
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(lambda p: _copy_one(p, os.path.join(local, p[len(remote) + 1:])), todo))
+    for f in ("names.parquet", "homes.parquet", "shard_months.json", "vectors.json", "state.json", "current.json"):
+        if rfs.isfile(os.path.join(remote, f)):
+            _copy_one(os.path.join(remote, f), os.path.join(local, f))
+    log(f"seeded the local index from {remote}: {len(todo)} files")
+    return len(todo)
 
 
 def current(root: str) -> dict[str, str]:
     p = os.path.join(search_dir(root), "current.json")
-    return json.load(open(p)) if os.path.exists(p) else {}
+    return rfs.read_json(p) if rfs.exists(p) else {}
 
 
-def _select(parts: Parts, layer: str, months: Collection[str]) -> str | None:
-    """SQL for the folded rows of one layer over some months (vault, a single file, goes to history; so does memory,
-    already folded by memory.py)."""
-    if layer == "memory":
-        p = os.path.join(parts.root, "index", "_memory", "notes.parquet")
-        if "history" not in months or not os.path.exists(p):
+def _columns(con: "duckdb.DuckDBPyConnection | None", files: list[str]) -> set[str]:
+    """The columns a set of parts has between them (old parts have no src_path)."""
+    if con is None or not files:
+        return set()
+    try:
+        return {r[0] for r in con.execute(f"DESCRIBE SELECT * FROM read_parquet({sql_list(files)}, union_by_name = true)").fetchall()}
+    except Exception:
+        return set()
+
+
+def _select(parts: Parts, layer: str, months: Collection[str], con: "duckdb.DuckDBPyConnection | None" = None) -> str | None:
+    """SQL for the folded rows of one layer over some months (vault, a single file, goes to history; so do memory and
+    git, already folded by memory.py and gitlog.py)."""
+    if layer in SIDE:
+        p = os.path.join(parts.root, "index", *SIDE[layer])
+        if "history" not in months or not rfs.exists(p):
             return None
-        return f"""SELECT msgkey AS uid, msgkey, chunk, key, month, sid, ts, ts_th, role, engine, cat, 'memory' AS layer,
-                   machines, text, title FROM read_parquet({sql_list([p])}) ORDER BY ts, msgkey"""
+        return f"""SELECT msgkey AS uid, msgkey, chunk, key, month, sid, ts, ts_th, role, engine, cat, '{layer}' AS layer,
+                   machines, text, title, NULL::VARCHAR AS home, NULL::VARCHAR AS homes, NULL::VARCHAR AS agent
+                   FROM read_parquet({sql_list([p])}) ORDER BY ts, msgkey"""
     srcs: list[str] = []
     for s in LAYERS[layer]:
         fs = [p for _, mon, p in parts.files(s) if (s == "vault" and "history" in months) or mon in months]
         if fs:
             title = "title" if s == "vault" else "NULL::VARCHAR AS title"
+            have = _columns(con, fs)
+            home = (f"{HOME_SQL} AS home" if "src_path" in have else "NULL::VARCHAR AS home") + ", " + \
+                   ("src_agent AS agent" if "src_agent" in have else "NULL::VARCHAR AS agent")
             srcs.append(f"""SELECT regexp_extract(filename, '/parts/([^/]+)/', 1) AS machine, msgkey, chunk, key,
-                coalesce(month, substr(ts_th, 1, 7)) AS month, sid, ts, ts_th, role, engine, cat, '{layer}' AS layer, text, {title}
+                coalesce(month, substr(ts_th, 1, 7)) AS month, sid, ts, ts_th, role, engine, cat, '{layer}' AS layer, text, {title}, {home}
                 FROM read_parquet({sql_list(fs)}, union_by_name = true, filename = true) WHERE text IS NOT NULL AND text <> ''""")
     if not srcs:
         return None
     u = " UNION ALL BY NAME ".join(srcs)
-    return f"""SELECT msgkey || CASE WHEN chunk > 0 THEN ':' || chunk ELSE '' END AS uid, * EXCLUDE (rn, machine) FROM (
-               SELECT *, list(machine) OVER (PARTITION BY msgkey, chunk ORDER BY machine
-                 ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS machines,
-               row_number() OVER (PARTITION BY msgkey, chunk ORDER BY machine) AS rn FROM ({u})) WHERE rn = 1
-               ORDER BY ts, msgkey, chunk"""
+    return f"""SELECT msgkey || CASE WHEN chunk > 0 THEN ':' || chunk ELSE '' END AS uid,
+               * EXCLUDE (rn, machine, home_list) REPLACE (coalesce(home, home_list[1]) AS home),
+               nullif(array_to_string(list_sort(list_distinct(home_list)), chr(10)), '') AS homes FROM (
+               SELECT *, list(machine) OVER w AS machines, list(home) FILTER (WHERE home IS NOT NULL) OVER w AS home_list,
+               row_number() OVER (PARTITION BY msgkey, chunk ORDER BY machine) AS rn FROM ({u})
+               WINDOW w AS (PARTITION BY msgkey, chunk ORDER BY machine ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING))
+               WHERE rn = 1 ORDER BY ts, msgkey, chunk"""
 
 
 def _sig(parts: Parts, layer: str, months: Collection[str]) -> Json:
@@ -85,8 +149,8 @@ def _sig(parts: Parts, layer: str, months: Collection[str]) -> Json:
     sig: Json = {}
     for m in months:
         p = parts.manifest_path(m)
-        if os.path.exists(p):
-            st = json.load(open(p))["streams"]
+        if rfs.exists(p):
+            st = rfs.read_json(p)["streams"]
             sig[m] = {s: st[s] for s in LAYERS[layer] if s in st}
     return sig
 
@@ -104,31 +168,38 @@ def build(root: str, con: "duckdb.DuckDBPyConnection", log: Callable[[str], obje
     months = parts.months()
     groups = {"history": [m for m in months if m != "undated" and m < cur_month] + ["undated"], "open": [m for m in months if m >= cur_month]}
     sd = search_dir(root)
-    os.makedirs(sd, exist_ok=True)
+    rfs.makedirs(sd)
+    rfs.duck(con, root)
     state_p = os.path.join(sd, "state.json")
-    state = json.load(open(state_p)) if os.path.exists(state_p) else {}
+    state = rfs.read_json(state_p) if rfs.exists(state_p) else {}
     vault = [p for _, _, p in parts.files("vault")]
-    from . import memory
-    memory.build(root) if lane == "fts" else None
-    mem_sig = memory.sig(root)
+    from . import gitlog, memory
+    if lane == "fts":
+        memory.build(root)
+        gitlog.build(root)
+    side_sig = {"memory": {"notes": memory.sig(root)}, "git": {"logs": gitlog.sig(root)}}
     plan: dict[str, tuple[str, list[str], Json]] = {}
     for layer in (LAYERS if lane == "fts" else ()):
         for part, ms in groups.items():
             name = f"{layer}_{part}"
-            sig = _sig(parts, layer, ms) | ({"vault": [os.path.getmtime(p) for p in vault]} if layer == "prose" and part == "history" else {})
-            if layer == "memory":
-                if part != "history":
+            sig = _sig(parts, layer, ms) | ({"vault": [rfs.getmtime(p) for p in vault]} if layer == "prose" and part == "history" else {})
+            if layer in SIDE:
+                if part != "history" or not next(iter(side_sig[layer].values())):   # no notes / no logs pushed: no table
                     continue
-                sig = {"notes": mem_sig}
+                sig = side_sig[layer]
             sig = json.loads(json.dumps(sig))
             if force or state.get(name, {}).get("sig") != sig or name not in current(root):
                 plan[name] = (layer, ms + (["history"] if part == "history" else []), sig)
     from . import vec as V
     for model in (V.models(root) if lane == "vectors" else ()):
         layer = "vec_" + V.slug(model)
-        shard_sig = [[os.path.basename(f), os.path.getsize(f)] for f in V.shards(root, model)]
+        sm = V.shard_months(root, model, con, parts)
+        sizes = {os.path.basename(f): rfs.getsize(f) for f in V.shards(root, model)}
         for part, ms in groups.items():
             name = f"{layer}_{part}"
+            mine = set(ms) | ({"undated", None} if part == "history" else set())
+            # only the shards holding keys of this table's months: a new October shard leaves history untouched
+            shard_sig = [[n, sizes[n]] for n in sorted(sm) if mine & set(sm[n])]
             sig = json.loads(json.dumps({"text": _sig(parts, "prose", ms), "shards": shard_sig}))
             if force or state.get(name, {}).get("sig") != sig or name not in current(root):
                 plan[name] = ("vec:" + model, ms, sig)
@@ -137,13 +208,13 @@ def build(root: str, con: "duckdb.DuckDBPyConnection", log: Callable[[str], obje
     # UTC, always: the native venv and the container disagree on the local zone, and "newest" is by name
     gen = time.strftime("%Y%m%d-%H%M%S", time.gmtime()) + f"-{os.getpid()}"   # unique even for two runs in one second
     gdir = os.path.join(sd, gen)
-    db = lancedb.connect(gdir)
+    db = rfs.lancedb_connect(gdir)
     cur = dict(current(root))
     done = []
     for name, (layer, ms, sig) in plan.items():
         t = time.time()
         is_vec = layer.startswith("vec:")
-        sql = V.table_sql(parts, root, layer[4:], ms) if is_vec else _select(parts, layer, ms)
+        sql = V.table_sql(parts, root, layer[4:], ms) if is_vec else _select(parts, layer, ms, con)
         tab = con.execute(sql).arrow() if sql else None
         if tab is not None and hasattr(tab, "read_all"):
             tab = tab.read_all()
@@ -166,23 +237,22 @@ def build(root: str, con: "duckdb.DuckDBPyConnection", log: Callable[[str], obje
         log(f"fts {name}: {tab.num_rows:,} rows ({time.time() - t:.1f}s)")
     # the other lane may have published meanwhile: merge on the newest files, keep only this lane's tables from us
     cur = {k: v for k, v in current(root).items() if (k.startswith("vec_")) != (lane == "vectors")} | {k: v for k, v in cur.items() if (k.startswith("vec_")) == (lane == "vectors")}
-    if os.path.exists(state_p):
-        state = {k: v for k, v in json.load(open(state_p)).items() if (k.startswith("vec_")) != (lane == "vectors")} | {k: v for k, v in state.items() if (k.startswith("vec_")) == (lane == "vectors")}
+    if rfs.exists(state_p):
+        state = {k: v for k, v in rfs.read_json(state_p).items() if (k.startswith("vec_")) != (lane == "vectors")} | {k: v for k, v in state.items() if (k.startswith("vec_")) == (lane == "vectors")}
     for p, obj in ((state_p, state), (os.path.join(sd, "current.json"), cur)):   # current.json last: the publish point
-        with open(p + ".tmp", "w") as f:
-            json.dump(obj, f, indent=1)
-        os.replace(p + ".tmp", p)
+        rfs.write_json(p, obj, indent=1)
     _prune(sd, cur)
     return done
 
 
 def _prune(sd: str, cur: dict[str, str]) -> None:
     live = {v.split("/")[0] for v in cur.values()}
-    gens = sorted((d for d in os.listdir(sd) if os.path.isdir(os.path.join(sd, d)) and d[:8].isdigit()),
-                  key=lambda d: os.path.getmtime(os.path.join(sd, d)))   # by age on disk, not by name
-    for g in gens[:-KEEP]:
+    names = [d for d in rfs.listdir(sd) if d[:8].isdigit() and rfs.isdir(os.path.join(sd, d))]
+    # by age on disk, not by name, where a folder has an age; on S3 a prefix has none, and the names are UTC times
+    gens = names if rfs.is_s3(sd) else sorted(names, key=lambda d: rfs.getmtime(os.path.join(sd, d)))
+    for g in sorted(gens)[:-KEEP] if rfs.is_s3(sd) else gens[:-KEEP]:
         if g not in live:
-            shutil.rmtree(os.path.join(sd, g))
+            rfs.rmtree(os.path.join(sd, g))
 
 
 class Index:
@@ -193,39 +263,55 @@ class Index:
     _mx_seen: float | None
 
     def __init__(self, root: str) -> None:
-        self.root = os.path.abspath(os.path.expanduser(root))
+        self.root = rfs.root_of(root)
         self.seen, self.tables = None, {}
 
     def _load(self) -> "dict[str, lancedb.table.Table]":
         p = os.path.join(search_dir(self.root), "current.json")
-        m = os.path.getmtime(p) if os.path.exists(p) else None
+        m = rfs.getmtime(p) if rfs.exists(p) else None
         if m != self.seen:
             import lancedb
             cur = current(self.root)
             tabs: dict[str, lancedb.table.Table] = {}
+            missing: list[str] = []
             for name, rel in cur.items():
                 gen, fname = rel.split("/")
-                tabs[name] = lancedb.connect(os.path.join(search_dir(self.root), gen)).open_table(fname[:-6])
-            self.tables, self.seen = tabs, m
+                try:   # a table current.json names but the folder lacks (a copy caught mid-publish): serve the rest
+                    tabs[name] = rfs.lancedb_connect(os.path.join(search_dir(self.root), gen)).open_table(fname[:-6])
+                except (ValueError, OSError, FileNotFoundError):
+                    missing.append(name)
+            self.tables, self.seen, self.missing = tabs, m, missing
         return self.tables
+        return self.tables
+
+    def has_column(self, col: str) -> bool:
+        tabs = self._load()
+        return bool(tabs) and all(col in t.schema.names for n, t in tabs.items() if not n.startswith("vec_"))
 
     def built(self) -> bool:
         return bool(self._load())
 
-    def vector(self, model: str, vector: Sequence[float], filt: "VecFilter", limit: int) -> list[Json]:
-        """Nearest prose rows to a unit query vector: exact, in memory (vec.Matrix), best first; _score = cosine."""
+    def matrices(self, model: str) -> "list[Matrix]":
+        """The in-memory vector matrices (open, history) of one model, made on first use per generation."""
         from . import vec as V
         tabs = self._load()
         if getattr(self, "_mx_seen", None) != self.seen:
             self._mx, self._mx_seen = {}, self.seen
-        out: list[Json] = []
+        out: list[V.Matrix] = []
         for part in ("open", "history"):
             name = f"vec_{V.slug(model)}_{part}"
             if name not in tabs:
                 continue
             if name not in self._mx:
                 self._mx[name] = V.Matrix(tabs[name])
-            out += self._mx[name].search(vector, filt, limit)
+            out.append(self._mx[name])
+        return out
+
+    def vector(self, model: str, vector: Sequence[float], filt: "VecFilter", limit: int) -> list[Json]:
+        """Nearest prose rows to a unit query vector: exact, in memory (vec.Matrix), best first; _score = cosine."""
+        out: list[Json] = []
+        for mx in self.matrices(model):
+            out += mx.search(vector, filt, limit)
         out.sort(key=lambda r: -r["_score"])
         return out[:limit]
 
@@ -241,9 +327,23 @@ class Index:
             qb = tb.search(q, query_type="fts").limit(limit)
             if where:
                 qb = qb.where(where, prefilter=True)
-            out += qb.select(COLS + ["_score"]).to_list()
+            have = set(tb.schema.names)
+            out += qb.select([c for c in COLS + HOME_COLS if c in have] + ["_score"]).to_list()
         out.sort(key=lambda r: (-r["_score"], r["ts"] or ""))
         return out[:limit]
+
+    def count(self, layer: str, q: str, cap: int) -> int:
+        """Rows of one layer (history + open) that match q, counted up to cap: a term's document frequency."""
+        n = 0
+        for part in ("open", "history"):
+            tb = self._load().get(f"{layer}_{part}")
+            if tb is not None:
+                n += len(tb.search(q, query_type="fts").limit(cap).select(["uid", "_score"]).to_arrow())
+        return min(n, cap)
+
+    def size(self, layer: str) -> int:
+        """Rows in one layer's BM25 tables (history + open)."""
+        return sum(tb.count_rows() for part in ("open", "history") if (tb := self._load().get(f"{layer}_{part}")) is not None)
 
     def query(self, layer: str, q: str, where: str | None, limit: int) -> list[Json]:
         """BM25 hits of one layer (history + open), best first. A query of two or more words also runs as an exact

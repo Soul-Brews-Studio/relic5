@@ -1,14 +1,19 @@
 import { useEffect, useRef, useState } from "react";
-import { usePoll } from "../api";
+import { get, usePoll } from "../api";
+import { bkk, clock, repoColor } from "../format";
+import { Drawer } from "../components/Drawer";
+import { Loading, MachinePick } from "../components/ui";
 import { DataTable } from "../components/DataTable";
-import { Hint, State, Who } from "../components/ui";
-import type { TailResult, TailRow } from "../types";
+import { Hint, PageHead, State, Who } from "../components/ui";
+import { Context, shortRepo, WhoPick } from "./SearchView";
+import type { ShowResult, TailResult, TailRow } from "../types";
 
 const keyOf = (r: TailRow) => `${r.ts_th}|${r.role}|${r.sid}|${(r.text ?? "").slice(0, 40)}`;
 
-/** The newest messages across machines, re-read every 15 s; rows that were not there last time flash green
+/** The newest messages across machines, re-read every 15 s; rows that were not there last time flash amber
  *  (lance-indexer ui/live.html). Rows arrive with each machine's push, so a quiet minute is normal. */
-export function LiveView({ machine, role = "", on }: { machine: string; role?: string; on: boolean }) {
+export function LiveView({ machine, role = "", on, machines, setMachine, setRole }:
+  { machine: string; role?: string; on: boolean; machines: string[]; setMachine: (m: string) => void; setRole: (r: string) => void }) {
   const p = usePoll<TailResult>(`/api/tail?n=80${machine ? "&machine=" + encodeURIComponent(machine) : ""}`, 15000, on);
   const seen = useRef<Set<string> | null>(null);
   const [fresh, setFresh] = useState<Set<string>>(new Set());
@@ -19,18 +24,38 @@ export function LiveView({ machine, role = "", on }: { machine: string; role?: s
     seen.current = new Set(keys);
   }, [p.data]);
   useEffect(() => { seen.current = null; }, [machine]);
+  const [open, setOpen] = useState<{ r: TailRow; show: ShowResult | null; err?: string } | null>(null);
+  const read = (r: TailRow) => {
+    if (!r.link) return;
+    setOpen({ r, show: null });
+    get<ShowResult>(`/api/show?id=${encodeURIComponent(r.link)}&before=3&after=3`).then(show => setOpen(o => o && o.r === r ? { r, show } : o))
+      .catch(e => setOpen(o => o && o.r === r ? { r, show: null, err: String(e.message ?? e) } : o));
+  };
 
   return (
     <>
-      <Hint>{p.data ? `GET /api/tail · newest ${p.data.newest ?? "none"} · read ${p.at?.toLocaleTimeString()} · ${fresh.size} new since the last read` : "reading /api/tail…"}</Hint>
+      <PageHead title="Live" sub="The newest messages from every machine, read again every 15 seconds. New rows glow amber; a quiet minute is normal, rows arrive with each push.">
+        <WhoPick role={role} onChange={setRole} />
+        <MachinePick machine={machine} machines={machines} onChange={setMachine} />
+      </PageHead>
+      <Hint>{p.data ? `GET /api/tail · newest ${bkk(p.data.newest)} · read ${clock(p.at)} · ${fresh.size} new since the last read` : "reading /api/tail…"}</Hint>
       {p.error && <State error>{p.error}</State>}
-      <DataTable rows={(p.data?.rows ?? []).filter(r => !role || r.role === role)} rowKey={keyOf} flash={fresh} cols={[
-        { key: "t", head: "time (+07)", cell: r => <time>{(r.ts_th ?? "").slice(5, 16).replace("T", " ")}</time> },
-        { key: "m", head: "machine", cell: r => (r.machines ?? []).join(", ") },
-        { key: "r", head: "role", cell: r => <Who role={r.role} /> },
-        { key: "s", head: "session", cell: r => (r.session_name || r.sid || "").slice(0, 40), title: r => r.sid ?? "" },
-        { key: "x", head: "text", cell: r => (r.text ?? "").replace(/\s+/g, " ").slice(0, 180), title: r => r.text ?? "" },
+      <DataTable rows={(p.data?.rows ?? []).filter(r => !role || r.role === role)} rowKey={keyOf} flash={fresh} onRow={read} cols={[
+        { key: "t", head: "time (+07)", w: "w-32", cell: r => <time>{(r.ts_th ?? "").slice(5, 16).replace("T", " ")}</time> },
+        { key: "m", head: "machine", w: "w-28", cell: r => (r.machines ?? []).join(", ") },
+        { key: "r", head: "who", w: "w-32", cell: r => <Who role={r.role} /> },
+        // repo first: a title is the session's first one ("Restart self" stays after the session moves on to other work)
+        { key: "s", head: "session", w: "w-[19rem]", cell: r => {
+            const repo = r.cat && r.cat !== "home / other" ? shortRepo(r.cat) : "";
+            const name = (r.session_name || r.sid || "").slice(0, 40);
+            return repo ? <><span className="mr-2 inline-block size-2 rounded-full align-middle" style={{ background: repoColor(repo) }} /><span style={{ color: repoColor(repo) }}>{repo.slice(0, 24)}</span><span className="text-muted"> · </span>{name}</> : name;
+          }, title: r => `${r.cat ?? ""} · ${r.session_name ?? ""} · ${r.sid ?? ""}` },
+        { key: "x", head: "text", lead: true, cell: r => (r.text ?? "").replace(/\s+/g, " ").slice(0, 180), title: r => r.text ?? "" },
       ]} />
+      <Drawer open={!!open} onClose={() => setOpen(null)} title={open ? <>{open.r.cat ? shortRepo(open.r.cat) + " · " : ""}{open.r.session_name ?? open.r.sid}</> : ""}
+        note={open?.r.link} onCopy={() => open?.r.link && navigator.clipboard.writeText(open.r.link)}>
+        {open?.err ? <State error>{open.err}</State> : open?.show ? <Context r={open.show} q="" /> : <Loading label="Reading the message" />}
+      </Drawer>
     </>
   );
 }

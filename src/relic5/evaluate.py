@@ -4,6 +4,7 @@ import json, os, sys, urllib.parse, urllib.request
 from typing import TypedDict
 
 from .types_ import Json
+from . import store as rfs
 
 
 class Row(TypedDict):
@@ -25,7 +26,7 @@ def _post(url: str, q: str, vector: list[float], limit: int, hybrid: bool = Fals
 
 def run(path: str, semantic: bool = False, url: str | None = None, limit: int = 10, model: str = "unsloth--embeddinggemma-300m@806f5f90",
         hybrid: bool = False) -> Json:
-    spec = json.load(open(path))
+    spec = rfs.read_json(path)
     url = (url or os.environ.get("RELIC5_URL", "http://white.follow-rankine.ts.net:8795")).rstrip("/")
     ok = 0
     rows: list[Row] = []
