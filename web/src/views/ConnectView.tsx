@@ -140,6 +140,7 @@ const ASK: Record<string, string> = {
   relic_hours: "What happened yesterday and so far today? Use relic5's relic_hours.",
   relic_month: "Give me every month since Sep 2025 in one line each, then October day by day.",
   relic_activity: "Chart my messages per month (typed by me vs the AI), and a weekday × hour heatmap of when I type.",
+  relic_usage: "How much AI have I used since the first month? Sessions and subagents by engine, and the tool-error rate, per month.",
   relic_files: "Which files did the agents change most this month? Group them by project.",
   relic_readings: "What did z.ai say about yesterday afternoon, 15-minute windows, friction and lessons only?",
   relic_conversation: "Show me the whole conversation of session 008db2b3 with its tool calls, then summarize it.",
