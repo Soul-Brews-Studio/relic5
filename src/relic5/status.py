@@ -62,6 +62,10 @@ def status(root: str, now: _datetime | None = None) -> Json:
                 if mv.get("mtime"):
                     at = time.strftime("%FT%T%z", time.localtime(mv["mtime"]))
                     e["pushed_at"] = max(e["pushed_at"] or "", at)
+    from .fts import current, search_dir
+    for name, rel in current(p.root).items():   # a table the index names but lacks (a copy caught mid-publish)
+        if not rfs.isdir(os.path.join(search_dir(p.root), rel)):
+            warnings.append(f"index table {name} is missing ({rel}): run relic5 index")
     for m in p.machines():
         if not rfs.isfile(os.path.join(p.dir, m, "meta", "sessions.parquet")):
             warnings.append(f"machine {m}: no meta/sessions.parquet (sessions and repo filters miss it)")
