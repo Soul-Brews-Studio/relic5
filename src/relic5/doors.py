@@ -69,6 +69,23 @@ class Doors:
         self.cache[ip] = (time.time(), r)
         return r
 
+    def served(self, client_ip: str, login: str, host: str | None) -> str | None:
+        """A request `tailscale serve` (HTTPS on the tailnet) passed on to the hub's serve port: tailscaled names the
+        caller (Tailscale-User-Login, X-Forwarded-For), and the hub asks tailscaled again who that address is. Only
+        trusted on the serve port, which only tailscale serve connects to (api.py SERVE_PORT)."""
+        if not self.enabled or not self.owner or (host or "").lower().strip("[]") not in self.names:
+            return None
+        try:
+            ip = ipaddress.ip_address(client_ip)
+        except ValueError:
+            return None
+        if ip.version != 4 or ip not in CGNAT:
+            return None
+        w = self._whois(client_ip)
+        if w and w["login"] == self.owner and login == self.owner:
+            return f"tailnet:{w['node'].split('.')[0]}"
+        return None
+
     def door(self, server: str, client: str, host: str | None, bearer: str) -> str | None:
         """-> "loopback" | "tailnet:<node>" | "token:<machine>" | None (refused)."""
         if bearer:
