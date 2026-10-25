@@ -26,7 +26,9 @@ from fastapi.responses import JSONResponse, PlainTextResponse, Response
 
 from .types_ import Json
 
-ORIGINS = ("https://studio.buildwithoracle.com",)
+# Every ui-oracle app shares the ?host= picker (feed, vector, canvas, forum ... read the same /api), so all of them may read.
+APPS = ("studio", "feed", "app", "canvas", "forum", "indexer", "local", "pulse", "schedule", "vector", "vector-playground")
+ORIGINS = tuple(f"https://{a}.buildwithoracle.com" for a in APPS)
 LOCAL_ORIGIN = re.compile(r"^http://(localhost|127\.0\.0\.1)(:\d+)?$")   # Studio's own dev server
 SAMPLE = 3000
 GRAPH = 300

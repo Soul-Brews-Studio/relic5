@@ -60,6 +60,9 @@ def test_studio_origin_is_let_in_and_others_are_not(client):
     pre = client.options("/arra/api/stats", headers={"Origin": STUDIO, "Access-Control-Request-Method": "GET"})
     assert pre.status_code == 204 and pre.headers["access-control-allow-origin"] == STUDIO
     assert pre.headers["access-control-allow-private-network"] == "true"
+    feed = client.options("/arra/api/list", headers={"Origin": "https://feed.buildwithoracle.com", "Access-Control-Request-Method": "GET"})
+    assert feed.status_code == 204                                          # the other ui-oracle apps share the picker
+    assert client.options("/arra/api/list", headers={"Origin": "https://evil.buildwithoracle.com.example"}).status_code == 403
     r = client.get("/arra/api/stats", headers=H | {"Origin": STUDIO})
     assert r.headers["access-control-allow-origin"] == STUDIO
     assert client.options("/arra/api/stats", headers={"Origin": "https://evil.example"}).status_code == 403
