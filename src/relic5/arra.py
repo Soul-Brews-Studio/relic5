@@ -39,7 +39,7 @@ def cors(origin: str | None) -> dict[str, str]:
         return {}
     return {"Access-Control-Allow-Origin": origin, "Vary": "Origin", "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
             "Access-Control-Allow-Headers": "Content-Type", "Access-Control-Allow-Private-Network": "true",
-            "Access-Control-Max-Age": "600"}
+            "Access-Control-Max-Age": "600", "Timing-Allow-Origin": origin}
 
 
 def project_of(repo_key: str | None) -> str | None:
@@ -304,22 +304,46 @@ def router(relic: Any, status: Any, oracles: Any, version: str) -> APIRouter:
     @r.get("/dashboard/summary")
     def summary() -> Json:
         st = stats()
-        top = Counter(c for x in sample.get(relic)["docs"] for c in x["concepts"][1:2]).most_common(12)
-        q = (status().get("queries") or {})
+        top = [(str(x["cat"]), int(x["n"])) for x in relic._rows("SELECT cat, count(*) AS n FROM arra_notes GROUP BY 1 ORDER BY 2 DESC LIMIT 12")] \
+            if notes.table() else []
+        from . import trace
+        lo = since(7)
+        s7 = sum(1 for x in trace.rows(relic.parts.root) if x.get("tool") == "relic_search" and str(x.get("at") or "") >= lo)
+        l7 = int(relic._rows("SELECT count(*) AS n FROM arra_notes WHERE ts >= ? AND type = 'learning'", [lo])[0]["n"]) if notes.table() else 0
         return {"documents": {"total": st["total"], "by_type": st["by_type"]},
                 "concepts": {"total": len(top), "top": [{"name": n, "count": c} for n, c in top]},
-                "activity": {"searches_7d": q.get("searches_7d") or q.get("count") or 0, "learnings_7d": 0},
+                "activity": {"searches_7d": s7, "learnings_7d": l7},
                 "health": {"fts_status": "ok" if not st["is_stale"] else "warning", "last_indexed": st["last_indexed"]}}
+
+    def since(days: int) -> str:
+        return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - days * 86400))
 
     @r.get("/dashboard/activity")
     def activity(days: int = 7) -> Json:
-        return {"searches": [], "learnings": [], "days": days}
+        """Searches = relic5's query log (every client: Claude Code, claude.ai, ChatGPT, the hub); learnings = the newest
+        notes in a learnings section."""
+        from . import trace
+        lo = since(max(1, min(days, 90)))
+        q = [x for x in trace.rows(relic.parts.root) if x.get("tool") == "relic_search" and str(x.get("at") or "") >= lo]
+        q.sort(key=lambda x: str(x.get("at") or ""), reverse=True)
+        learn = notes.rows("section LIKE '%learnings%' AND ts >= ?", [lo], limit=30)
+        return {"searches": [{"query": x.get("query") or "", "type": x.get("mode") or "keyword", "results_count": x.get("hits") or 0,
+                              "search_time_ms": x.get("ms") or 0, "created_at": x.get("at")} for x in q[:50]],
+                "learnings": [{"document_id": x["msgkey"], "pattern_preview": (x.get("title") or x.get("text") or "")[:120],
+                               "source": x.get("cat") or "", "concepts": [x.get("section") or ""], "created_at": x.get("ts")} for x in learn],
+                "days": days}
 
     @r.get("/dashboard/growth")
     def growth(period: str = "week") -> Json:
+        """Per day: notes written (by their time) and searches asked."""
+        from . import trace
         days = {"week": 7, "month": 30, "quarter": 90}.get(period, 7)
-        c = Counter((x.get("ts") or "")[:10] for x in relic.tail(500, since=f"{days}d")["rows"])
-        return {"period": period, "days": days, "data": [{"date": d, "documents": n, "searches": 0} for d, n in sorted(c.items()) if d]}
+        lo = since(days)
+        docs = {str(x["d"]): int(x["n"]) for x in relic._rows("SELECT left(ts, 10) AS d, count(*) AS n FROM arra_notes WHERE ts >= ? GROUP BY 1", [lo])} \
+            if notes.table() else {}
+        sq = Counter(str(x.get("at") or "")[:10] for x in trace.rows(relic.parts.root) if x.get("tool") == "relic_search" and str(x.get("at") or "") >= lo)
+        return {"period": period, "days": days, "data": [{"date": d, "documents": docs.get(d, 0), "searches": sq.get(d, 0)}
+                                                         for d in sorted(set(docs) | set(sq)) if d]}
 
     @r.get("/file", response_model=None)
     def file(path: str, project: str = "") -> PlainTextResponse:
