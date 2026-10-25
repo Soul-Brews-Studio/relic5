@@ -5,6 +5,7 @@ import { ago, bkk, bytes, clock, compact, num, secs, sum } from "../format";
 import { Badge, HealthCard, levelText, levelWord, type Level } from "../components/HealthCard";
 import { Arrow, Disk, Machine, Pulse, Search, Shield, Vector } from "../components/Icons";
 import { syncChip } from "../components/sync";
+import { Resources } from "../components/Resources";
 import { cx, Stat as Kpi } from "../components/ui";
 import type { JobEvent, Queries, Status } from "../types";
 
@@ -218,6 +219,10 @@ export function GlancePage({ s, error, at, openHub, search }: { s: Status | null
         </section>
 
         <Searched q={asked.data} search={search} />
+
+        <Section title="The hub's machine" sub="What the hub holds on white's disk and what it costs the machine right now. The Disk page has the detail.">
+          <Resources s={s} />
+        </Section>
 
         <Section title="Machines" sub="Who feeds the hub: what each one sent, when it last pushed, and what its own chain says about the sync.">
           <MachineRows s={s} machines={machines} />

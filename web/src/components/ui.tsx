@@ -10,7 +10,7 @@ export { cx };
 export function PageHead({ title, sub, children }: { title: ReactNode; sub?: ReactNode; children?: ReactNode }) {
   return (
     <header className="mb-8 flex flex-wrap items-end gap-x-8 gap-y-4">
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-[1_1_20rem]">
         <h1 className="m-0 text-xl lg:text-2xl font-extrabold tracking-[-0.02em] text-text text-balance">{title}</h1>
         {sub && <p className="m-0 mt-3 max-w-[75ch] text-base text-muted">{sub}</p>}
       </div>
