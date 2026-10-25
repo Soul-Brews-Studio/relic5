@@ -5,7 +5,7 @@
 // the first hit is selected, so the pane is never empty). Narrower screens open the same reader as a drawer.
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { get } from "../api";
-import { ago, bkk, repoColor } from "../format";
+import { ago, bkk, repoColor, shortRepo } from "../format";
 import type { Hit, SearchResult, ShowResult } from "../types";
 import { Drawer } from "../components/Drawer";
 import { Markdown } from "../components/Markdown";
@@ -17,8 +17,7 @@ export interface SearchState { q: string; horizon: string; with: string; repo: s
 
 /** "-opt-Code-github-com-laris-co-neo-oracle-wt-garage-home-neo-issue190-24oct-sat2026" -> "laris-co-neo-oracle": the
  *  host's path prefix and a worktree's "-wt-<slug>" go; the session title already says what the worktree was for. */
-export const shortRepo = (k?: string | null) => (k ?? "").replace(/^-(opt-Code|Users-[^-]+(-Code)?|home-[^-]+(-Code)?)-github-com-/, "")
-  .replace(/^git:github\.com\//, "").replace(/-wt-.*$/, "").replace(/--claude-worktrees-.*$/, "") || "(no repo)";
+export { shortRepo };
 const LAYERS = [
   { value: "", label: "Talk", note: "what people and agents said to each other" },
   { value: "tools", label: "Talk + tools", note: "also the commands agents ran and their output" },

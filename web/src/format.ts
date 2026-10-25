@@ -41,3 +41,7 @@ export const repoColor = (name: string | null | undefined) => {
   for (const c of name ?? "") h = (h * 31 + c.charCodeAt(0)) >>> 0;
   return REPO_HUES[h % REPO_HUES.length];
 };
+
+/** "-opt-Code-github-com-laris-co-neo-oracle-wt-x" -> "laris-co-neo-oracle": a repo key as people say it. */
+export const shortRepo = (k?: string | null) => (k ?? "").replace(/^-(opt-Code|Users-[^-]+(-Code)?|home-[^-]+(-Code)?)-github-com-/, "")
+  .replace(/^git:github\.com\//, "").replace(/-wt-.*$/, "").replace(/--claude-worktrees-.*$/, "") || "(no repo)";

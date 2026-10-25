@@ -85,9 +85,10 @@ interface Portrait {
 
 const when = (ms?: number) => (ms ? new Date(ms).toISOString() : undefined);
 
-function Copy({ text, label }: { text: string; label: string }) {
+function Copy({ text, label, short }: { text: string; label: string; short?: string }) {
   const [done, setDone] = useState(false);
-  return <Btn primary type="button" onClick={() => { navigator.clipboard.writeText(text); setDone(true); setTimeout(() => setDone(false), 1800); }}>{done ? "Copied" : label}</Btn>;
+  return <Btn primary type="button" aria-label={label} onClick={() => { navigator.clipboard.writeText(text); setDone(true); setTimeout(() => setDone(false), 1800); }}>
+    {done ? "Copied" : short ? <><span className="sm:hidden">{short}</span><span className="max-sm:hidden">{label}</span></> : label}</Btn>;
 }
 
 function Notes({ title, sub, notes, empty }: { title: string; sub: string; notes: NoteLite[]; empty: string }) {
@@ -136,10 +137,10 @@ function OraclePage({ name, onBack }: { name: string; onBack: () => void }) {
           <div role="tablist" aria-label="Prompt" className="flex min-w-0 flex-1 gap-1 overflow-x-auto [scrollbar-width:none]">
             {([["character", "Character"], ["enlighten", "Enlighten"], ["pet", "Pet"]] as const).filter(([k]) => k !== "pet" || p.prompts.pet).map(([k, l]) => (
               <button key={k} type="button" role="tab" aria-selected={tab === k} onClick={() => setTab(k)}
-                className={cx("-mb-px min-h-11 flex-none border-b-2 px-3 text-sm font-semibold whitespace-nowrap", tab === k ? "border-accent text-text" : "border-transparent text-muted hover:text-text")}>{l}</button>
+                className={cx("-mb-px min-h-11 flex-none border-b-2 px-2.5 text-sm font-semibold whitespace-nowrap sm:px-3", tab === k ? "border-accent text-text" : "border-transparent text-muted hover:text-text")}>{l}</button>
             ))}
           </div>
-          <span className="flex-none"><Copy text={p.prompts[tab] ?? ""} label="Copy the prompt" /></span>
+          <span className="flex-none"><Copy text={p.prompts[tab] ?? ""} label="Copy the prompt" short="Copy" /></span>
         </div>
         <p className="m-0 mt-3 text-sm text-muted">{tab === "pet"
           ? `For Pet Studio (pet-studio/ in relic5, on the Mac that holds the pets): give it to studio_auto_sprite to draw ${p.name}'s desk pet and its seven moods, then keep the GIFs here with relic_artifact_put.`

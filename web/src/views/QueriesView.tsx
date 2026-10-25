@@ -5,7 +5,7 @@
 // re-run and say what is new, GET/POST /api/saved). The pane and the open chain live in the hash, so a chain is a link.
 import { useEffect, useMemo, useState } from "react";
 import { post, usePoll } from "../api";
-import { bkk, num } from "../format";
+import { bkk, num, shortRepo } from "../format";
 import { DataTable, type Col } from "../components/DataTable";
 import { Btn, Chip, cx, Hint, inputCls, Lbl, Loading, PageHead, SectionHead, Seg, Stat, State, Stats } from "../components/ui";
 import type { AccessPage, AskedStats, ChainRow, Queries, QueryRow, SavedSearch, TraceChain, TraceStep } from "../types";
@@ -207,7 +207,7 @@ function Step({ s, onSave }: { s: TraceStep; onSave: (s: TraceStep) => void }) {
           <li key={h.link + i} className="flex min-w-0 items-baseline gap-2 text-sm">
             <span className="w-5 flex-none text-right font-mono text-xs text-faint">{i + 1}</span>
             <button type="button" onClick={() => openSearch({ ...(s.args ?? {}), query: s.query, session: (h.session ?? "").slice(0, 8) })}
-              className="min-w-0 truncate text-left text-accent hover:underline" title={h.link}>{h.repo || "(no repo)"} · {(h.session ?? "").slice(0, 8)}</button>
+              className="min-w-0 truncate text-left text-accent hover:underline" title={`${h.repo ?? ""}\n${h.link}`}>{shortRepo(h.repo)} · {(h.session ?? "").slice(0, 8)}</button>
             <span className="flex-none font-mono text-xs text-faint">{h.role} · {bkk(h.ts)}</span>
           </li>))}</ol>
       )}
