@@ -32,7 +32,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/relic5"]
-artifacts = ["src/relic5/web/*.html", "src/relic5/web/assets/*"]
+artifacts = ["src/relic5/web/*.html", "src/relic5/web/assets/*", "src/relic5/icons/*"]
 
 [tool.mypy]
 # Strict typing for src/relic5, enforced by tests/test_types.py (Nat, 2026-10-24: "can python have a strong type?").

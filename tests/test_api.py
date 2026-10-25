@@ -186,6 +186,14 @@ def test_last_used_seeded_from_the_logs(tmp_path):
     assert seen.of("token:seeded")["last_path"] == "/mcp relic_search"
 
 
+def test_icon_needs_no_token(root):
+    c = TestClient(make_app(root, {"m5": "tok-m5"}, Doors({"m5": "tok-m5"}, enabled=False)))
+    for p, mime in (("/favicon.ico", "image/x-icon"), ("/favicon.svg", "image/svg+xml"), ("/icon-512.png", "image/png")):
+        r = c.get(p)
+        assert r.status_code == 200 and r.headers["content-type"].startswith(mime) and len(r.content) > 100
+    assert c.get("/").status_code == 401                                   # the rest still needs a door
+
+
 def test_big_answers_are_gzipped(client):
     import glob, os
     import relic5
