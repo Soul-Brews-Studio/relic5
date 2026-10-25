@@ -76,13 +76,13 @@ def home_kind(home: str | None, agent: str | None = None) -> Json:
     folder inside a home: .codex/path-migration-backup-*, .codex-team-attic/slot-3-dead),
     export (/Users/Shared/<u>-export), project (a .claude inside a project or an archive), unknown (no src_path)."""
     if not home:
-        return {"user": (agent or "").split("@")[0] or None, "kind": "unknown", "label": "unknown (parts before src_path)"}
+        return {"user": (agent or "").split("@")[0] or None, "kind": "unknown", "label": "unknown (no home in its path)"}
     owners = re.findall(r"/(?:Users|home)/([^/]+)/", home + "/")
     exp = re.search(r"/Users/Shared/([^/]+?)-export/", home + "/")
     user = (exp.group(1) if exp else None) or next((u for u in reversed(owners) if u != "Shared"), None) or (agent or "").split("@")[0] or None
     if "/.relic3-mirror/" in home or "/.relic-mirrors/" in home or re.search(r"/\.(?:claude|codex)[^/]*/from-", home):
         kind = "mirror"
-    elif re.search(r"/\.[^/]+.*(?:backup|attic|rescued|-dead|-removed)|/\.tmp$", home):
+    elif re.search(r"/\.[^/]+.*(?:backup|attic|rescued|-dead|-removed)|/\.tmp$|-backup(?:/|$)", home):
         kind = "backup"
     elif exp:
         kind = "export"

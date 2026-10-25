@@ -1,7 +1,7 @@
 """The whole hub on an S3 root (store.py): the test fixture copied to a fresh prefix in a real bucket, indexed there,
 and asked through the API exactly as a disk hub is. Runs only with RELIC5_TEST_S3=s3://bucket/prefix and a key
 (RELIC5_S3_KEY or ~/.config/relic5/s3-live); the prefix is removed afterwards."""
-import json, os, uuid
+import json, os, time, uuid
 
 import pytest
 
@@ -97,5 +97,15 @@ def test_a_fresh_s3_hub_seeds_its_local_index_from_the_bucket(root, monkeypatch,
         assert seed_local(dst) > 0 and os.path.isfile(os.path.join(search_dir(dst), "current.json"))
         assert seed_local(dst) == 0                                               # once
         assert Relic5(dst, duckdb.connect()).search("hub")["hits"]
+        rfs.rmtree(search_dir(dst))                                              # a hub starting: answers while it copies
+        from relic5.fts import seed_in_background
+        seed_in_background(dst).join(60)
+        assert os.path.isfile(os.path.join(search_dir(dst), "current.json"))
+        time.sleep(1.1)                                                          # a generation is named by the second
+        main(["index", "--root", root, "--force"])                               # a newer index mirrored into the bucket
+        mirror.copy(root, dst)
+        assert seed_local(dst) > 0 and rfs.read_json(os.path.join(search_dir(dst), "current.json")) == \
+            rfs.read_json(os.path.join(root, "index", "_search", "current.json"))
+        assert seed_local(dst) == 0
     finally:
         rfs.rmtree(dst)

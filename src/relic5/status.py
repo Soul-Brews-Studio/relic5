@@ -95,7 +95,10 @@ def status(root: str, now: _datetime | None = None) -> Json:
     live = current(p.root)
     fts = {"at": max((v["built"] for k, v in fst.items() if k in live), default=None),
            "rows": {k: v["rows"] for k, v in fst.items() if k in live}}
-    if not live:
+    from .fts import SEEDING
+    if SEEDING.get(p.root.rstrip("/")) or SEEDING.get(p.root):
+        warnings.append(f"copying the search index from the bucket to this machine since {SEEDING.get(p.root.rstrip('/')) or SEEDING.get(p.root)}: search answers by substring until it lands")
+    elif not live:
         warnings.append("no BM25 index published: search answers by substring (run relic5 index)")
     from .jobs import read as read_jobs
     evs, running = read_jobs(p.root)
