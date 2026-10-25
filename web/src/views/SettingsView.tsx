@@ -4,7 +4,7 @@ import { useState } from "react";
 import { usePoll } from "../api";
 import { StoragePanel } from "../components/StoragePanel";
 import { DataTable } from "../components/DataTable";
-import { Tokens } from "./ConnectView";
+import { LastUsedCell, Tokens, type LastUsed } from "./ConnectView";
 import { PageHead, SectionHead } from "../components/ui";
 import { cx } from "../components/ui";
 import type { Layout, Theme } from "../components/Shell";
@@ -20,7 +20,7 @@ function Choice<T extends string>({ value, set, options }: { value: T; set: (v: 
   );
 }
 
-interface Conn { client_id: string; name: string; at: string; redirect_uris: string[]; tokens: number }
+interface Conn extends LastUsed { client_id: string; name: string; at: string; redirect_uris: string[]; tokens: number }
 
 /** claude.ai and other OAuth clients connected through the tunnel (oauth.py), each revocable. */
 function Connectors() {
@@ -42,6 +42,7 @@ function Connectors() {
       <DataTable rows={clients.filter(c => !gone.includes(c.client_id))} rowKey={c => c.client_id} empty="No connector has been approved yet." cols={[
         { key: "n", head: "connector", lead: true, cell: c => <b>{c.name}</b>, title: c => c.redirect_uris.join(", ") },
         { key: "a", head: "registered", w: "w-44", cell: c => <span className="tabular-nums text-muted">{c.at.slice(0, 16).replace("T", " ")}</span> },
+        { key: "l", head: "last used", w: "w-56", cell: c => <LastUsedCell r={c} /> },
         { key: "t", head: "live tokens", num: true, w: "w-24", cell: c => c.tokens },
         { key: "r", head: "", w: "w-24", cell: c => <button type="button" onClick={() => revoke(c.client_id)} className="min-h-9 rounded-lg px-2 text-xs font-semibold text-danger hover:bg-raised">Revoke</button> },
       ]} />

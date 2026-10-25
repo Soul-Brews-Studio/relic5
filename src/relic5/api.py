@@ -28,6 +28,7 @@ from .types_ import JobEvent, Json
 from . import store as rfs
 from . import swr
 from . import oauth
+from . import seen
 
 if TYPE_CHECKING:
     from .doors import Doors
@@ -111,7 +112,7 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
         t, bad = token_admin(request)
         if t is None:
             return bad or JSONResponse({"error": "refused"}, status_code=403)
-        return t.list()
+        return [r | seen.of("token:" + r["name"]) for r in t.list()]
 
     @app.post("/api/tokens", response_model=None)
     async def tokens_change(request: Request) -> Response | Json:
@@ -378,6 +379,12 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
     def base_of(request: Request) -> str:
         return PUBLIC or f"{request.url.scheme}://{request.url.netloc}"
 
+    def where(request: Request) -> tuple[str, str]:
+        """The caller's address: through the tunnel, cloudflared connects from loopback and names the real one."""
+        client = request.client.host if request.client else ""
+        cf = request.headers.get("cf-connecting-ip")
+        return (cf, "tunnel") if cf and client in ("127.0.0.1", "::1") else (client, "direct")
+
     def who(request: Request) -> str | None:
         """The door this request came through (doors.py), from the socket's addresses only."""
         h = request.headers.get("authorization", "")
@@ -402,6 +409,7 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
             hdr = {"WWW-Authenticate": f'Bearer resource_metadata="{base_of(request)}/.well-known/oauth-protected-resource"'} if path == "/mcp" else {}
             return JSONResponse({"error": "missing or bad Authorization: Bearer token"}, status_code=401, headers=hdr)
         request.state.door = d
+        seen.touch(d, *where(request), path)
         t0 = time.perf_counter()
         perf.ROUTE.set(request.url.path)   # the queries this request runs are filed under it (perf.query)
         resp = await call_next(request)
@@ -460,6 +468,7 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
             time.sleep(1)   # a wrong token costs a second
             return HTMLResponse(oauth.page({k: v for k, v in q.items() if k != "token"}, c, "That is not one of this hub's tokens."),
                                 status_code=401, headers={"cache-control": "no-store", "x-frame-options": "DENY"})
+        seen.touch(d, *where(request), "/oauth/authorize")
         return RedirectResponse(oauth.approve({k: v for k, v in q.items() if k != "token"}, d), status_code=302)
 
     @app.post("/oauth/token")
@@ -473,7 +482,7 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
     def oauth_clients(request: Request) -> Response:
         if not str(request.state.door).startswith(("loopback", "tailnet:")):
             return JSONResponse({"error": "connectors are managed from the tailnet"}, status_code=403)
-        return JSONResponse({"clients": oauth.clients(), "public": PUBLIC or None})
+        return JSONResponse({"clients": [c | seen.of("oauth:" + c["name"]) for c in oauth.clients()], "public": PUBLIC or None})
 
     @app.post("/api/oauth", response_model=None)
     async def oauth_revoke(request: Request) -> Response:
