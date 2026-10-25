@@ -37,7 +37,7 @@ async function tokenCall(body: object): Promise<{ token?: string; error?: string
 }
 
 /** Issue, rotate and revoke tokens for clients outside the tailnet. The secret is shown once, here, and never again. */
-function Tokens({ url }: { url: string }) {
+export function Tokens({ url }: { url: string }) {
   const p = usePoll<TokenRow[] | { error: string }>("/api/tokens", 0);
   const [name, setName] = useState("");
   const [expires, setExpires] = useState("90d");
