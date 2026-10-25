@@ -1,15 +1,16 @@
 // The hub's shell, after the old ARRA Oracle Studio: a sticky top header on desktop, a bottom tab bar on a phone, and a Cmd/Ctrl-K palette to jump or search from anywhere.
 import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
 import { cx } from "./ui";
-import { Alert, Pulse, Asked, Close, Gear, Globe, Psi, Tree, Columns, Menu, Rows, Disk, Home, Jobs, Live, Mark, More, Moon, Note, Plug, Search, Session, Sun } from "./Icons";
+import { Alert, Pulse, Asked, Clock, Close, Gear, Globe, Psi, Tree, Columns, Menu, Rows, Disk, Home, Jobs, Live, Mark, More, Moon, Note, Plug, Search, Session, Sun } from "./Icons";
 
-export type View = "home" | "search" | "map" | "oracles" | "family" | "live" | "memory" | "jobs" | "queries" | "compare" | "store" | "connect" | "incidents" | "settings" | "perf";
+export type View = "home" | "search" | "hours" | "map" | "oracles" | "family" | "live" | "memory" | "jobs" | "queries" | "compare" | "store" | "connect" | "incidents" | "settings" | "perf";
 export type Theme = "dark" | "paper";
 export type Layout = "top" | "side";
 
 export const VIEWS: { id: View; label: string; icon: ComponentType<{ size?: number }>; phone?: boolean; group: 0 | 1 }[] = [
   { id: "home", label: "Home", icon: Home, phone: true, group: 0 },
   { id: "search", label: "Search", icon: Search, phone: true, group: 0 },
+  { id: "hours", label: "Hours", icon: Clock, phone: true, group: 0 },
   { id: "map", label: "Map", icon: Globe, group: 0 },
   { id: "live", label: "Live", icon: Live, phone: true, group: 0 },
   { id: "memory", label: "Knowledge", icon: Note, phone: true, group: 0 },

@@ -14,6 +14,7 @@ import { GlancePage } from "./views/GlancePage";
 // Every view but Home and Search loads on first use, so the first page carries only those two (relic4-scan's
 // review, 2026-10-25: "fast"; the main JS had grown to 51.9 KB gz with all ten views in it).
 const MemoryView = lazy(() => import("./views/MemoryView").then(m => ({ default: m.MemoryView })));
+const HoursView = lazy(() => import("./views/HoursView").then(m => ({ default: m.HoursView })));
 const MapView = lazy(() => import("./views/MapView").then(m => ({ default: m.MapView })));
 const OraclesView = lazy(() => import("./views/OraclesView").then(m => ({ default: m.OraclesView })));
 const FamilyView = lazy(() => import("./views/FamilyView").then(m => ({ default: m.FamilyView })));
@@ -134,6 +135,7 @@ export function App() {
           <Suspense fallback={<Loading label="Loading the page" />}>
           {st.view === "live" && <LiveView machine={st.machine} role={st.search.role} machines={machines}
             setMachine={m => setSt(v => ({ ...v, machine: m }))} setRole={role => setSt(v => ({ ...v, search: { ...v.search, role } }))} on />}
+          {st.view === "hours" && <HoursView on />}
           {st.view === "memory" && <MemoryView />}
           {st.view === "oracles" && <OraclesView />}
           {st.view === "family" && <FamilyView />}

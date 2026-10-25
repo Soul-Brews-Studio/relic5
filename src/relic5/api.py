@@ -719,6 +719,21 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
         except ValueError as ex:
             return JSONResponse({"error": str(ex)}, status_code=400)
 
+    @app.get("/api/hours", response_model=None)
+    @cached(60)
+    def hours_route(date: str = "") -> Json | JSONResponse:
+        from . import ravens
+        try:
+            return ravens.hours(relic, date or time.strftime("%Y-%m-%d", time.gmtime(time.time() + 7 * 3600)))
+        except ValueError as ex:
+            return JSONResponse({"error": str(ex)}, status_code=400)
+
+    @app.get("/api/hours/days", response_model=None)
+    @cached(300)
+    def hours_days(limit: int = 60) -> Json:
+        from . import ravens
+        return ravens.days(relic, min(max(limit, 1), 400))
+
     @app.get("/api/recap", response_model=None)
     def recap_route(id: str, limit: int = 20) -> Json | JSONResponse:
         from .recap import recap
