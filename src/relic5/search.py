@@ -138,7 +138,7 @@ def search(relic: "Relic5", index: "Index", query: str, since: str | None = None
            tier: str | None = None, with_: str | None = None, limit: int = 20, cursor: str | None = None,
            vector: Sequence[float] | None = None, model: str | None = None, hybrid: bool = False, sort: str | None = None,
            min_chars: int | None = None, cwd: str | None = None, branch: str | None = None, title: str | None = None,
-           via: str | None = None, chat: str | None = None, from_user: str | None = None) -> Json:
+           via: str | None = None, chat: str | None = None, from_user: str | None = None, home: str | None = None) -> Json:
     from .query import UsageError, like, repo_pattern
     if sort not in (None, "", "relevant", "newest"):
         raise UsageError("sort is relevant | newest")
@@ -169,6 +169,12 @@ def search(relic: "Relic5", index: "Index", query: str, since: str | None = None
             conds.append(c.format(q_(v)))
     if session:
         conds.append(f"sid LIKE {q_(session.replace('%', '') + '%')}")
+    if home:   # whose .claude (fts.HOME_COLS): any home that holds the message, as a substring, case-blind
+        if not index.has_column("homes"):
+            raise UsageError("home is not in the index yet: run relic5 index --force once")
+        conds.append(f"lower(homes) LIKE {q_('%' + home.lower().replace('%', '') + '%')}")
+        if vector is not None:   # the vector matrices carry no home: narrow them to the sessions of that home
+            filt["sids"] = set(relic.sessions_of_home(home))
     if cwd and not relic.meta_has("cwd"):
         raise UsageError("cwd is not in the index yet (needs relic-scan >= PR #37 on every machine)")
     channel: dict[str, str | None] = {"via": via, "chat": chat, "from_user": from_user}   # relic3 --via/--chat/--from-user: session-level substrings
@@ -287,6 +293,7 @@ def search(relic: "Relic5", index: "Index", query: str, since: str | None = None
                     "session_name": vlt["name"] if vlt else names.get(r["sid"]), "text_snippet": snippet(r["text"] or "", words), "score": round(float(r["_score"]), 4),
                     "layer": r["layer"], "source_present": False,
                     "ephemeral": sorted(set(EPHEMERAL.findall(r["text"] or "")))[:5] or None, "machines": r["machines"], "title": r.get("title"),
+                    "home": r.get("home"), "homes": (r.get("homes") or "").split("\n") if r.get("homes") else None, "agent": r.get("agent"),
                     "link": f"relic5://{r['month']}/{r['uid']}",
                     "matched": [t for t in qtok if t in htok] if qtok else None,
                     "locator": {"month": r["month"], "stream": r["layer"], "key": r["key"], "chunk": r["chunk"]}}

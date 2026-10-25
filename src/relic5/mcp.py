@@ -36,6 +36,8 @@ SEARCH_PROPS = {
     "from_user": {**STR, "description": "who sent the session's first channel message, substring, case-blind"},
     "cwd": {**STR, "description": "sessions that began in this folder or below it (relic-scan meta cwd)"},
     "branch": {**STR, "description": "sessions on this git branch"},
+    "home": {**STR, "description": "whose .claude (or .codex) the message was written in, a substring of its folder, case-blind: "
+             "/Users/nat/.claude, beta/.claude, .claude1, a project's own .../.claude-hello/.claude. relic_homes lists them"},
     "title": {**STR, "description": "sessions whose host title contains this (case-blind)"},
     "with": {**STR, "enum": ["tools", "thinking", "vault", "memory", "git", "all"], "description": "also search tool calls, thinking, ψ notes, or all; memory = only the agents' memory notes (rules, decisions, references; role memory-feedback / memory-project / memory-reference / memory-user); git = only git commits of every ghq repo, back to 2025 when no transcript survives (role commit-claude = Claude co-wrote it, commit-codex, commit)"},
     "limit": {"type": "integer", "minimum": 1, "description": f"default {DEFAULT_LIMIT}"},
@@ -62,6 +64,7 @@ TOOLS = [
                     "into its parent's `children` count, so `total` is smaller than relic-scan's session count (it counts every tier).",
      "inputSchema": {"type": "object", "properties": {"repo": STR, "since": STR, "until": STR, "limit": INT,
                      "via": SEARCH_PROPS["via"], "chat": SEARCH_PROPS["chat"], "from_user": SEARCH_PROPS["from_user"], "parent": PARENT,
+                     "home": SEARCH_PROPS["home"],
                      "by_repo": {"type": "boolean", "description": "also return repos: sessions and events per repo for the same window and filters, most first (a session with no repo counts as '(no repo) <tenant>')"}},
                      "additionalProperties": False}},
     {"name": "relic_session", "description": "Resolve a session id prefix to its session record and subagent tree.",
@@ -99,6 +102,10 @@ TOOLS = [
                                                       "goal": STR, "how": STR, "found": STR,
                                                       "links": {"type": "array", "items": {"type": "string"}}},
                      "required": ["parent", "goal", "found"], "additionalProperties": False}},
+    {"name": "relic_homes", "description": "Where the history comes from: every .claude (or .codex) folder, per machine, with "
+     "relic-scan's user@host, sessions, messages and first/last time: nat's ~/.claude, beta's, ~/.claude1, a project's own "
+     ".claude. Use a home with relic_search or relic_sessions (home=).",
+     "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
     {"name": "relic_status", "description": "Months, per-machine watermarks, totals, jobs and warnings (StatusReport).",
      "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
     {"name": "relic_artifact_put", "description": "Keep something you made for an oracle on the hub: an image (png jpg webp gif svg), "
@@ -228,7 +235,7 @@ def run_tool(relic: Relic5, name: str, a: Json, door: str | None = None) -> Json
                          with_=_str(a, "with"), limit=min(_int(a, "limit", 1) or DEFAULT_LIMIT, 100), cursor=_str(a, "cursor"),
                          vector=vec, model=_str(a, "model") if vec is not None else None,
                          hybrid=bool(a.get("hybrid")) and vec is not None, sort=_str(a, "sort"), cwd=_str(a, "cwd"), branch=_str(a, "branch"), title=_str(a, "title"),
-                         via=_str(a, "via"), chat=_str(a, "chat"), from_user=_str(a, "from_user"),
+                         via=_str(a, "via"), chat=_str(a, "chat"), from_user=_str(a, "from_user"), home=_str(a, "home"),
                          min_chars=_int(a, "min_chars") if vec is not None else None)
         if note:   # keep the search's own note (older hits) after this one; never overwrite it (regression of #20)
             r = r | {"note": note + (f" · {r['note']}" if r.get("note") else "")}
@@ -239,9 +246,10 @@ def run_tool(relic: Relic5, name: str, a: Json, door: str | None = None) -> Json
         return relic.show(_str(a, "id"), seq=_int(a, "seq"), before=min(2 if before is None else before, 50),
                           after=min(2 if after is None else after, 50))
     if name == "relic_sessions":
-        _check(a, ["repo", "since", "until", "limit", "via", "chat", "from_user", "by_repo"])
+        _check(a, ["repo", "since", "until", "limit", "via", "chat", "from_user", "by_repo", "home"])
         return relic.sessions(repo=_str(a, "repo"), since=_str(a, "since"), until=_str(a, "until"), limit=min(_int(a, "limit") or DEFAULT_LIMIT, 500),
-                              via=_str(a, "via"), chat=_str(a, "chat"), from_user=_str(a, "from_user"), by_repo=a.get("by_repo") is True)
+                              via=_str(a, "via"), chat=_str(a, "chat"), from_user=_str(a, "from_user"), by_repo=a.get("by_repo") is True,
+                              home=_str(a, "home"))
     if name == "relic_session":
         _check(a, ["id"])
         return relic.session(_str(a, "id"))
@@ -255,6 +263,9 @@ def run_tool(relic: Relic5, name: str, a: Json, door: str | None = None) -> Json
         from . import artifacts
         _check(a, ["oracle", "limit"])
         return artifacts.listing(relic.parts.root, _str(a, "oracle"), min(_int(a, "limit", 1) or 100, 500))
+    if name == "relic_homes":
+        _check(a, [])
+        return relic.homes()
     if name == "relic_status":
         _check(a, [])
         return {"you": door, **status(relic.parts.root)}

@@ -33,7 +33,7 @@ function readHash(): { view: View; machine: string; search: SearchState } {
   const h = new URLSearchParams(raw.startsWith("/") ? "" : raw);
   const t = h.get("tab") ?? "";
   const view: View = (TABS as string[]).includes(t) ? (t as View) : "home";
-  return { view, machine: h.get("machine") ?? "", search: { q: h.get("q") ?? "", horizon: h.get("horizon") ?? "", with: h.get("with") ?? "", repo: h.get("repo") ?? "", role: h.get("role") ?? "", session: h.get("session") ?? "" } };
+  return { view, machine: h.get("machine") ?? "", search: { q: h.get("q") ?? "", horizon: h.get("horizon") ?? "", with: h.get("with") ?? "", repo: h.get("repo") ?? "", role: h.get("role") ?? "", session: h.get("session") ?? "", home: h.get("home") ?? "" } };
 }
 function writeHash(view: View, machine: string, s: SearchState) {
   let next = "#";

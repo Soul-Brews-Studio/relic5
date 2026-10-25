@@ -4,9 +4,9 @@
 // search: on the left the sessions and repos the hits come from; in the middle the hits; on a wide screen a reader on the right that shows the selected hit in its conversation (ARRA Oracle v3's OracleDig list + detail pane:
 // the first hit is selected, so the pane is never empty). Narrower screens open the same reader as a drawer.
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { get } from "../api";
+import { get, usePoll } from "../api";
 import { ago, bkk, repoColor, shortRepo } from "../format";
-import type { Explain, Hit, SearchResult, ShowResult } from "../types";
+import type { Explain, Hit, HomeRow, SearchResult, ShowResult } from "../types";
 import { Drawer } from "../components/Drawer";
 import { Markdown } from "../components/Markdown";
 import { SearchExplain } from "../components/SearchExplain";
@@ -15,7 +15,16 @@ import { Btn, Chip, cx, inputCls, Kbd, Lbl, Loading, Marked, Seg, State, Who } f
 import type { PaletteSession } from "../components/Shell";
 import { Close, Filter, Search, Session } from "../components/Icons";
 
-export interface SearchState { q: string; horizon: string; with: string; repo: string; role: string; session: string }
+export interface SearchState { q: string; horizon: string; with: string; repo: string; role: string; session: string; home: string }
+
+/** "/Users/beta/.claude" -> "beta · ~/.claude"; a project's own home keeps its last two folders. */
+export const homeLabel = (h?: string | null) => {
+  if (!h) return "";
+  const m = h.match(/^\/(?:Users|home)\/([^/]+)\/(.*)$/);
+  if (!m) return h;
+  const rest = m[2].split("/");
+  return `${m[1]} · ${rest.length > 2 ? "…/" + rest.slice(-2).join("/") : "~/" + m[2]}`;
+};
 
 /** "-opt-Code-github-com-laris-co-neo-oracle-wt-garage-home-neo-issue190-24oct-sat2026" -> "laris-co-neo-oracle": the
  *  host's path prefix and a worktree's "-wt-<slug>" go; the session title already says what the worktree was for. */
@@ -56,6 +65,7 @@ function HitRow({ h, q, active, onOpen, more, onMore }: { h: Hit; q: string; act
           <time className="tabular-nums text-soft">{bkk(h.ts)}</time>
           {h.layer === "memory" ? <Chip tone="ok">{h.role.replace("memory-", "")} note</Chip> : h.layer === "git" ? <Chip tone="ok">{h.role === "commit-claude" ? "commit · Claude" : h.role === "commit-codex" ? "commit · Codex" : "commit"}</Chip> : <><Who role={h.role} />{h.layer !== "prose" && <Chip>{h.layer}</Chip>}</>}
           <span title={`held by ${h.machines.join(", ")}`}>{h.machines.length > 1 ? `on ${h.machines.join(" + ")}` : h.machines[0]}</span>
+          {h.home && <span className="font-mono text-[11px] text-faint" title={`${(h.homes ?? [h.home]).join("\n")}${h.agent ? `\nwritten as ${h.agent}` : ""}`}>{homeLabel(h.home)}{(h.homes?.length ?? 0) > 1 ? ` +${h.homes!.length - 1}` : ""}</span>}
         </span>
         <span className="mt-1.5 flex min-w-0 items-center gap-2 text-sm font-semibold text-text">
           <span className="size-2 flex-none rounded-full" style={{ background: repoColor(shortRepo(h.repo_key)) }} />
@@ -92,6 +102,23 @@ function RailGroup({ label, children, aside }: { label: string; children: ReactN
     </div>
   );
 }
+/** Whose .claude (GET /api/homes): every home the hub knows, biggest first, by user. */
+function HomePick({ home, onChange }: { home: string; onChange: (h: string) => void }) {
+  const p = usePoll<{ homes: HomeRow[] }>("/api/homes", 0);
+  const homes = [...new Map((p.data?.homes ?? []).filter(h => h.home).map(h => [h.home!, h])).values()];
+  if (!homes.length) return null;
+  return (
+    <label className="flex min-w-0 items-center gap-2 max-sm:w-full">
+      <span className="text-xs font-semibold text-muted">from</span>
+      <select value={home} onChange={e => onChange(e.target.value)} aria-label="Whose .claude"
+        className={inputCls + " h-9 min-h-9 w-full max-w-[22rem] font-mono text-xs sm:w-auto"}>
+        <option value="">every home</option>
+        {homes.map(h => <option key={h.home!} value={h.home!}>{homeLabel(h.home)} · {h.machine} · {h.sessions} sessions{h.kind === "project" ? " · project" : ""}</option>)}
+      </select>
+    </label>
+  );
+}
+
 const linkBtn = "-my-2.5 inline-flex min-h-11 items-center rounded-lg px-2 text-xs font-semibold text-accent hover:bg-raised";
 
 /** The sessions and repos the current hits come from, most hits first: the left pane's suggestions. */
@@ -241,7 +268,7 @@ export function SearchView({ st, setSt, machine, setMachine, machines, recent, t
   const wide = () => window.matchMedia("(min-width: 1536px)").matches;
 
   useEffect(() => { input.current?.focus(); }, [focusKey]);
-  useEffect(() => { setDraft(st); if (st.q) run(st); else setRes(null); }, [st.q, st.horizon, st.with, st.repo, st.role, st.session]);   // eslint-disable-line
+  useEffect(() => { setDraft(st); if (st.q) run(st); else setRes(null); }, [st.q, st.horizon, st.with, st.repo, st.role, st.session, st.home]);   // eslint-disable-line
   useEffect(() => {
     setEx(null);
     if (!st.q) return;
@@ -254,7 +281,7 @@ export function SearchView({ st, setSt, machine, setMachine, machines, recent, t
   async function run(s: SearchState) {
     const id = ++runId.current;
     const p = new URLSearchParams({ q: s.q, limit: "40" });
-    for (const k of ["horizon", "with", "repo", "role", "session"] as const) if (s[k]) p.set(k, s[k]);
+    for (const k of ["horizon", "with", "repo", "role", "session", "home"] as const) if (s[k]) p.set(k, s[k]);
     const was = prev.current;   // same words with other filters, or words added to the last search: the same line of asking
     if (was && (s.q === was.q || s.q.includes(was.q))) p.set("parent", was.id);
     setBusy(true); setErr(null);
@@ -328,6 +355,7 @@ export function SearchView({ st, setSt, machine, setMachine, machines, recent, t
           <Seg label="When" value={draft.horizon} onChange={v => narrow({ horizon: v })} options={HORIZONS} />
         </div>
         {draft.with !== "memory" && draft.with !== "git" && <WhoPick role={draft.role} onChange={role => narrow({ role })} />}
+        {draft.with !== "memory" && draft.with !== "git" && <HomePick home={draft.home} onChange={home => narrow({ home })} />}
         {machines.length > 1 && <Seg label="Machine" value={machine} onChange={setMachine} options={["", ...machines].map(m => ({ value: m, label: `${m || "all machines"}${counts ? ` · ${counts[m] ?? 0}` : ""}` }))} />}
         <label className="flex min-w-0 items-center gap-2 max-sm:w-full">
           <span className="text-xs font-semibold text-muted">in</span>

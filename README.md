@@ -166,3 +166,18 @@ RELIC5_HUB=s3://relic5-live/hub bin/relic5-push       # a machine pushes into th
   counted as behind, not failed). After a clean verify, "Switch at next start" moves the hub there when it restarts,
   and the old home becomes the mirror. The choice is kept in `storage.json` (`/config` in the container).
 - **Tests:** `RELIC5_TEST_S3=s3://relic5-live/test uv run pytest tests/test_s3.py` runs a whole hub on the bucket.
+
+## Whose .claude: homes
+
+Every message carries the folder it was written in (relic-scan's `src_path`), so the hub can tell `nat`'s
+`~/.claude` from `beta`'s, an extra home like `~/.claude1`, or a project's own `.claude`
+(`…/exp/.claude-hello/.claude`). The home is the last `.claude*` / `.codex*` folder before `projects*`, `sessions`
+or `backups` in that path.
+
+- `relic_homes` / `GET /api/homes`: every home per machine, with relic-scan's `user@host`, sessions, messages, first
+  and last.
+- `home=` on `relic_search` and `relic_sessions` (and the Search page's "from" picker): a substring of the home,
+  case-blind (`beta/.claude`, `.claude1`, `.claude-hello`). A message copied into several homes (a mirror, an
+  export) is found from any of them; a hit shows its home and how many others hold it.
+- The search index carries `home`, `homes` and `agent` from the first `relic5 index --force` after this change.
+  Parts pushed before relic-scan wrote `src_path` (white's, today) show home unknown.

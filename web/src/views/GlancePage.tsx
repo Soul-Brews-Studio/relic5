@@ -8,7 +8,7 @@ import { syncChip } from "../components/sync";
 import { Resources } from "../components/Resources";
 import { HourBars, Latency } from "../components/AskedCharts";
 import { cx, Stat as Kpi } from "../components/ui";
-import type { AskedStats, JobEvent, Queries, Status } from "../types";
+import type { AskedStats, HomeRow, JobEvent, Queries, Status } from "../types";
 
 /* Home: the glance page inside the hub's shell. The direction contract for the whole hub is in web/index.html. */
 
@@ -209,6 +209,33 @@ function MonthLedger({ days, months, openRecap }: { days: NonNullable<Status["se
   );
 }
 
+/** Whose .claude (GET /api/homes): one row per home and machine, most messages first. */
+function Homes() {
+  const p = usePoll<{ homes: HomeRow[]; note?: string }>("/api/homes", 300000);
+  if (!p.data) return null;
+  if (!p.data.homes.length) return <p className="m-0 text-sm text-muted">{p.data.note ?? "No homes yet."}</p>;
+  const max = Math.max(1, ...p.data.homes.map(h => h.messages));
+  return (
+    <div className="overflow-hidden rounded-2xl border border-line bg-panel">
+      {p.data.homes.slice(0, 40).map(h => (
+        <a key={`${h.machine}|${h.home}`} href={h.home ? `#tab=search&home=${encodeURIComponent(h.home)}` : undefined}
+          className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 border-b border-line px-5 py-3 last:border-b-0 hover:bg-raised md:grid-cols-[7rem_minmax(0,1fr)_8rem_minmax(0,9rem)_6rem]">
+          <span className="text-sm font-semibold text-text">{h.user ?? "unknown"}<span className="ml-2 text-xs font-normal text-muted">{h.machine}</span></span>
+          <span className="col-span-2 min-w-0 md:col-span-1">
+            <span className="block truncate font-mono text-sm text-soft" title={h.home ?? ""}>{h.label}</span>
+            {h.kind === "project" && <span className="text-xs text-amber">a project's own home</span>}
+            {h.kind === "unknown" && <span className="text-xs text-muted">pushed before relic-scan wrote where</span>}
+          </span>
+          <span className="text-right text-sm text-muted tabular-nums md:text-left">{num(h.sessions)} sessions</span>
+          <span className="flex items-center gap-2"><span className="h-1.5 min-w-0 flex-1 rounded-full bg-raised"><span className="block h-1.5 rounded-full bg-accent" style={{ width: `${Math.max(2, (100 * Math.log1p(h.messages)) / Math.log1p(max))}%` }} /></span>
+            <span className="w-14 text-right font-mono text-xs text-muted tabular-nums">{compact(h.messages)}</span></span>
+          <span className="text-right text-xs text-muted">{ago(h.last)}</span>
+        </a>
+      ))}
+    </div>
+  );
+}
+
 function Searched({ q, search }: { q: Queries | null; search: (q: string) => void }) {
   if (!q) return null;
   // what a person would type: no eval fragments, no message links or bare message ids (a human never typed those)
@@ -338,6 +365,10 @@ export function GlancePage({ s, error, at, openHub, search }: { s: Status | null
 
         <Section title="Machines" sub="Who feeds the hub: what each one sent, when it last pushed, and what its own chain says about the sync.">
           <MachineRows s={s} machines={machines} />
+        </Section>
+
+        <Section title="Where the history comes from" sub="Every .claude (or .codex) folder on each machine: a user's own, an extra home like ~/.claude1, or a project's own .claude. Open one to search only it.">
+          <Homes />
         </Section>
 
         <Section title="Every check" sub="Failing and late checks come first, each with the command that fixes it. The rest are fine.">
