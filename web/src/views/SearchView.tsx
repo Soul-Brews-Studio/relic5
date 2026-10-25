@@ -10,6 +10,7 @@ import type { Explain, Hit, SearchResult, ShowResult } from "../types";
 import { Drawer } from "../components/Drawer";
 import { Markdown } from "../components/Markdown";
 import { SearchExplain } from "../components/SearchExplain";
+import { Keep } from "../components/Keep";
 import { Btn, Chip, cx, inputCls, Kbd, Lbl, Loading, Marked, Seg, State, Who } from "../components/ui";
 import type { PaletteSession } from "../components/Shell";
 import { Close, Filter, Search, Session } from "../components/Icons";
@@ -350,6 +351,7 @@ export function SearchView({ st, setSt, machine, setMachine, machines, recent, t
           </div>
           <Btn type="button" onClick={() => navigator.clipboard.writeText(selected.link)}>Copy link</Btn>
         </div>
+        <Keep link={selected.link} query={st.q} parent={show?.r?.trace?.id ?? res?.trace?.id} title={`${selected.session_name ?? ""} ${selected.text_snippet.slice(0, 80)}`.trim()} />
         <div className="min-h-0 flex-1 overflow-y-auto">
           {show?.err ? <State error>{show.err}</State> : show?.r ? <Context r={show.r} q={hq} /> : <div className="p-5"><Loading label="Reading the message" /></div>}
         </div>
@@ -430,6 +432,7 @@ export function SearchView({ st, setSt, machine, setMachine, machines, recent, t
 
       <Drawer open={drawer} onClose={() => setDrawer(false)} title={title(selected)}
         note={selected?.link} onCopy={() => selected && navigator.clipboard.writeText(selected.link)}>
+        {selected && <div className="-mx-5 -mt-2 mb-3"><Keep link={selected.link} query={st.q} parent={show?.r?.trace?.id ?? res?.trace?.id} title={`${selected.session_name ?? ""} ${selected.text_snippet.slice(0, 80)}`.trim()} /></div>}
         {show?.err ? <State error>{show.err}</State> : show?.r ? <Context r={show.r} q={hq} /> : <Loading label="Reading the message" />}
       </Drawer>
     </>

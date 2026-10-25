@@ -89,6 +89,144 @@ def record_args(args: Json) -> Json:
     return {k: v for k, v in args.items() if k not in ("vector", "parent")}
 
 
+# ---- periods ---------------------------------------------------------------------------------------------------
+
+def span(since: str | None, until: str | None) -> tuple[str | None, str | None]:
+    """A period as two UTC second stamps (the log's `at` form). A bare YYYY-MM-DD is a Bangkok day here, the day a
+    person means; an ISO time or Nd/Nh/Nm before now as window.bound reads them."""
+    from .window import bound
+
+    def one(v: str | None, end: bool) -> str | None:
+        if not v:
+            return None
+        if len(v) == 10 and v[4] == "-" and v[7] == "-":
+            v = v + ("T23:59:59+07:00" if end else "T00:00:00+07:00")
+        b = bound(v, end)
+        return b[:19] + "Z" if b else None
+    return one(since, False), one(until, True)
+
+
+def _in(at: object, lo: str | None, hi: str | None) -> bool:
+    a = str(at or "")[:19] + "Z"
+    return (not lo or a >= lo) and (not hi or a <= hi)
+
+
+def asked(root: str, since: str | None = None, until: str | None = None, limit: int = 50) -> Json:
+    """What was asked in a period, for a person or an agent coming back to it later: every distinct search with how
+    often, its hits and when, the ones that found nothing, the found notes (an agent's relic_found, or a person's
+    "Keep this hit" on the Search page) with their links, and the chains. Eval runs are left out."""
+    lo, hi = span(since, until)
+    rows_ = [r for r in rows(root) if _in(r.get("at"), lo, hi) and not str(r.get("client") or "").startswith("eval")]
+    q: dict[str, Json] = {}
+    for r in rows_:
+        if r.get("tool") != "relic_search" or not r.get("query"):
+            continue
+        e = q.setdefault(str(r["query"]), {"query": r["query"], "times": 0, "first": r.get("at"), "last": None, "hits": None,
+                                           "clients": [], "ids": []})
+        e["times"] += 1
+        e["last"], e["hits"] = r.get("at"), r.get("hits")
+        c = str(r.get("client") or "").split(" (")[0]
+        if c and c not in e["clients"]:
+            e["clients"].append(c)
+        if r.get("id"):
+            e["ids"] = (e["ids"] + [r["id"]])[-5:]
+    found = [{"at": r.get("at"), "client": r.get("client"), "id": r.get("id"), "root": r.get("root"),
+              **{k: (r.get("args") or {}).get(k) for k in ("goal", "how", "found", "links")}}
+             for r in rows_ if r.get("tool") == "relic_found"]
+    searches = sorted(q.values(), key=lambda e: (-e["times"], str(e["last"] or "")))
+    return {"since": lo, "until": hi, "calls": len(rows_), "searches": len(searches),
+            "zero_hits": [e["query"] for e in searches if e["hits"] == 0][:limit],
+            "top": searches[:limit], "found": found[-limit:][::-1],
+            "chains": chains(root, limit, since, until), "tags": tagged(root, None, since, until)["tags"]}
+
+
+# ---- tags ------------------------------------------------------------------------------------------------------
+# Labels a person or an agent puts on what it found, as digger tags its nodes (Nat, 2026-10-25: "can we have add tag
+# support? add tag label like digger?"). logs/tags.jsonl, append-only like the query log: one line per change
+# {at, target, kind, op: add | remove, tags, by, note?}. A target is a message (relic5:// link), a session (its id),
+# or a search (a trace id). The state is the fold of every line; nothing is ever rewritten.
+
+import re as _re
+
+TAG_RE = _re.compile(r"^[\w\u0E00-\u0E7F][\w\u0E00-\u0E7F.\-/]{0,47}$")
+
+
+def _tags_path(root: str) -> str:
+    return os.path.join(root, "logs", "tags.jsonl")
+
+
+def _kind(target: str) -> str:
+    return "message" if target.startswith("relic5://") else "search" if len(target) == 10 and all(c in "0123456789abcdef" for c in target) else "session"
+
+
+def tag(root: str, target: str, add: list[str] | None = None, remove: list[str] | None = None, by: str | None = None,
+        note: str | None = None) -> Json:
+    from .query import UsageError
+    target = (target or "").strip()
+    if not target:
+        raise UsageError("tag needs a target: a relic5:// link, a session id or a trace id")
+    def norm(xs: list[str] | None) -> list[str]:
+        return [t.strip().lower().lstrip("#") for t in (xs or []) if t and t.strip()]
+    add_, rem_ = norm(add), norm(remove)
+    for t in add_ + rem_:
+        if not TAG_RE.match(t):
+            raise UsageError(f"tag {t!r}: letters, digits, Thai, - . / _, up to 48 characters")
+    if not add_ and not rem_:
+        raise UsageError("give tags to add or to remove")
+    p = _tags_path(root)
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    try:
+        for op, ts in (("add", add_), ("remove", rem_)):
+            if ts:
+                os.write(fd, (json.dumps({"at": at, "target": target, "kind": _kind(target), "op": op, "tags": ts, "by": by,
+                                          **({"note": note[:500]} if note and op == "add" else {})}, ensure_ascii=False) + "\n").encode())
+    finally:
+        os.close(fd)
+    return {"target": target, "tags": tags_of(root).get(target, {}).get("tags", [])}
+
+
+def tags_of(root: str) -> dict[str, Json]:
+    """target -> {tags, kind, first, last, notes}: the fold of tags.jsonl."""
+    out: dict[str, Json] = {}
+    try:
+        lines = open(_tags_path(root), encoding="utf-8").read().splitlines()
+    except OSError:
+        return out
+    for line in lines:
+        try:
+            e = json.loads(line)
+        except ValueError:
+            continue
+        t = out.setdefault(e["target"], {"target": e["target"], "kind": e.get("kind"), "tags": [], "first": e.get("at"), "last": None, "notes": []})
+        for x in e.get("tags") or []:
+            if e.get("op") == "remove":
+                t["tags"] = [y for y in t["tags"] if y != x]
+            elif x not in t["tags"]:
+                t["tags"].append(x)
+        t["last"] = e.get("at")
+        if e.get("note"):
+            t["notes"].append({"at": e.get("at"), "note": e["note"], "by": e.get("by")})
+    return {k: v for k, v in out.items() if v["tags"] or v["notes"]}
+
+
+def tagged(root: str, name: str | None = None, since: str | None = None, until: str | None = None) -> Json:
+    """Every tag with its count, or one tag's targets, newest first; a period keeps targets tagged inside it."""
+    lo, hi = span(since, until)
+    items = [v for v in tags_of(root).values() if _in(v["last"], lo, hi)]
+    if name:
+        n = name.strip().lower().lstrip("#")
+        hits = sorted((v for v in items if n in v["tags"]), key=lambda v: str(v["last"]), reverse=True)
+        return {"tag": n, "targets": hits}
+    counts: dict[str, int] = {}
+    for v in items:
+        for t in v["tags"]:
+            counts[t] = counts.get(t, 0) + 1
+    return {"tags": sorted(({"tag": t, "n": n} for t, n in counts.items()), key=lambda x: (-x["n"], x["tag"])),
+            "targets": sorted(items, key=lambda v: str(v["last"]), reverse=True)[:100]}
+
+
 # ---- chains ---------------------------------------------------------------------------------------------------
 
 def _step(r: Json) -> Json:
@@ -113,11 +251,13 @@ def chain(root: str, rid: str) -> Json:
             "first": steps[0]["at"] if steps else None, "last": steps[-1]["at"] if steps else None}
 
 
-def chains(root: str, limit: int = 30) -> list[Json]:
-    """The newest chains that have more than one step, or that hold a search: newest activity first."""
+def chains(root: str, limit: int = 30, since: str | None = None, until: str | None = None) -> list[Json]:
+    """The newest chains that have more than one step, or that hold a search: newest activity first. With a period,
+    the steps inside it."""
+    lo, hi = span(since, until)
     by: dict[str, Json] = {}
     for n, r in enumerate(rows(root)):
-        if not r.get("id") or str(r.get("client") or "").startswith("eval"):
+        if not r.get("id") or str(r.get("client") or "").startswith("eval") or not _in(r.get("at"), lo, hi):
             continue
         k = str(r.get("root") or r["id"])
         c = by.setdefault(k, {"root": k, "steps": 0, "searches": 0, "opened": 0, "query": None, "first": r.get("at"), "last": None,
@@ -143,19 +283,22 @@ def chains(root: str, limit: int = 30) -> list[Json]:
 # ---- the access log -------------------------------------------------------------------------------------------
 
 def access(root: str, limit: int = 100, before: int | None = None, tool: str | None = None, client: str | None = None,
-           door: str | None = None, q: str | None = None, zero: bool = False, errors: bool = False, evals: bool = False) -> Json:
+           door: str | None = None, q: str | None = None, zero: bool = False, errors: bool = False, evals: bool = False,
+           since: str | None = None, until: str | None = None) -> Json:
     """The log newest first. `before` is a row number from the previous page's next_before (rows only grow, so a
     page stays the same while new lines arrive)."""
     all_ = rows(root)
     end = len(all_) if before is None else max(0, min(before, len(all_)))
     ql = (q or "").lower()
+    lo, hi = span(since, until)
     out: list[Json] = []
     i = end - 1
     while i >= 0 and len(out) < limit:
         r = all_[i]
         if ((evals or not str(r.get("client") or "").startswith("eval")) and (not tool or r.get("tool") == tool)
                 and (not client or client.lower() in str(r.get("client") or "").lower()) and (not door or door in str(r.get("door") or ""))
-                and (not ql or ql in str(r.get("query") or "").lower()) and (not zero or r.get("hits") == 0) and (not errors or r.get("error"))):
+                and (not ql or ql in str(r.get("query") or "").lower()) and (not zero or r.get("hits") == 0) and (not errors or r.get("error"))
+                and _in(r.get("at"), lo, hi)):
             out.append(r | {"n": i})
         i -= 1
     return {"rows": out, "total": len(all_), "next_before": i + 1 if i >= 0 else None}

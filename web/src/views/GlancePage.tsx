@@ -215,7 +215,7 @@ function Searched({ q, search }: { q: Queries | null; search: (q: string) => voi
   const real = (r: { query: string; client?: string | null; tool?: string }) => r.query && r.query.length < 70 && !(r.client ?? "").startsWith("eval")
     && !r.query.startsWith("relic5://") && !/^[0-9a-f]{16,}$/i.test(r.query.trim());
   const top = q.top.filter(t => real(t)).slice(0, 40);
-  const recent = [...new Map([...(q.searches ?? []).map(r => ({ ...r, tool: "relic_search" })), ...q.last].filter(r => r.tool === "relic_search" && real(r)).map(r => [r.query.trim(), r] as const)).values()].slice(0, 8);
+  const recent = [...new Map([...(q.searches ?? []).map(r => ({ ...r, tool: "relic_search" })), ...q.last].filter(r => r.tool === "relic_search" && real(r)).map(r => [r.query.trim(), r] as const)).values()].slice(0, 16);
   if (!top.length && !recent.length) return null;
   const max = Math.max(...top.map(t => t.n), 1);
   // one smooth scale (log of times asked), 14 to 34 px, so the cloud fills the card instead of three small sizes
@@ -325,15 +325,16 @@ export function GlancePage({ s, error, at, openHub, search }: { s: Status | null
         <Asked goAsked={() => { location.hash = "tab=queries"; }} />
         <Searched q={asked.data} search={search} />
 
-        <Section title="The hub's machine" sub="What the hub holds on white's disk and what it costs the machine right now. The Disk page has the detail.">
-          <Resources s={s} />
-        </Section>
-
         {(s.seal_days?.length ?? 0) > 0 && (
           <Section title="Months" sub="Each Bangkok month seals when it ends. On seal day the hub checks every machine's copy byte for byte, then writes the month down with a fingerprint; a late row adds an amendment, never a rewrite.">
             <MonthLedger days={s.seal_days!} months={s.months.list} openRecap={openRecap} />
           </Section>
         )}
+
+        <Section title="The hub's machine" sub="What the hub holds on white's disk and what it costs the machine right now. The Disk page has the detail.">
+          <Resources s={s} />
+        </Section>
+
 
         <Section title="Machines" sub="Who feeds the hub: what each one sent, when it last pushed, and what its own chain says about the sync.">
           <MachineRows s={s} machines={machines} />

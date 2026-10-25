@@ -55,7 +55,7 @@ uv run relic5 search ภาษาไทย --limit 5   # RELIC5_URL defaults to 
 ```
 
 MCP is the easy way: an agent calls `relic_search`, `relic_show`, `relic_sessions`, `relic_session`, `relic_trace`,
-`relic_saved`, `relic_found` and `relic_status` directly. Register it once per machine. `bin/relic5-mcp-headers` reads the 0600 token file, so the token
+`relic_saved`, `relic_asked`, `relic_tag`, `relic_tags`, `relic_found` and `relic_status` directly. Register it once per machine. `bin/relic5-mcp-headers` reads the 0600 token file, so the token
 never sits in `~/.claude.json`:
 
 ```sh
@@ -86,6 +86,11 @@ search "rustfs backup"      #a1  ── relic_show hit 3   parent=#a1
   for, how it searched, and what it found ("nothing" counts). The hub adds the chain's own count of searches and
   opened hits. The MCP server's `initialize` answer carries instructions that ask every agent to pass `parent` and
   to call `relic_found` once at the end.
+- `relic_asked {"since": "2026-10-24"}` tells what was looked into in a period (a Bangkok day, an ISO time, or `7d`):
+  each distinct search and how often, the ones that found nothing, the found notes, the chains and the tags.
+- `relic_tag {"target": "<relic5:// link | session id | trace.id>", "add": ["rustfs"], "note": "…"}` labels what was
+  found, like digger's node tags; `relic_tags {"tag": "rustfs"}` lists what carries a tag. Append-only in
+  `logs/tags.jsonl`. On the Search page, "Keep this hit" writes a found note and tags for the message being read.
 - The Search page passes `parent` for you. The Asked page shows the charts, the full paged log, the chains and the saved
   searches. Over HTTP: `GET /api/trace`, `/api/access`, `/api/asked`, `/api/saved`, and `POST /api/saved`.
 

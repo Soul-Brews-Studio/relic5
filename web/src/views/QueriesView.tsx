@@ -11,7 +11,7 @@ import { Btn, Chip, cx, Hint, inputCls, Lbl, Loading, PageHead, SectionHead, Seg
 import { HourBars, Latency } from "../components/AskedCharts";
 import type { AccessPage, AskedStats, ChainRow, Queries, QueryRow, SavedSearch, TraceChain, TraceStep } from "../types";
 
-type Pane = "overview" | "log" | "chains" | "saved";
+type Pane = "overview" | "log" | "chains" | "found" | "saved";
 
 function hashGet(k: string) { return new URLSearchParams(location.hash.slice(1)).get(k) ?? ""; }
 function hashSet(p: Record<string, string>) {
@@ -217,6 +217,82 @@ function Chains({ on, open, setOpen, onSave }: { on: boolean; open: string; setO
   );
 }
 
+// ---- found and tags, for a day or a period ----------------------------------------------------------------------
+
+interface Period {
+  since: string | null; until: string | null; calls: number; searches: number; zero_hits: string[];
+  top: { query: string; times: number; first: string; last: string; hits: number | null; clients: string[] }[];
+  found: { at: string; client?: string; goal?: string; how?: string; found?: string; links?: string[]; root?: string }[];
+  tags: { tag: string; n: number }[];
+}
+interface Tagged { tag: string; targets: { target: string; kind: string; tags: string[]; last: string; notes: { at: string; note: string }[] }[] }
+
+const bkkDay = (offset: number) => new Date(Date.now() + 7 * 3600e3 - offset * 864e5).toISOString().slice(0, 10);
+
+function Found({ on, openChain }: { on: boolean; openChain: (id: string) => void }) {
+  const [since, setSince] = useState(() => hashGet("since") || bkkDay(0)), [until, setUntil] = useState(() => hashGet("until"));
+  const [tag, setTag] = useState("");
+  useEffect(() => { hashSet({ since, until }); }, [since, until]);
+  const p = usePoll<Period>(`/api/period?${new URLSearchParams({ since, ...(until ? { until } : {}) })}`, 60000, on);
+  const t = usePoll<Tagged>(tag ? `/api/tags?${new URLSearchParams({ tag })}` : null, 0, on);
+  const quick: [string, string, string][] = [["Today", bkkDay(0), ""], ["Yesterday", bkkDay(1), bkkDay(1)], ["7 days", bkkDay(6), ""], ["30 days", bkkDay(29), ""]];
+  const d = p.data;
+  return (
+    <>
+      <div className="mb-5 flex flex-wrap items-center gap-2">
+        {quick.map(([l, a, b]) => (
+          <button key={l} type="button" onClick={() => { setSince(a); setUntil(b); }} aria-pressed={since === a && until === b}
+            className={cx("min-h-11 rounded-lg border px-3 text-sm font-semibold", since === a && until === b ? "border-accent bg-accent-wash text-text" : "border-line text-muted hover:text-text")}>{l}</button>))}
+        <label className="ml-2 flex items-center gap-2 text-sm text-muted">from<input type="date" value={since} onChange={e => setSince(e.target.value)} className={inputCls + " h-11"} /></label>
+        <label className="flex items-center gap-2 text-sm text-muted">to<input type="date" value={until} onChange={e => setUntil(e.target.value)} className={inputCls + " h-11"} /></label>
+        <span className="text-xs text-faint">Bangkok days · MCP relic_asked {"{"}"since": "{since}"{until ? `, "until": "${until}"` : ""}{"}"}</span>
+      </div>
+      {p.error && !d ? <State error>{p.error}</State> : !d ? <Loading label="Reading the period" /> : <>
+        <p className="m-0 mb-6 text-lg text-soft"><b className="text-text tabular-nums">{num(d.searches)}</b> different searches in {num(d.calls)} calls, <b className="text-text tabular-nums">{d.found.length}</b> found {d.found.length === 1 ? "note" : "notes"}, <b className="text-text tabular-nums">{d.zero_hits.length}</b> that found nothing.</p>
+        <div className="grid grid-cols-[minmax(0,1fr)] gap-6 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+          <div className="min-w-0">
+            <SectionHead sub="An agent's relic_found, or Keep this hit on the Search page: what was looked for and what answered it.">Found</SectionHead>
+            {!d.found.length ? <State>Nothing kept in this period. On the Search page, “Keep this hit” adds a note and tags to what you were reading.</State> :
+              <ol className="m-0 flex list-none flex-col gap-3 p-0">{d.found.map((f, i) => (
+                <li key={i} className="rounded-xl bg-ok-wash px-4 py-3">
+                  <div className="flex flex-wrap items-baseline gap-x-3"><b className="min-w-0 break-words text-text">{f.found}</b><span className="ml-auto font-mono text-xs text-faint">{bkk(f.at)} · {short(f.client)}</span></div>
+                  <div className="mt-1 text-sm text-soft">looked for: {f.goal}{f.how && <span className="text-muted"> · {f.how}</span>}</div>
+                  {!!f.links?.length && <div className="mt-1 flex flex-col font-mono text-xs break-all text-accent">{f.links.map(l => <span key={l}>{l}</span>)}</div>}
+                  {f.root && <button type="button" onClick={() => openChain(f.root!)} className="mt-1 -ml-2 inline-flex min-h-9 items-center rounded-lg px-2 text-xs font-semibold text-accent hover:bg-raised">its chain</button>}
+                </li>))}</ol>}
+            <SectionHead sub="Most asked first. Open one to search it again.">Searched</SectionHead>
+            <DataTable rows={d.top} rowKey={r => r.query} onRow={r => openSearch({ query: r.query })} empty="no searches in this period" cols={[
+              { key: "q", head: "query", lead: true, cell: r => <span className="break-words">{r.query}</span> },
+              { key: "n", head: "times", num: true, w: "w-16", cell: r => r.times },
+              { key: "h", head: "hits", num: true, w: "w-16", cell: r => r.hits === 0 ? <Chip tone="warn">0</Chip> : r.hits ?? "" },
+              { key: "l", head: "last (+07)", w: "w-32", cell: r => <time>{bkk(r.last)}</time> },
+              { key: "c", head: "who", w: "w-36", meta: true, cell: r => <span className="truncate">{r.clients.join(", ")}</span> },
+            ]} />
+          </div>
+          <div className="min-w-0">
+            <SectionHead sub="Labels on what was found, like digger's. Click one to see what carries it.">Tags</SectionHead>
+            {!d.tags.length ? <State>No tags in this period.</State> :
+              <div className="flex flex-wrap gap-2">{d.tags.map(x => (
+                <button key={x.tag} type="button" onClick={() => setTag(tag === x.tag ? "" : x.tag)} aria-pressed={tag === x.tag}
+                  className={cx("inline-flex min-h-9 items-center gap-1.5 rounded-lg px-2.5 text-sm font-semibold", tag === x.tag ? "bg-accent text-on-accent" : "bg-accent-wash text-accent hover:brightness-110")}>#{x.tag}<span className="font-mono text-xs opacity-75">{x.n}</span></button>))}</div>}
+            {tag && t.data && <ol className="m-0 mt-4 flex list-none flex-col gap-2 p-0">{t.data.targets.map(x => (
+              <li key={x.target} className="rounded-xl border border-line bg-panel px-4 py-3">
+                <div className="flex flex-wrap items-baseline gap-2"><span className="text-xs font-bold tracking-[0.1em] text-muted uppercase">{x.kind}</span>
+                  <span className="min-w-0 font-mono text-xs break-all text-soft">{x.target}</span></div>
+                <div className="mt-1 flex flex-wrap gap-1">{x.tags.map(y => <span key={y} className="rounded bg-raised px-1.5 text-xs text-muted">#{y}</span>)}</div>
+                {x.notes.length > 0 && <p className="m-0 mt-1 text-sm text-soft">“{x.notes[x.notes.length - 1].note}”</p>}
+              </li>))}</ol>}
+            {d.zero_hits.length > 0 && <>
+              <SectionHead sub="What search did not find in this period.">Found nothing</SectionHead>
+              <div className="flex flex-wrap gap-2">{d.zero_hits.map(z => <button key={z} type="button" onClick={() => openSearch({ query: z })} className="rounded-lg bg-warning-wash px-2.5 py-1 text-sm text-warning">{z}</button>)}</div>
+            </>}
+          </div>
+        </div>
+      </>}
+    </>
+  );
+}
+
 // ---- saved searches --------------------------------------------------------------------------------------------
 
 function Saved({ on, bump }: { on: boolean; bump: number }) {
@@ -257,7 +333,7 @@ function Saved({ on, bump }: { on: boolean; bump: number }) {
 }
 
 export function QueriesView({ on }: { on: boolean }) {
-  const [pane, setPane] = useState<Pane>(() => (["overview", "log", "chains", "saved"].includes(hashGet("pane")) ? hashGet("pane") as Pane : hashGet("trace") ? "chains" : "overview"));
+  const [pane, setPane] = useState<Pane>(() => (["overview", "log", "chains", "found", "saved"].includes(hashGet("pane")) ? hashGet("pane") as Pane : hashGet("trace") ? "chains" : "overview"));
   const [open, setOpen] = useState(hashGet("trace"));
   const [bump, setBump] = useState(0), [note, setNote] = useState<string | null>(null);
   const q = usePoll<Queries>("/api/queries", 30000, on && pane === "overview");
@@ -274,7 +350,7 @@ export function QueriesView({ on }: { on: boolean }) {
     try { await post("/api/saved", { action: "add", from: s.id, every: Number(every) }); setBump(b => b + 1); setNote(`Saved "${s.query}" as a job, every ${every} min.`); }
     catch (e) { setNote(String((e as Error).message)); }
   };
-  const tabs = useMemo(() => [{ value: "overview", label: "Overview" }, { value: "log", label: "Log" }, { value: "chains", label: "Chains" }, { value: "saved", label: "Saved" }], []);
+  const tabs = useMemo(() => [{ value: "overview", label: "Overview" }, { value: "log", label: "Log" }, { value: "chains", label: "Chains" }, { value: "found", label: "Found & tags" }, { value: "saved", label: "Saved" }], []);
   return (
     <>
       <PageHead title="Asked" sub="Who asked the hub what, how fast it answered, and what followed: each search is kept with its hits, chained to what was opened after it, and can be saved as a job.">
@@ -284,6 +360,7 @@ export function QueriesView({ on }: { on: boolean }) {
       {pane === "overview" && <Overview on={on} q={q.data} />}
       {pane === "log" && <Log on={on} openChain={openChain} />}
       {pane === "chains" && <Chains on={on} open={open} setOpen={setOpen} onSave={save} />}
+      {pane === "found" && <Found on={on} openChain={openChain} />}
       {pane === "saved" && <Saved on={on} bump={bump} />}
       <div className="mt-8"><Hint>GET /api/asked · /api/access · /api/trace · /api/saved · MCP relic_trace, relic_saved · logs/queries.jsonl on the hub only (0600), never in git</Hint></div>
     </>

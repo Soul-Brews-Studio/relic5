@@ -169,11 +169,33 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
 
     @app.get("/api/access", response_model=None)
     def access_route(limit: int = 100, before: int | None = None, tool: str = "", client: str = "", door: str = "", q: str = "",
-                     zero: int = 0, errors: int = 0, evals: int = 0) -> Json:
-        """The query log, newest first, filtered; page with before=<next_before>."""
+                     zero: int = 0, errors: int = 0, evals: int = 0, since: str = "", until: str = "") -> Response | Json:
+        """The query log, newest first, filtered (since/until: a Bangkok day YYYY-MM-DD, an ISO time or Nd/Nh);
+        page with before=<next_before>."""
         from . import trace
-        return trace.access(relic.parts.root, max(1, min(limit, 500)), before, tool or None, client or None, door or None, q or None,
-                            bool(zero), bool(errors), bool(evals))
+        from .window import WindowError
+        try:
+            return trace.access(relic.parts.root, max(1, min(limit, 500)), before, tool or None, client or None, door or None, q or None,
+                                bool(zero), bool(errors), bool(evals), since or None, until or None)
+        except WindowError as ex:
+            return JSONResponse({"error": str(ex)}, status_code=400)
+
+    @app.get("/api/tags", response_model=None)
+    def tags_route(tag: str = "", target: str = "", since: str = "", until: str = "") -> Json:
+        from . import trace
+        if target:
+            return trace.tags_of(relic.parts.root).get(target) or {"target": target, "tags": [], "notes": []}
+        return trace.tagged(relic.parts.root, tag or None, since or None, until or None)
+
+    @app.get("/api/period", response_model=None)
+    def period_route(since: str = "", until: str = "", limit: int = 50) -> Response | Json:
+        """What was asked in a period and what came of it (trace.asked): searches, zero hits, found notes, chains."""
+        from . import trace
+        from .window import WindowError
+        try:
+            return trace.asked(relic.parts.root, since or None, until or None, max(1, min(limit, 500)))
+        except WindowError as ex:
+            return JSONResponse({"error": str(ex)}, status_code=400)
 
     @app.get("/api/explain", response_model=None)
     def explain_route(q: str = "", with_: str = "", w: str = "") -> Response | Json:
