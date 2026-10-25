@@ -110,3 +110,48 @@ def handoff(relic: "Relic5", ident: str, user_only: bool = False) -> Json:
             f"median gap {statistics.median(gaps) / 60 if gaps else 0:.0f} min, longest {max(gaps) / 3600 if gaps else 0:.1f} h.")
     return {"uuid": sid, "turns": len(user), "span_s": round(span), "median_gap_s": round(statistics.median(gaps)) if gaps else 0,
             "longest_gap_s": round(max(gaps)) if gaps else 0, "text": head + "\n\n" + "\n".join(lines)}
+
+
+def _call(name: str | None, text: str | None) -> str:
+    """One tool call as a line: its description (what the agent said it was doing) and the command or file it ran on."""
+    try:
+        a = json.loads(text or "")
+    except ValueError:
+        return " ".join((text or "").split())[:400]
+    if not isinstance(a, dict):
+        return str(a)[:400]
+    what = a.get("description") or ""
+    how = a.get("command") or a.get("file_path") or a.get("pattern") or a.get("url") or a.get("query") or a.get("prompt") or ""
+    return " · ".join(x for x in (str(what), " ".join(str(how).split())[:600]) if x)
+
+
+def conversation(relic: "Relic5", ident: str, offset: int = 0, limit: int = 200, tools: bool = False,
+                 role: str | None = None, since: str | None = None, until: str | None = None) -> Json:
+    """The whole session in order, every turn whole (Nat, 2026-10-26: "get full conversation?"): the human's turns and
+    the agent's replies, each once (_fold_repeats), and with tools=True each tool call between them (name, its
+    description, the command or file). Tool results are not on the hub (relic-scan keeps calls only). Pages by offset."""
+    sid, s = _resolve(relic, ident)
+    turns = [t | {"kind": "text"} for t in _turns(relic, sid)]
+    if tools:
+        src = relic.parts.source("tools")
+        if src:
+            from .query import folded
+            seen: set[tuple[str, str]] = set()
+            for r in relic._rows(f"""SELECT ts, ts_th, name, string_agg(text, '' ORDER BY chunk) AS text FROM {folded(src, "sid = ?")}
+                                     GROUP BY msgkey, ts, ts_th, name ORDER BY ts""", [sid]):
+                line = _call(r["name"], r["text"])
+                if (r["ts"], line) in seen:
+                    continue
+                seen.add((r["ts"], line))
+                turns.append({"role": "tool", "kind": "call", "name": r["name"], "ts": r["ts"], "ts_th": r["ts_th"], "text": line})
+            turns.sort(key=lambda t: (t["ts"] or "", 0 if t["kind"] == "text" else 1))
+    if role:
+        turns = [t for t in turns if t["role"] == role]
+    if since:
+        turns = [t for t in turns if (t["ts_th"] or "") >= since or (t["ts"] or "") >= since]
+    if until:
+        turns = [t for t in turns if (t["ts_th"] or "")[: len(until)] <= until]
+    page = turns[offset: offset + limit] if limit else turns[offset:]
+    nxt = offset + len(page)
+    return {"uuid": sid, "name": s.get("name"), "repo": s.get("repo"), "startedAt": s.get("startedAt"), "endedAt": s.get("endedAt"),
+            "total": len(turns), "offset": offset, "turns": page, "next_offset": nxt if nxt < len(turns) else None}
