@@ -739,6 +739,15 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
         except ValueError as ex:
             return JSONResponse({"error": str(ex)}, status_code=400)
 
+    @app.get("/api/usage", response_model=None)
+    @cached(300)
+    def usage_route(by: str = "month", group: str = "engine", since: str = "", until: str = "") -> Json | JSONResponse:
+        from . import activity
+        try:
+            return activity.usage(relic, by, group, since or None, until or None)
+        except ValueError as ex:
+            return JSONResponse({"error": str(ex)}, status_code=400)
+
     @app.get("/api/hours/months", response_model=None)
     @cached(300)
     def hours_months(month: str = "") -> Json | JSONResponse:

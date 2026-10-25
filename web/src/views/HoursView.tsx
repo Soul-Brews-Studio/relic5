@@ -70,6 +70,7 @@ function Overall({ on, pick }: { on: boolean; pick: (d: string) => void }) {
         <MonthlyMessages on={on} />
         <WhenTyping on={on} />
       </div>
+      <div className="mt-6"><AiUsage on={on} /></div>
       {month && one.data && (
         <div className="mt-4 rounded-2xl border border-line bg-panel p-5">
           <div className="mb-3 flex items-baseline gap-3"><b className="font-mono text-lg text-text">{month}</b>
@@ -119,6 +120,49 @@ function MonthlyMessages({ on }: { on: boolean }) {
                 <rect x={x} y={H - (u / max) * H} width={W - 2} height={Math.max((u / max) * H, 1)} rx={2} fill="var(--user)" />
                 <rect x={x + W} y={H - (as / max) * H} width={W - 2} height={Math.max((as / max) * H, 1)} rx={2} fill="var(--assistant)" />
                 <text x={x + W} y={H + 14} textAnchor="middle" fontSize={9} className="fill-[var(--muted)] font-mono">{b.slice(2)}</text>
+              </g>);
+          })}
+        </svg>
+      </div>
+    </div>
+  );
+}
+
+interface UsageRow { period: string; engine: string; sessions: number; subagents: number; tool_calls: number; tool_errors: number }
+const ENGINES: [string, string][] = [["claude", "var(--assistant)"], ["codex", "var(--ok)"], ["omp", "var(--tool)"], ["thclaws", "var(--code)"]];
+
+/** AI usage since the first month (GET /api/usage, MCP relic_usage): sessions per month by engine, subagents inside. */
+function AiUsage({ on }: { on: boolean }) {
+  const u = usePoll<{ rows: UsageRow[]; totals: Record<string, number> }>("/api/usage?by=month&group=engine", 0, on);
+  const rows = u.data?.rows ?? [];
+  if (!rows.length) return null;
+  const months = [...new Set(rows.map(r => r.period))].sort();
+  const tot = (m: string) => rows.filter(r => r.period === m).reduce((a, r) => a + r.sessions + r.subagents, 0);
+  const max = Math.max(...months.map(tot), 1);
+  const H = 140, W = 26, G = 8;
+  const t = u.data!.totals;
+  return (
+    <div className="min-w-0">
+      <div className="mb-2 flex flex-wrap items-center gap-x-4 text-xs text-muted">
+        <b className="text-soft">AI sessions per month, by engine</b>
+        {ENGINES.map(([e, c]) => <span key={e} className="inline-flex items-center gap-1.5"><span className="size-2.5 rounded-sm" style={{ background: c }} />{e}</span>)}
+        <span>· {num(t.sessions)} sessions, {num(t.subagents)} subagents, {num(t.tool_calls)} tool calls ({((t.tool_errors / Math.max(t.tool_calls, 1)) * 100).toFixed(1)}% errors)</span>
+      </div>
+      <div className="overflow-x-auto">
+        <svg width={months.length * (W + G)} height={H + 22} role="img" aria-label="AI sessions per month by engine">
+          {months.map((m, i) => {
+            let y = H;
+            return (
+              <g key={m}>
+                <title>{rows.filter(r => r.period === m).map(r => `${r.engine}: ${num(r.sessions)} sessions + ${num(r.subagents)} subagents, ${num(r.tool_calls)} tool calls`).join("\n")}</title>
+                {ENGINES.map(([e, c]) => {
+                  const r = rows.find(x => x.period === m && x.engine === e);
+                  const v = r ? r.sessions + r.subagents : 0;
+                  if (!v) return null;
+                  const h = Math.max((v / max) * H, 1.5); y -= h;
+                  return <rect key={e} x={i * (W + G)} y={y} width={W} height={h - 1} rx={2} fill={c} />;
+                })}
+                <text x={i * (W + G) + W / 2} y={H + 14} textAnchor="middle" fontSize={9} className="fill-[var(--muted)] font-mono">{m.slice(2)}</text>
               </g>);
           })}
         </svg>
