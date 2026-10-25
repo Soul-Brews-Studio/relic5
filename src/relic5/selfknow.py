@@ -111,7 +111,7 @@ def queries(root: str) -> Json:
                 break
     return {"running": running, "total_logged": len(rows), "eval_logged": len(rows) - len(real), "last": real[-20:][::-1], "per_hour": per_hour,
             "searches": searches,
-            "top": sorted((TopQuery(query=q, n=n) for q, n in counts.items() if n > 1), key=lambda x: -x["n"])[:15],
+            "top": sorted((TopQuery(query=q, n=n) for q, n in counts.items() if n > 1), key=lambda x: -x["n"])[:40],
             "zero_hits": [{"at": r["at"], "query": r["query"], "tool": r.get("tool")} for r in zero[-20:][::-1]]}
 
 
