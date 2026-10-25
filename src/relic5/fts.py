@@ -49,7 +49,10 @@ from user beta or .claude project of some project"): home is the last .claude*/.
 sessions or backups in relic-scan's src_path (/Users/beta/.claude, /Users/nat/.claude1, a project's own
 .../exp/.claude-hello/.claude); homes, every home that holds the message (a copy lives in several), newline-joined;
 agent, relic-scan's user@host. Tables built before this have none of them (index --force adds them)."""
-HOME_SQL = r"nullif(regexp_extract(src_path, '^(.*/\.(?:claude|codex)[^/]*)/(?:projects|sessions|backups|archived)', 1), '')"
+# with any folders under the home before projects/, sessions/ or a Claude project folder (-Users-...):
+# .codex-team/1/sessions, .codex/path-migration-backup-*/sessions, .claude/rescued-*/full-backup-*/-Users-nat-x
+# (2026-10-25: those left 1,587 sessions without a home)
+HOME_SQL = r"nullif(regexp_extract(src_path, '^(.*/\.(?:claude|codex)[^/]*(?:/[^/]+)*?)/(?:(?:projects|sessions|backups|archived)[^/]*|-[^/]+)/', 1), '')"
 KEEP = 3
 
 

@@ -60,7 +60,7 @@ export interface Hit {
   machines: string[]; link: string; matched?: string[] | null; home?: string | null; homes?: string[] | null; agent?: string | null;
 }
 
-export interface HomeRow { machine: string; home: string | null; agent: string | null; user: string | null; kind: "user" | "extra" | "project" | "mirror" | "export" | "unknown"; label: string; sessions: number; messages: number; first: string; last: string }
+export interface HomeRow { machine: string; home: string | null; agent: string | null; user: string | null; kind: "user" | "extra" | "project" | "mirror" | "backup" | "export" | "unknown"; label: string; sessions: number; messages: number; first: string; last: string }
 
 export interface Explain {
   query: string; tokens: string[]; layers: string[]; rows: number; phrase_rows: number | null; tokenizer: string; ms: number;
