@@ -226,14 +226,16 @@ def place(relic: "Relic5", uids: list[str], scores: list[float] | None = None, m
     want = list(dict.fromkeys(u for u in uids if u))
     found: dict[str, "Any"] = {}
     for m in index.matrices(slug):
-        u = getattr(m, "_uid", None)
-        if u is None:   # made once per matrix: a 1.4M-row astype per call cost about a second
+        idx = getattr(m, "_uid_sorted", None)
+        if idx is None:   # once per matrix: the uids as strings and their sort order, so a lookup is a binary search
             u = m.cols["uid"].astype(str)
-            try:
-                setattr(m, "_uid", u)
-            except AttributeError:
-                pass
-        hit = np.flatnonzero(np.isin(u, want))
+            order = np.argsort(u)
+            idx = (u[order], order)
+            setattr(m, "_uid_sorted", idx)
+        su, order = idx
+        wa = np.asarray(want, dtype=str)
+        pos = np.clip(np.searchsorted(su, wa), 0, len(su) - 1)
+        hit = order[pos[su[pos] == wa]]
         for i in hit:
             found.setdefault(str(m.cols["uid"][i]), m.M[i])
     def xyz(v: "Any") -> list[float]:
