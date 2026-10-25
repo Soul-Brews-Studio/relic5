@@ -100,11 +100,12 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {"month": STR}, "additionalProperties": False}},
     {"name": "relic_activity", "description": "How much happened when, ready to chart: message counts (each message once) "
      "by a time bucket and optionally split by one dimension. by: day | week | month | hour | hour_of_day | weekday (1 = Mon); "
-     "group: none | role (user = the human typed it) | project | machine | engine; filters since/until ('YYYY-MM-DD', "
+     "group: none | role (user = the human typed it) | project | machine | engine | tool; stream: text (messages, default) | "
+     "tools (tool calls; group tool = which tool) | thinking | git (commits; role commit-claude = Claude co-wrote it); filters since/until ('YYYY-MM-DD', "
      "Bangkok time), role, project (substring), machine; top: how many groups before 'other' (default 12). "
      "Use it for activity charts, heatmaps, busiest hours, which projects took the time.",
      "inputSchema": {"type": "object", "properties": {"by": STR, "group": STR, "since": STR, "until": STR, "role": STR,
-                     "project": STR, "machine": STR, "top": INT}, "additionalProperties": False}},
+                     "project": STR, "machine": STR, "top": INT, "stream": STR}, "additionalProperties": False}},
     {"name": "relic_team", "description": "Sessions started per project per Bangkok day over the last N days (default 90), "
      "and which projects ran on the same days (pairs): who worked with whom, for a timeline or a co-activity chart.",
      "inputSchema": {"type": "object", "properties": {"days": INT}, "additionalProperties": False}},
@@ -319,10 +320,11 @@ def run_tool(relic: Relic5, name: str, a: Json, door: str | None = None) -> Json
             raise UsageError(str(ex)) from ex
     if name == "relic_activity":
         from . import activity
-        _check(a, ["by", "group", "since", "until", "role", "project", "machine", "top"])
+        _check(a, ["by", "group", "since", "until", "role", "project", "machine", "top", "stream"])
         try:
             return activity.activity(relic, _str(a, "by") or "day", _str(a, "group") or "none", _str(a, "since"), _str(a, "until"),
-                                     _str(a, "role"), _str(a, "project"), _str(a, "machine"), min(_int(a, "top", 1) or 12, 50))
+                                     _str(a, "role"), _str(a, "project"), _str(a, "machine"), min(_int(a, "top", 1) or 12, 50),
+                                     _str(a, "stream") or "text")
         except ValueError as ex:
             raise UsageError(str(ex)) from ex
     if name == "relic_team":

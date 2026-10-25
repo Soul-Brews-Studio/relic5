@@ -17,3 +17,13 @@ def test_counts_by_day_and_role(relic):
     assert activity(relic, group="machine", top=1)["series"][-1]["name"] == "other"
     with pytest.raises(ValueError):
         activity(relic, by="year")
+
+
+def test_other_streams(relic):
+    t = activity(relic, stream="tools", group="tool")
+    assert t["unit"] == "tool calls" and t["total"] == 1
+    with pytest.raises(ValueError):
+        activity(relic, group="tool")
+    with pytest.raises(ValueError):
+        activity(relic, stream="video")
+    assert activity(relic, stream="git")["total"] == 0          # no commits pushed in the fixture
