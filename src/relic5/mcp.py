@@ -106,6 +106,11 @@ TOOLS = [
      "Use it for activity charts, heatmaps, busiest hours, which projects took the time.",
      "inputSchema": {"type": "object", "properties": {"by": STR, "group": STR, "since": STR, "until": STR, "role": STR,
                      "project": STR, "machine": STR, "top": INT, "stream": STR}, "additionalProperties": False}},
+    {"name": "relic_usage", "description": "AI usage over time from the session table: per period (day | week | month | "
+     "year) and group (engine: claude / codex / omp / thclaws | tier | project | via | version | none) the sessions, "
+     "subagent sessions, messages typed by the human and written by the agent, thinking blocks, tool calls, tool results "
+     "and tool errors, back to the first month (Sep 2025). No model names or tokens (not extracted).",
+     "inputSchema": {"type": "object", "properties": {"by": STR, "group": STR, "since": STR, "until": STR}, "additionalProperties": False}},
     {"name": "relic_files", "description": "The files the agents changed most: Edit / Write / MultiEdit / NotebookEdit "
      "calls by file path, with calls, sessions, days, first and last time (Bangkok), the tools and the projects. Filters "
      "since/until, project (substring), contains (a path substring, e.g. 'relic5/src' or '.md'); top (default 30).",
@@ -330,6 +335,13 @@ def run_tool(relic: Relic5, name: str, a: Json, door: str | None = None) -> Json
             return activity.activity(relic, _str(a, "by") or "day", _str(a, "group") or "none", _str(a, "since"), _str(a, "until"),
                                      _str(a, "role"), _str(a, "project"), _str(a, "machine"), min(_int(a, "top", 1) or 12, 50),
                                      _str(a, "stream") or "text")
+        except ValueError as ex:
+            raise UsageError(str(ex)) from ex
+    if name == "relic_usage":
+        from . import activity
+        _check(a, ["by", "group", "since", "until"])
+        try:
+            return activity.usage(relic, _str(a, "by") or "month", _str(a, "group") or "engine", _str(a, "since"), _str(a, "until"))
         except ValueError as ex:
             raise UsageError(str(ex)) from ex
     if name == "relic_files":
