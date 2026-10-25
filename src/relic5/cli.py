@@ -20,7 +20,8 @@
   relic5 recap <session> [--limit 20|0] [--json]   what happened: turns asked, tools, files edited, how it ended
   relic5 handoff <session> [--role user]   paste-ready block for a new session's first prompt (relic3 tail --handoff)
   relic5 pending                  what is not searchable yet: stale months (BM25), chunks without vectors, push lag
-  relic5 tail [--session S] [--machine M] [--n 50] [-f]   the newest messages as they land (-f: keep following)
+  relic5 tail [--session S] [--machine M] [--n 50] [-f] [--full]   the newest messages as they land, users and agents
+                                  (-f: keep following; --full: each whole message, not its first line)
   relic5 status [--json]
 
 Client settings: RELIC5_URL (default http://white.follow-rankine.ts.net:8795), RELIC5_TOKEN_FILE
@@ -340,15 +341,23 @@ def _main(argv: list[str] | None = None) -> None:
     elif cmd == "tail":
         import time as _t
         params = {k: o for k in ("session", "machine", "n") if (o := _opt(rest, "--" + k))}
+        full = "--full" in rest
+        if full:
+            params["full"] = "1"
         follow, seen = "-f" in rest, set[str]()
         while True:
             r = call("/api/tail", params)
             for x in reversed(r["rows"]):
-                if x["msgkey"] in seen:
+                # one message is often written twice (a queued prompt, a re-sent assistant block): show it once
+                said = (x["sid"], x["role"], " ".join((x["text"] or "").split()))
+                if x["msgkey"] in seen or str(said) in seen:
                     continue
-                seen.add(x["msgkey"])
-                txt = " ".join((x["text"] or "").split())[:110]
-                print(f"{x['ts_th'][:16]} {','.join(x['machines']):<9} {x['role']:<9} {(x['session_name'] or x['sid'] or '')[:24]:<24} {txt}")
+                seen.update((x["msgkey"], str(said)))
+                head = f"{x['ts_th'][:16]} {','.join(x['machines']):<9} {x['role']:<9} {(x['session_name'] or x['sid'] or '')[:24]:<24}"
+                if full:
+                    print(f"── {head.rstrip()}  {(x['sid'] or '')[:8]}\n{(x['text'] or '').rstrip()}\n")
+                else:
+                    print(f"{head} {said[2][:110]}")
             if not follow:
                 break
             _t.sleep(30)

@@ -691,8 +691,8 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
 
     @app.get("/api/tail", response_model=None)
     @cached(5)
-    def tail(n: int = 50, session: str = "", machine: str = "", since: str = "") -> Json:
-        return relic.tail(min(max(n, 1), 500), session or None, machine or None, since or None)
+    def tail(n: int = 50, session: str = "", machine: str = "", since: str = "", full: int = 0) -> Json:
+        return relic.tail(min(max(n, 1), 500), session or None, machine or None, since or None, bool(full))
 
     @app.get("/api/queries", response_model=None)
     @cached(15)

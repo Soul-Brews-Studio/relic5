@@ -414,8 +414,11 @@ class Relic5:
         return [link(r) for r in reversed(b)], [link(r) for r in a]
 
     # ---- tail ----
-    def tail(self, n: int = 50, session: str | None = None, machine: str | None = None, since: str | None = None) -> Json:
-        """The newest messages as they land (open month first), every machine or one session: chunk 0 of each."""
+    def tail(self, n: int = 50, session: str | None = None, machine: str | None = None, since: str | None = None,
+             full: bool = False) -> Json:
+        """The newest messages as they land (open month first), every machine or one session: chunk 0 of each, its first
+        600 characters; full: the whole message, every chunk joined in order (Nat, 2026-10-26: "can we get all relic5
+        tail? full from user and agents?")."""
         from .parts import this_month
         mons = sorted(self.parts.months(), reverse=True)[:2]   # the open month, and the last one across a rollover
         src = self.parts.source("text", months=set(mons))
@@ -441,6 +444,13 @@ class Relic5:
             rows = run(where + ["ts > ?"], params + [cut])
         if len(rows) < n:
             rows = run(where, params)
+        if full and rows:
+            keys = [r["msgkey"] for r in rows]
+            whole = {x["msgkey"]: x["text"] for x in self._rows(
+                f"""SELECT msgkey, string_agg(text, '' ORDER BY chunk) AS text FROM {folded(src, "list_contains(?, msgkey)")}
+                    GROUP BY msgkey""", [keys])}
+            for r in rows:
+                r["text"] = whole.get(r["msgkey"], r["text"])
         names = self._names({r["sid"] for r in rows if r["sid"]})
         for r in rows:
             r["session_name"] = names.get(r["sid"])
