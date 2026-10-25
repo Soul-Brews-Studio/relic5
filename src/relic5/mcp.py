@@ -74,6 +74,20 @@ TOOLS = [
                      "additionalProperties": False}},
     {"name": "relic_session", "description": "Resolve a session id prefix to its session record and subagent tree.",
      "inputSchema": {"type": "object", "properties": {"id": STR, "parent": PARENT}, "required": ["id"], "additionalProperties": False}},
+    {"name": "relic_conversation", "description": "One session's whole conversation in order, every turn in full: the human's "
+     "turns and the agent's replies (a prompt Claude Code stored twice shows once); tools=true also puts each tool call between "
+     "them (name, what the agent said it was doing, the command or file; results are not on the hub). Long sessions page: "
+     "pass next_offset back as offset. role: user | assistant | tool; since/until: Bangkok time 'YYYY-MM-DDTHH:MM'.",
+     "inputSchema": {"type": "object", "properties": {"id": STR, "offset": INT, "limit": INT, "role": STR, "since": STR, "until": STR,
+                     "tools": {"type": "boolean"}, "parent": PARENT}, "required": ["id"], "additionalProperties": False}},
+    {"name": "relic_readings", "description": "What relic-extract's models (gb300 qwen3:14b, z.ai glm-5.3, and the trial models) made of "
+     "each stretch of time: per window (day, 3h, 1h, 15m, across every session in it) type, focus, distraction, work, agents, "
+     "pattern, en and th summaries, and for deep readings friction and lesson. Newest first. since/until: 'YYYY-MM-DD' or "
+     "'YYYY-MM-DD HH:MM' Bangkok time, on the window's start; grain: day | 3h | 1h | 15m; model: substring (gb300, zai); "
+     "q: words that must all appear. Answers are a model's reading, not the transcript: open the window with relic_search "
+     "or relic_conversation for what was said.",
+     "inputSchema": {"type": "object", "properties": {"since": STR, "until": STR, "grain": STR, "model": STR, "q": STR,
+                     "limit": INT, "offset": INT}, "additionalProperties": False}},
     {"name": "relic_trace", "description": "The trace log. With id (a trace.id from any result): the whole chain it belongs to, oldest "
      "first: each search with its first 10 hits as links, each message or session opened from it, the narrower searches after "
      "it and the saved-search runs made from it, with depth by parent. Without id: the newest chains.",
@@ -258,6 +272,21 @@ def run_tool(relic: Relic5, name: str, a: Json, door: str | None = None) -> Json
     if name == "relic_session":
         _check(a, ["id"])
         return relic.session(_str(a, "id"))
+    if name == "relic_conversation":
+        from .recap import conversation
+        _check(a, ["id", "offset", "limit", "role", "since", "until", "tools"])
+        lim = _int(a, "limit", 1)
+        return conversation(relic, _str(a, "id") or "", offset=_int(a, "offset") or 0, limit=min(lim or 200, 1000),
+                            tools=a.get("tools") is True, role=_str(a, "role"), since=_str(a, "since"), until=_str(a, "until"))
+    if name == "relic_readings":
+        from . import readings
+        _check(a, ["since", "until", "grain", "model", "q", "limit", "offset"])
+        try:
+            return readings.readings(relic.parts.root, since=_str(a, "since"), until=_str(a, "until"), grain=_str(a, "grain"),
+                                     model=_str(a, "model"), q=_str(a, "q"), limit=min(_int(a, "limit", 1) or 50, 500),
+                                     offset=_int(a, "offset") or 0)
+        except ValueError as ex:
+            raise UsageError(str(ex)) from ex
     if name == "relic_artifact_put":
         from . import artifacts
         _check(a, ["oracle", "title", "filename", "ext", "data", "text", "note", "prompt", "session"])

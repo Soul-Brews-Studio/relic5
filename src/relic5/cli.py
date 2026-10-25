@@ -18,6 +18,9 @@
   relic5 serve [--root ~/relic5] [--host 127.0.0.1,100.103.52.67] [--port 8795]
   relic5 search <words> [--with tools] [--limit 20] [--since 7d] [--repo R] [--json]     any machine, over tailscale
   relic5 recap <session> [--limit 20|0] [--json]   what happened: turns asked, tools, files edited, how it ended
+  relic5 conversation <session> [--tools] [--role user] [--offset 0] [--limit 0]   the whole session, every turn in full
+  relic5 readings [--since D] [--until D] [--grain day|3h|1h|15m] [--model zai] [--q words] [--limit 20]
+                                  what gb300 / z.ai made of each window (relic-extract's readings on the hub)
   relic5 handoff <session> [--role user]   paste-ready block for a new session's first prompt (relic3 tail --handoff)
   relic5 pending                  what is not searchable yet: stale months (BM25), chunks without vectors, push lag
   relic5 tail [--session S] [--machine M] [--n 50] [-f] [--full]   the newest messages as they land, users and agents
@@ -312,6 +315,47 @@ def _main(argv: list[str] | None = None) -> None:
             for h in r["hits"]:
                 print(_line(h))
             print(f"{len(r['hits'])} hits" + (" (more: next_cursor)" if r.get("next_cursor") else ""))
+    elif cmd == "conversation" and rest:
+        p: dict[str, str] = {"id": rest[0], "offset": _opt(rest, "--offset", "0"), "limit": _opt(rest, "--limit", "0") or "0"}
+        if "--tools" in rest:
+            p["tools"] = "1"
+        if who := _opt(rest, "--role"):
+            p["role"] = who
+        off, total = int(p["offset"]), None
+        while True:
+            r = call("/api/conversation", p | {"offset": str(off), "limit": p["limit"] if p["limit"] != "0" else "1000"})
+            if as_json:
+                print(json.dumps(r, ensure_ascii=False, indent=1))
+                break
+            if total is None:
+                total = r["total"]
+                print(f"{r['uuid']}  {r.get('name') or ''}\n{r.get('repo') or ''}  {r['startedAt']} .. {r['endedAt']}  {total} turns\n")
+            for t in r["turns"]:
+                if t["role"] == "tool":
+                    print(f"   {t['ts_th'][11:16]} {t['name']}: {t['text']}")
+                else:
+                    print(f"── {t['ts_th'][:16].replace('T', ' ')} {t['role']}\n{(t['text'] or '').rstrip()}\n")
+            if p["limit"] != "0" or r["next_offset"] is None:
+                break
+            off = r["next_offset"]
+    elif cmd == "readings":
+        p = {k: o for k in ("since", "until", "grain", "model", "q", "limit", "offset") if (o := _opt(rest, "--" + k))}
+        p.setdefault("limit", "20")
+        r = call("/api/readings", p)
+        if as_json:
+            print(json.dumps(r, ensure_ascii=False, indent=1))
+        else:
+            print(f"{r['total']:,} readings · " + ", ".join(f"{m} {n:,}" for m, n in r["models"].items()) + (f"\n{r['note']}" if r.get("note") else ""))
+            for x in r["rows"]:
+                print(f"\n── {x['start']} {x['grain']}  {x['model']}{' deep' if x['deep'] else ''}  {x.get('type') or ''}")
+                print(f"focus: {x.get('focus')}")
+                for w in x.get("work") or []:
+                    print(f"  - {w}")
+                for k in ("distraction", "friction", "lesson"):
+                    if x.get(k) and x[k] != "none":
+                        print(f"{k}: {x[k]}")
+                if x.get("th"):
+                    print(f"th: {x['th']}")
     elif cmd == "recap" and rest:
         r = call("/api/recap", {"id": rest[0], "limit": _opt(rest, "--limit", "20")})
         if as_json:

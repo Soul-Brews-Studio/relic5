@@ -699,6 +699,26 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
     def queries_route() -> Json:
         return selfknow.queries(relic.parts.root)
 
+    @app.get("/api/conversation", response_model=None)
+    def conversation_route(id: str, offset: int = 0, limit: int = 200, tools: int = 0, role: str = "",
+                           since: str = "", until: str = "") -> Json | JSONResponse:
+        from .recap import conversation
+        from .query import NotFound, UsageError
+        try:
+            return conversation(relic, id, max(offset, 0), min(max(limit, 0), 1000), bool(tools), role or None, since or None, until or None)
+        except (NotFound, UsageError) as ex:
+            return JSONResponse({"error": str(ex)}, status_code=404 if isinstance(ex, NotFound) else 400)
+
+    @app.get("/api/readings", response_model=None)
+    def readings_route(since: str = "", until: str = "", grain: str = "", model: str = "", q: str = "",
+                       limit: int = 50, offset: int = 0) -> Json | JSONResponse:
+        from . import readings
+        try:
+            return readings.readings(root, since or None, until or None, grain or None, model or None, q or None,
+                                     min(max(limit, 1), 500), max(offset, 0))
+        except ValueError as ex:
+            return JSONResponse({"error": str(ex)}, status_code=400)
+
     @app.get("/api/recap", response_model=None)
     def recap_route(id: str, limit: int = 20) -> Json | JSONResponse:
         from .recap import recap
