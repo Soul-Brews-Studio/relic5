@@ -83,6 +83,8 @@ export function MapView({ openSession, search }: { openSession: (sid: string, na
   const p = usePoll<MapData>(`/api/map?limit=${limit}`, 0);
   const [mode, setMode] = useState<"3d" | "2d">(() => (localStorage.getItem("relic5-map") as "3d" | "2d") || "3d");
   const [q, setQ] = useState("");
+  // #tab=map&sessions=abcd1234,ef567890: the Search page's "see these hits on the Map" lights just those sessions
+  const [only, setOnly] = useState<string[]>(() => (new URLSearchParams(location.hash.slice(1)).get("sessions") ?? "").split(",").filter(Boolean));
   const [repo, setRepo] = useState("");
   const [sel, setSel] = useState(-1);
   const [hover, setHover] = useState<{ i: number; x: number; y: number }>({ i: -1, x: 0, y: 0 });
@@ -97,8 +99,9 @@ export function MapView({ openSession, search }: { openSession: (sid: string, na
   }, [pts]);
   const dim = useMemo(() => {
     const words = q.toLowerCase().split(/\s+/).filter(Boolean);
-    return pts.map(x => (!!repo && shortRepo(x.repo) !== repo) || (words.length > 0 && !words.every(w => `${x.name ?? ""} ${x.repo ?? ""} ${x.sid}`.toLowerCase().includes(w))));
-  }, [pts, q, repo]);
+    return pts.map(x => (!!repo && shortRepo(x.repo) !== repo) || (only.length > 0 && !only.some(p => x.sid.startsWith(p)))
+      || (words.length > 0 && !words.every(w => `${x.name ?? ""} ${x.repo ?? ""} ${x.sid}`.toLowerCase().includes(w))));
+  }, [pts, q, repo, only]);
   const lit = dim.filter(d => !d).length;
   const s = sel >= 0 ? pts[sel] : undefined;
   const hv = hover.i >= 0 ? pts[hover.i] : undefined;
@@ -123,6 +126,8 @@ export function MapView({ openSession, search }: { openSession: (sid: string, na
             className="h-11 w-full rounded-lg border border-line bg-panel pr-3 pl-10 text-sm text-text placeholder:text-faint hover:border-line-strong focus:border-accent" />
         </label>
         <span className="text-sm text-muted tabular-nums">{lit === pts.length ? `${num(pts.length)} points` : `${num(lit)} of ${num(pts.length)} lit`}</span>
+        {only.length > 0 && <button type="button" onClick={() => { setOnly([]); history.replaceState(null, "", "#tab=map"); }}
+          className="inline-flex min-h-11 items-center gap-1.5 rounded-lg bg-accent-wash px-3 text-xs font-semibold text-accent">the sessions of a search ({only.length}) · show all</button>}
         {mode === "3d" && <label className="flex min-h-11 items-center gap-2 text-sm text-soft"><input type="checkbox" checked={spin} onChange={e => setSpin(e.target.checked)} className="accent-[var(--accent)]" />turn slowly</label>}
       </div>
 

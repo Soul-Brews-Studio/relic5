@@ -6,9 +6,10 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { get } from "../api";
 import { ago, bkk, repoColor, shortRepo } from "../format";
-import type { Hit, SearchResult, ShowResult } from "../types";
+import type { Explain, Hit, SearchResult, ShowResult } from "../types";
 import { Drawer } from "../components/Drawer";
 import { Markdown } from "../components/Markdown";
+import { SearchExplain } from "../components/SearchExplain";
 import { Btn, Chip, cx, inputCls, Kbd, Lbl, Loading, Marked, Seg, State, Who } from "../components/ui";
 import type { PaletteSession } from "../components/Shell";
 import { Close, Filter, Search, Session } from "../components/Icons";
@@ -234,11 +235,20 @@ export function SearchView({ st, setSt, machine, setMachine, machines, recent, t
   const [show, setShow] = useState<{ link: string; r: ShowResult | null; err?: string } | null>(null);
   const input = useRef<HTMLInputElement>(null);
   const runId = useRef(0), showId = useRef(0);
-  const prev = useRef<{ q: string; id: string } | null>(null);   // the search before: a narrower one joins its trace chain   // stale-request guards (ARRA Oracle v3 SimpleSearch): a late answer never overwrites a newer one
+  const prev = useRef<{ q: string; id: string } | null>(null);
+  const [ex, setEx] = useState<Explain | null>(null);   // how the index reads the query (GET /api/explain)   // the search before: a narrower one joins its trace chain   // stale-request guards (ARRA Oracle v3 SimpleSearch): a late answer never overwrites a newer one
   const wide = () => window.matchMedia("(min-width: 1536px)").matches;
 
   useEffect(() => { input.current?.focus(); }, [focusKey]);
   useEffect(() => { setDraft(st); if (st.q) run(st); else setRes(null); }, [st.q, st.horizon, st.with, st.repo, st.role, st.session]);   // eslint-disable-line
+  useEffect(() => {
+    setEx(null);
+    if (!st.q) return;
+    let live = true;
+    get<Explain>(`/api/explain?${new URLSearchParams({ q: st.q, ...(st.with ? { w: st.with } : {}) })}`).then(e => { if (live) setEx(e); }).catch(() => {});
+    return () => { live = false; };
+  }, [st.q, st.with]);
+  const hq = ex ? ex.tokens.join(" ") : st.q;   // highlight the index's own tokens (Thai split into words)
 
   async function run(s: SearchState) {
     const id = ++runId.current;
@@ -341,7 +351,7 @@ export function SearchView({ st, setSt, machine, setMachine, machines, recent, t
           <Btn type="button" onClick={() => navigator.clipboard.writeText(selected.link)}>Copy link</Btn>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto">
-          {show?.err ? <State error>{show.err}</State> : show?.r ? <Context r={show.r} q={st.q} /> : <div className="p-5"><Loading label="Reading the message" /></div>}
+          {show?.err ? <State error>{show.err}</State> : show?.r ? <Context r={show.r} q={hq} /> : <div className="p-5"><Loading label="Reading the message" /></div>}
         </div>
       </> : <p className="m-0 p-6 text-sm text-muted">No hit to read. Widen the window or drop a word.</p>}
     </div>
@@ -399,13 +409,15 @@ export function SearchView({ st, setSt, machine, setMachine, machines, recent, t
                 {res.trace && <> · <a href={`#tab=queries&pane=chains&trace=${res.trace.id}`} className="text-accent hover:underline" title="This search, the hits opened from it and the searches after it (Asked · Chains)">trace #{res.trace.root}</a></>}</span>
             </p>
           )}
+          {ex && res && <SearchExplain e={ex} hits={rows.map(r => r.h)} active={active} pick={n => { setActive(n); if (!wide()) setDrawer(true); }}
+            mapHref={rows.length ? `#tab=map&sessions=${[...new Set(rows.map(r => r.h.session_uuid.slice(0, 8)).filter(x => x && !x.includes(":")))].join(",")}` : null} />}
           {err && <State error>{err}</State>}
           {res && !hits.length && (machine && res.hits.length
             ? <State>None of these {res.hits.length} hits are on {machine}. The machine choice narrows the hits already found; it does not search {machine} on its own.
                 <span className="mt-3 block"><Btn type="button" onClick={() => setMachine("")}>Show all {res.hits.length}</Btn></span></State>
             : <State>No match. Pick a wider window above, or try fewer words: every word must appear.</State>)}
           <div className="flex flex-col gap-1">
-            {rows.map((r, n) => <HitRow key={r.h.uid + n} h={r.h} q={st.q} active={n === active} more={unfold.has(r.h.uid) ? 0 : r.more.length}
+            {rows.map((r, n) => <HitRow key={r.h.uid + n} h={r.h} q={hq} active={n === active} more={unfold.has(r.h.uid) ? 0 : r.more.length}
               onMore={() => setUnfold(u => new Set(u).add(r.h.uid))}
               onOpen={() => { setActive(n); if (!wide()) setDrawer(true); }} />)}
           </div>
@@ -419,7 +431,7 @@ export function SearchView({ st, setSt, machine, setMachine, machines, recent, t
 
       <Drawer open={drawer} onClose={() => setDrawer(false)} title={title(selected)}
         note={selected?.link} onCopy={() => selected && navigator.clipboard.writeText(selected.link)}>
-        {show?.err ? <State error>{show.err}</State> : show?.r ? <Context r={show.r} q={st.q} /> : <Loading label="Reading the message" />}
+        {show?.err ? <State error>{show.err}</State> : show?.r ? <Context r={show.r} q={hq} /> : <Loading label="Reading the message" />}
       </Drawer>
     </>
   );

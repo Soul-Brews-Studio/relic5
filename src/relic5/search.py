@@ -273,7 +273,13 @@ def search(relic: "Relic5", index: "Index", query: str, since: str | None = None
     from . import vaults as vaults_
     vs = vaults_.load(index.root) if any((h["sid"] or "").startswith("vault:") for h in page) else {}
     out: list[Json] = []
+    from .fts import tokens
+    try:   # which of the query's tokens each hit holds, for the Search page's token matrix
+        qtok = list(dict.fromkeys(tokens(query)))
+    except Exception:
+        qtok = []
     for r in page:
+        htok = set(tokens((r["text"] or "")[:20000])) if qtok else set()
         vlt = vaults_.of(vs, r["sid"], r["machines"])
         out.append({"uid": r["uid"], "partition": r["month"], "session_uuid": r["sid"], "role": r["role"], "ts": r["ts"],
                     "day": (r["ts_th"] or "")[:10] or None, "repo_key": vlt["repo_key"] if vlt else r["sid"][4:] if (r["sid"] or "").startswith("git:") else repos.get(r["sid"]),
@@ -281,6 +287,7 @@ def search(relic: "Relic5", index: "Index", query: str, since: str | None = None
                     "layer": r["layer"], "source_present": False,
                     "ephemeral": sorted(set(EPHEMERAL.findall(r["text"] or "")))[:5] or None, "machines": r["machines"], "title": r.get("title"),
                     "link": f"relic5://{r['month']}/{r['uid']}",
+                    "matched": [t for t in qtok if t in htok] if qtok else None,
                     "locator": {"month": r["month"], "stream": r["layer"], "key": r["key"], "chunk": r["chunk"]}}
                    | ({"near_duplicates": r["_dups"]} if r.get("_dups") else {}))
     nxt = base64.urlsafe_b64encode(json.dumps({"o": off + limit, "q": sig, "h": chosen}).encode()).decode().rstrip("=") if more else None

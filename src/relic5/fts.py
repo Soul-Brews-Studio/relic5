@@ -45,6 +45,15 @@ COLS = ["uid", "msgkey", "chunk", "key", "month", "sid", "ts", "ts_th", "role", 
 KEEP = 3
 
 
+def tokens(text: str) -> list[str]:
+    """The words the BM25 index sees in a text: lance's own query tokenizer with the index's settings (ICU, so Thai
+    splits into words; lower case; no stemming, no stop words). The Search page shows a query this way."""
+    import lance
+    return [t.text for t in lance.tokenize(text, base_tokenizer=FTS_SETTINGS["base_tokenizer"], stem=FTS_SETTINGS["stem"],
+                                            remove_stop_words=FTS_SETTINGS["remove_stop_words"],
+                                            max_token_length=FTS_SETTINGS["max_token_length"])]
+
+
 def search_dir(root: str) -> str:
     return os.path.join(root, "index", "_search")
 
@@ -259,6 +268,19 @@ class Index:
             out += qb.select(COLS + ["_score"]).to_list()
         out.sort(key=lambda r: (-r["_score"], r["ts"] or ""))
         return out[:limit]
+
+    def count(self, layer: str, q: str, cap: int) -> int:
+        """Rows of one layer (history + open) that match q, counted up to cap: a term's document frequency."""
+        n = 0
+        for part in ("open", "history"):
+            tb = self._load().get(f"{layer}_{part}")
+            if tb is not None:
+                n += len(tb.search(q, query_type="fts").limit(cap).select(["uid"]).to_arrow())
+        return min(n, cap)
+
+    def size(self, layer: str) -> int:
+        """Rows in one layer's BM25 tables (history + open)."""
+        return sum(tb.count_rows() for part in ("open", "history") if (tb := self._load().get(f"{layer}_{part}")) is not None)
 
     def query(self, layer: str, q: str, where: str | None, limit: int) -> list[Json]:
         """BM25 hits of one layer (history + open), best first. A query of two or more words also runs as an exact

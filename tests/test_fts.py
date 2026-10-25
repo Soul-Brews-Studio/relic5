@@ -124,3 +124,23 @@ def test_exact_phrase_ranks_first(built):
     fts.build(root, con, log=lambda s: None)
     hits = Relic5(root, duckdb.connect()).search("to use ego browser to", horizon="archive")["hits"]
     assert hits[0]["session_uuid"] == "p1" and {h["session_uuid"] for h in hits} >= {"p1", "p2"}
+
+
+def test_explain_shows_tokens_weights_and_what_each_hit_matched(root):
+    from fastapi.testclient import TestClient
+    from relic5.api import make_app
+    from relic5.doors import Doors
+    from relic5.cli import main
+    main(["index", "--root", root])
+    import os
+    os.environ["RELIC5_WARM"] = "0"
+    c = TestClient(make_app(root, {"m5": "t"}, Doors({"m5": "t"}, enabled=False)))
+    H = {"Authorization": "Bearer t"}
+    e = c.get("/api/explain", params={"q": "Deploy the HUB ค้นหาได้ไหม"}, headers=H).json()
+    assert e["tokens"][:3] == ["deploy", "the", "hub"] and "ค้นหา" in e["tokens"]
+    t = {x["token"]: x for x in e["terms"]}
+    assert t["deploy"]["rows"] == 1 and t["hub"]["rows"] >= 2 and t["deploy"]["idf"] > t["hub"]["idf"]
+    assert e["rows"] > 0 and e["phrase_rows"] is not None
+    hits = c.get("/api/search", params={"q": "deploy hub"}, headers=H).json()["hits"]
+    assert hits and all(set(h["matched"]) <= {"deploy", "hub"} for h in hits) and any(h["matched"] == ["deploy", "hub"] for h in hits)
+    assert c.get("/api/explain", params={"q": " "}, headers=H).status_code == 400
