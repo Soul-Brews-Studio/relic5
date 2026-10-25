@@ -65,6 +65,7 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
     con = duckdb.connect(":memory:", config={"threads": min(os.cpu_count() or 4, 16), "memory_limit": os.environ.get("RELIC5_DUCK_MEM", "6GB")})
     from . import perf
     perf.keep(root)
+    threading.Thread(target=seen.seed, args=(root,), name="seen-seed", daemon=True).start()   # last used, from the logs
     relic = Relic5(root, con)
     app = FastAPI(title="relic5", docs_url=None, redoc_url=None, openapi_url=None)
 

@@ -173,6 +173,19 @@ def test_tokens_show_when_last_used(hub_with_tokens):
     assert r["last_ip"] != "203.0.113.9"
 
 
+def test_last_used_seeded_from_the_logs(tmp_path):
+    import json, os
+    from relic5 import seen
+    os.makedirs(tmp_path / "logs" / "requests")
+    day = __import__("time").strftime("%Y-%m-%d", __import__("time").gmtime())
+    (tmp_path / "logs" / "requests" / f"{day}.jsonl").write_text(
+        json.dumps({"at": f"{day}T01:00:00.000Z", "path": "/mcp", "door": "oauth:Seeded"}) + "\n")
+    (tmp_path / "logs" / "queries.jsonl").write_text(json.dumps({"at": f"{day}T02:00:00Z", "door": "token:seeded", "tool": "relic_search"}) + "\n")
+    seen.seed(str(tmp_path))
+    assert seen.of("oauth:Seeded")["last_used"] == f"{day}T01:00:00Z" and seen.of("oauth:Seeded")["last_path"] == "/mcp"
+    assert seen.of("token:seeded")["last_path"] == "/mcp relic_search"
+
+
 def test_big_answers_are_gzipped(client):
     import glob, os
     import relic5
