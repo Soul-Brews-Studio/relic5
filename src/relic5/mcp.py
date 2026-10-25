@@ -88,6 +88,11 @@ TOOLS = [
      "or relic_conversation for what was said.",
      "inputSchema": {"type": "object", "properties": {"since": STR, "until": STR, "grain": STR, "model": STR, "q": STR,
                      "limit": INT, "offset": INT}, "additionalProperties": False}},
+    {"name": "relic_hours", "description": "What happened on a day (Bangkok time), hour by hour: odin-oracle's Huginn "
+     "hourly flights (who typed what, commits, which oracles worked, the hour's theme) and its daily roll-up, Munin's searches, "
+     "and what z.ai / gb300 made of each hour (relic_readings). Start here for 'what happened today / yesterday'. date: "
+     "YYYY-MM-DD (default today); hour: 'HH' for that hour in full.",
+     "inputSchema": {"type": "object", "properties": {"date": STR, "hour": STR}, "additionalProperties": False}},
     {"name": "relic_trace", "description": "The trace log. With id (a trace.id from any result): the whole chain it belongs to, oldest "
      "first: each search with its first 10 hits as links, each message or session opened from it, the narrower searches after "
      "it and the saved-search runs made from it, with depth by parent. Without id: the newest chains.",
@@ -278,6 +283,14 @@ def run_tool(relic: Relic5, name: str, a: Json, door: str | None = None) -> Json
         lim = _int(a, "limit", 1)
         return conversation(relic, _str(a, "id") or "", offset=_int(a, "offset") or 0, limit=min(lim or 200, 1000),
                             tools=a.get("tools") is True, role=_str(a, "role"), since=_str(a, "since"), until=_str(a, "until"))
+    if name == "relic_hours":
+        import time as _time
+        from . import ravens
+        _check(a, ["date", "hour"])
+        try:
+            return ravens.brief(relic, _str(a, "date") or _time.strftime("%Y-%m-%d", _time.gmtime(_time.time() + 7 * 3600)), _str(a, "hour"))
+        except ValueError as ex:
+            raise UsageError(str(ex)) from ex
     if name == "relic_readings":
         from . import readings
         _check(a, ["since", "until", "grain", "model", "q", "limit", "offset"])

@@ -96,3 +96,38 @@ def days(relic: Any, limit: int = 60) -> Json:
     for r in R.readings(relic.parts.root, limit=10**7)["rows"]:
         bump(r["start"][:10], "readings")
     return {"days": sorted(counts.values(), key=lambda c: c["date"], reverse=True)[:limit]}
+
+
+FRONT = re.compile(r"^---\n[\s\S]*?\n---\n?")
+LEAD = re.compile(r"^> ?(.*)$", re.M)
+
+
+def lead(text: str, limit: int = 900) -> str:
+    """A flight in a few lines: Huginn opens every report with a > quote block (window, counts, the hour's theme)."""
+    body = FRONT.sub("", text)
+    q = " ".join(m.strip() for m in LEAD.findall(body) if m.strip())
+    q = q or " ".join(body.split())
+    return q if len(q) <= limit else q[:limit].rsplit(" ", 1)[0] + "…"
+
+
+def brief(relic: Any, date: str, hour: str | None = None) -> Json:
+    """hours() sized for an agent (MCP relic_hours): the day's Huginn roll-up whole, each hour as Huginn's opening lines
+    plus each model's focus; with hour, that hour whole (Huginn's full flight and every reading)."""
+    d = hours(relic, date)
+    if hour is not None:
+        h = next((x for x in d["hours"] if x["hour"] == hour.zfill(2)[:2]), None)
+        if not h:
+            raise ValueError(f"nothing for {date} {hour.zfill(2)}:00 (hours with data: {', '.join(x['hour'] for x in d['hours']) or 'none'})")
+        return {"date": date, "hour": h["hour"], "huginn": h["huginn"] and FRONT.sub("", h["huginn"]["text"]), "readings": h["readings"]}
+    keep = ("grain", "start", "model", "type", "focus", "friction", "lesson")
+    return {
+        "date": date,
+        "daily": d["daily"] and FRONT.sub("", d["daily"]["text"]),
+        "day_readings": [{k: r.get(k) for k in keep + ("work",)} for r in d["day"]],
+        "munin": [{"path": n["path"], "lead": lead(n["text"], 400)} for n in d["munin"]],
+        "hours": [{"hour": h["hour"], "huginn": h["huginn"] and lead(h["huginn"]["text"]),
+                   "readings": [{k: r.get(k) for k in keep} for r in h["readings"] if r["grain"] in ("1h", "3h")]}
+                  for h in d["hours"]],
+        "notes_newest": d["notes_newest"],
+        "more": "relic_hours {date, hour: 'HH'} for one hour in full; relic_readings for 15m windows",
+    }
