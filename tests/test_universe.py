@@ -78,3 +78,22 @@ def test_a_message_is_placed_in_the_maps_own_space(tmp_path):
     assert hit["uid"] == "s2-1" and out["missing"] == ["nope"] and len(out["cloud"]) == 6
     assert all(abs(hit[k] - s2[k]) < 0.05 for k in "xyz")      # a session's own message sits on the session
     assert all(abs(out["centre"][k] - hit[k]) < 1e-3 for k in "xyz")
+
+
+def test_a_new_index_generation_serves_the_last_map_and_rebuilds_behind(tmp_path, monkeypatch):
+    """A request never waits for a rebuild: after a push (a new generation) it gets the map made before, and the
+    rebuild runs in the background (2026-10-25: opening a hit took 10-20 s behind a map rebuild)."""
+    universe._CACHE.clear(); universe._BASIS.clear()
+    rng = np.random.default_rng(3)
+    rows = [(f"s{k}", f"2026-10-{k:02d}", rng.normal(size=8)) for k in range(1, 7) for _ in range(4)]
+    m = FakeMatrix([r[0] for r in rows], [r[1] for r in rows], [r[2] for r in rows], [["m5"]] * len(rows))
+    relic = FakeRelic([m], tmp_path)
+    first = universe.sessions_map(relic, need_basis=True)
+    assert first["map_id"] and universe._basis_by_id(relic, first["map_id"]) is not None
+    called = []
+    monkeypatch.setattr(universe, "_rebuild_soon", lambda *a: called.append(a))
+    relic.index.seen = 2.0                                   # a push: a new generation
+    again = universe.sessions_map(relic, need_basis=True)
+    assert again["map_id"] == first["map_id"] and called     # the old map at once, a rebuild asked for
+    fresh = universe.sessions_map(relic, need_basis=True, wait=True)
+    assert fresh["map_id"] != first["map_id"]

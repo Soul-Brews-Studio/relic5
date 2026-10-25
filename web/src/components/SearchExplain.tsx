@@ -21,10 +21,10 @@ function HitSpace({ hits, active, pick }: { hits: Hit[]; active: number; pick: (
   useEffect(() => {
     let live = true;
     setSp(null); setErr(null);
-    fetch("/api/place", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
+    const t = setTimeout(() => fetch("/api/place", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ uids: hits.map(h => h.uid), scores: hits.map(h => h.score) }) })
-      .then(r => r.json()).then(j => { if (live) (j.error ? setErr(j.error) : setSp(j)); }).catch(e => live && setErr(String(e)));
-    return () => { live = false; };
+      .then(r => r.json()).then(j => { if (live) (j.error ? setErr(j.error) : setSp(j)); }).catch(e => live && setErr(String(e))), 900);
+    return () => { live = false; clearTimeout(t); };
   }, [key]);   // eslint-disable-line
   // points: the cloud first (dimmed), then the hits in rank order, then the hits' centre
   const view = useMemo(() => {
