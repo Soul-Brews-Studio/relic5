@@ -82,3 +82,22 @@ def test_usage_keeps_empty_placeholders_apart(root):
                   types={"n_rows": "BIGINT", "months": "VARCHAR[]", **{k: "BIGINT" for k in META_COLS[11:]}})
     u = usage(Relic5(root, duckdb.connect()))
     assert u["totals"]["sessions"] == 1 and u["totals"]["empty_sessions"] == 2
+
+
+def test_a_real_machine_beats_a_one_time_import(root):
+    """2026-10-26: the fold took the first machine by name, so "jsonl-truth-import" beat "m5" and its zero-counter copy
+    of 43,326 July sessions made them look empty. An import's copy is kept only when no real machine has the session."""
+    import duckdb
+    from conftest import META_COLS, meta, write_parquet
+    from relic5.activity import usage
+    from relic5.query import Relic5
+    types = {"n_rows": "BIGINT", "months": "VARCHAR[]", **{k: "BIGINT" for k in META_COLS[11:]}}
+    zero = {k: 0 for k in META_COLS[11:]}
+    write_parquet(f"{root}/parts/jsonl-truth-import/meta/sessions.parquet", META_COLS,
+                  [{**meta("s1-aaaa"), **zero}, {**meta("only-imp"), **zero}], types=types)
+    r = Relic5(root, duckdb.connect())
+    rows = {x["sid"]: x for x in r._rows(f"SELECT sid, machine, user_text FROM {r._meta()}")}
+    assert rows["s1-aaaa"]["machine"] == "m5" and rows["s1-aaaa"]["user_text"] == 1
+    assert rows["only-imp"]["machine"] == "jsonl-truth-import"            # nobody else has it: the import's copy stays
+    u = usage(r)
+    assert u["totals"]["empty_sessions"] == 1

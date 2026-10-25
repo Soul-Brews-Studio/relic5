@@ -127,10 +127,12 @@ class Relic5:
         if not fs:
             return None
         lst = ", ".join("'" + f.replace("'", "''") + "'" for f in fs)
-        # one row per sid: a main session over a subagent copy, then the first machine by name, then the most complete
-        # copy (latest last_ts, most rows, then by file name). Without the last three a sid held twice on one machine
-        # (~/.claude and a mirror) picked a copy at random, and relic_sessions' total moved between calls (2026-10-24).
-        return f"""(SELECT * EXCLUDE (rn) FROM (SELECT *, row_number() OVER (PARTITION BY sid ORDER BY tier <> 'main', machine,
+        # one row per sid: a main session over a subagent copy, a real machine over a one-time import (*-import), then
+        # the first machine by name, then the most complete copy (latest last_ts, most rows, then by file name). Without
+        # the last three a sid held twice on one machine (~/.claude and a mirror) picked a copy at random, and
+        # relic_sessions' total moved between calls (2026-10-24). Without the import rule "jsonl-truth-import" sorted
+        # before "m5" and its copies, every counter 0, won for 43,326 July sessions (2026-10-26, ChatGPT saw July as empty).
+        return f"""(SELECT * EXCLUDE (rn) FROM (SELECT *, row_number() OVER (PARTITION BY sid ORDER BY tier <> 'main', machine LIKE '%-import', machine,
                    last_ts DESC NULLS LAST, n_rows DESC NULLS LAST, base) AS rn
                    FROM (SELECT regexp_extract(filename, '/parts/([^/]+)/', 1) AS machine, * EXCLUDE (filename)
                    FROM read_parquet([{lst}], union_by_name = true, filename = true))) WHERE rn = 1)"""
