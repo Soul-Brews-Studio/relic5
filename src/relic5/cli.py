@@ -18,6 +18,8 @@
   relic5 serve [--root ~/relic5] [--host 127.0.0.1,100.103.52.67] [--port 8795]
   relic5 search <words> [--with tools] [--limit 20] [--since 7d] [--repo R] [--json]     any machine, over tailscale
   relic5 recap <session> [--limit 20|0] [--json]   what happened: turns asked, tools, files edited, how it ended
+  relic5 show <uid | relic5://… | relic3://…> [--before 2] [--after 2]   one hit in full, with its neighbours
+  relic5 --version
   relic5 conversation <session> [--tools] [--role user] [--offset 0] [--limit 0]   the whole session, every turn in full
   relic5 readings [--since D] [--until D] [--grain day|3h|1h|15m] [--model zai] [--q words] [--limit 20]
                                   what gb300 / z.ai made of each window (relic-extract's readings on the hub)
@@ -156,6 +158,10 @@ def _main(argv: list[str] | None = None) -> None:
     args = list(sys.argv[1:] if argv is None else argv)
     if not args or args[0] in ("-h", "--help"):
         print(__doc__)
+        return
+    if args[0] in ("--version", "-V", "version"):   # #96
+        from . import __version__
+        print(f"relic5 {__version__}")
         return
     cmd, rest = args[0], args[1:]
     as_json = "--json" in rest
@@ -315,6 +321,20 @@ def _main(argv: list[str] | None = None) -> None:
             for h in r["hits"]:
                 print(_line(h))
             print(f"{len(r['hits'])} hits" + (" (more: next_cursor)" if r.get("next_cursor") else ""))
+            if r.get("note"):
+                print(f"note: {r['note']}")
+    elif cmd == "show" and rest:   # #96: open a hit (uid, relic5:// or relic3:// link), the same as MCP relic_show
+        r = call("/api/show", {"id": rest[0], "before": _opt(rest, "--before", "2"), "after": _opt(rest, "--after", "2")})
+        if as_json:
+            print(json.dumps(r, ensure_ascii=False, indent=1))
+        else:
+            t = r["target"]
+            for x in r.get("before") or []:
+                print(f"   {x['ts_th'][:16].replace('T', ' ')} {x['role']}: {' '.join((x.get('text') or '').split())[:200]}")
+            print(f"── {t['ts_th'][:16].replace('T', ' ')} {t['role']}  {t.get('sid') or ''}  {t.get('src_path') or ''}:{t.get('src_line') or ''}")
+            print("".join(x.get("text") or "" for x in r.get("parts") or [t]).rstrip() + "\n")
+            for x in r.get("after") or []:
+                print(f"   {x['ts_th'][:16].replace('T', ' ')} {x['role']}: {' '.join((x.get('text') or '').split())[:200]}")
     elif cmd == "conversation" and rest:
         p: dict[str, str] = {"id": rest[0], "offset": _opt(rest, "--offset", "0"), "limit": _opt(rest, "--limit", "0") or "0"}
         if "--tools" in rest:

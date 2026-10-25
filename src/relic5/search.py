@@ -298,6 +298,9 @@ def search(relic: "Relic5", index: "Index", query: str, since: str | None = None
                     "matched": [t for t in qtok if t in htok] if qtok else None,
                     "locator": {"month": r["month"], "stream": r["layer"], "key": r["key"], "chunk": r["chunk"]}}
                    | ({"near_duplicates": r["_dups"]} if r.get("_dups") else {}))
+    if not out and since and re.fullmatch(r"\d+m", since):   # #95: 3m reads as three months to most people
+        note = (f"since {since} means {since[:-1]} minute(s) ago (relic3's Nm). For months say {since[:-1]}mo, "
+                f"or horizon {since} for the {since} window") + (f" · {note}" if note else "")
     nxt = base64.urlsafe_b64encode(json.dumps({"o": off + limit, "q": sig, "h": chosen}).encode()).decode().rstrip("=") if more else None
     months = sorted({h["month"] for h in hits if h.get("month")})
     extra: Json = {"semantic": True, "model": slug, "hybrid": bool(hybrid)} if vector is not None else {}

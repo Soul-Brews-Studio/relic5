@@ -22,3 +22,11 @@ def test_horizon():
     assert window(horizon="archive") == (None, None, "archive")
     with pytest.raises(WindowError):
         window(since="1d", horizon="7d")
+
+
+def test_weeks_and_months_95():
+    from datetime import datetime, timezone
+    from relic5.window import bound
+    now = datetime(2026, 10, 26, tzinfo=timezone.utc)
+    assert bound("2w", now=now) == "2026-10-12T00:00:00.000Z" and bound("3mo", now=now) == "2026-07-28T00:00:00.000Z"
+    assert bound("3m", now=now) == "2026-10-25T23:57:00.000Z"          # still minutes, as relic3
