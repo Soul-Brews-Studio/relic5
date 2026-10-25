@@ -12,7 +12,7 @@ no loopback exemption. A hub serves many machines, and a proxy on the same box w
 Parts arrive over ssh (bin/relic5-push), never over HTTP. The routes that write are the hub's own records: tokens
 (Connect), artifacts, and saved searches (trace.py); a POST that changes settings needs X-Relic5-Request: 1.
 """
-import functools, hmac, json, os, time
+import functools, hmac, json, os, threading, time
 from urllib.parse import parse_qs, urlparse
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
@@ -743,5 +743,27 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
 
     for path, tool in ROUTES.items():
         app.add_api_route(path, make_route(tool), methods=["GET"])
+
+
+    if os.environ.get("RELIC5_WARM", "1") != "0":
+        # the first page after a start asked every heavy route cold (Home 1.1 s, Knowledge 2.2 s, measured in a browser
+        # 2026-10-25): ask them once here, through the app itself on the loopback door, so swr.py holds the answers
+        WARM = ["/api/status", "/api/sessions?limit=500", "/api/sessions?limit=0", "/api/memory", "/api/oracles", "/api/homes",
+                "/api/queries", "/api/map?limit=3000", "/api/clients", "/api/tail?n=50"]
+
+        def _warm() -> None:
+            import asyncio
+            import httpx
+            async def go() -> None:
+                t = httpx.ASGITransport(app=app, client=("127.0.0.1", 0))
+                async with httpx.AsyncClient(transport=t, base_url="http://127.0.0.1", timeout=300) as c:
+                    for u in WARM:
+                        try:
+                            await c.get(u)
+                        except Exception:
+                            pass
+            time.sleep(3)
+            asyncio.run(go())
+        threading.Thread(target=_warm, name="relic5-warm-pages", daemon=True).start()
 
     return app
