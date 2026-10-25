@@ -68,8 +68,35 @@ def _tail(path: str, n: int = 5000) -> list[Json]:
     return out
 
 
+def _since(path: str, days: float = 7, cap: int = 64_000_000) -> list[Json]:
+    """The log's lines of the last `days`, oldest first. It reads back from the end in growing steps (4 MB, 8 MB, ...)
+    until the first line read is older than that, or the cap. A fixed 2 MB read showed only minutes on 2026-10-26: eval
+    runs log large lines (their top hits), 761 lines filled 2 MB, and "Searched most" looked as if the history was lost."""
+    since = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - days * 86400))
+    size = 4_000_000
+    while True:
+        lines = rfs.tail_lines(path, size)
+        first = next((ln for ln in lines if ln.startswith("{")), "")
+        try:
+            first_at = str(json.loads(first).get("at") or "") if first else ""
+        except ValueError:
+            first_at = ""
+        if len(lines) < 2 or first_at < since or size >= cap or size >= rfs.getsize(path):
+            break
+        size *= 2
+    out: list[Json] = []
+    for line in lines:
+        try:
+            r = json.loads(line)
+        except ValueError:
+            continue
+        if str(r.get("at") or "") >= since:
+            out.append(r)
+    return out
+
+
 def queries(root: str) -> Json:
-    rows = _tail(_log(root))
+    rows = _since(_log(root))
     now = time.time()
     hours: dict[str, list[int]] = {}
     for r in rows:
@@ -243,7 +270,7 @@ def clients(root: str, days: int = 7) -> Json:
     token:<name>); a client is the program (relic-feeder (http), claude-code (mcp), python-urllib (mcp): the Mac shim)."""
     now = time.time()
     seen: dict[tuple[str, str], Json] = {}
-    for r in _tail(_log(root), 20000):
+    for r in _since(_log(root), days):
         try:
             t = time.mktime(time.strptime(r["at"], "%Y-%m-%dT%H:%M:%SZ")) - time.timezone
         except (KeyError, ValueError):
