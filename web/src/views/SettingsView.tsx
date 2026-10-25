@@ -36,8 +36,8 @@ function Connectors() {
   return (
     <div className="flex flex-col gap-4">
       <div className="rounded-2xl border border-line bg-panel px-5 py-4 text-sm text-soft">
-        {pub ? <>In claude.ai: Settings, Connectors, Add custom connector, URL <code className="font-mono text-text select-all">{pub}/mcp</code>. claude.ai opens this hub's approve page; paste one of the access tokens above to let it in.</>
-          : <>No public address: set RELIC5_PUBLIC_URL to the tunnel's https address to connect claude.ai.</>}
+        {pub ? <>In claude.ai: Settings, Connectors, Add custom connector. In ChatGPT: Settings, Apps, Advanced settings, Developer mode, Create app, authentication OAuth. URL <code className="font-mono text-text select-all">{pub}/mcp</code>. Either opens this hub's approve page; paste one of the access tokens above to let it in.</>
+          : <>No public address: set RELIC5_PUBLIC_URL to the tunnel's https address to connect claude.ai or ChatGPT.</>}
       </div>
       <DataTable rows={clients.filter(c => !gone.includes(c.client_id))} rowKey={c => c.client_id} empty="No connector has been approved yet." cols={[
         { key: "n", head: "connector", lead: true, cell: c => <b>{c.name}</b>, title: c => c.redirect_uris.join(", ") },
@@ -64,7 +64,7 @@ export function SettingsView({ theme, setTheme, layout, setLayout }: { theme: Th
         <Tokens url={url} />
       </section>
       <section className="mb-10">
-        <SectionHead sub="claude.ai and other apps that reach /mcp through the tunnel with OAuth; revoking one ends its tokens at once">Connectors</SectionHead>
+        <SectionHead sub="claude.ai, ChatGPT and other apps that reach /mcp through the tunnel with OAuth; revoking one ends its tokens at once">Connectors</SectionHead>
         <Connectors />
       </section>
       <section className="mb-10">

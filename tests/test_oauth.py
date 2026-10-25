@@ -37,6 +37,9 @@ def test_claude_ai_connects_through_oauth(hub):
     assert asm["code_challenge_methods_supported"] == ["S256"]
 
     assert c.post("/oauth/register", json={"redirect_uris": ["https://evil.example/cb"]}).status_code == 400
+    assert c.post("/oauth/register", json={"redirect_uris": ["https://chatgpt.com.evil.example/cb"]}).status_code == 400
+    assert c.post("/oauth/register", json={"redirect_uris": ["https://chatgpt.com/connector_platform_oauth_redirect"],
+                                           "client_name": "ChatGPT"}).status_code == 201   # ChatGPT's connector
     reg = c.post("/oauth/register", json={"redirect_uris": [CB], "client_name": "Claude"}).json()
     v, ch = pkce()
     q = {"response_type": "code", "client_id": reg["client_id"], "redirect_uri": CB, "code_challenge": ch,
