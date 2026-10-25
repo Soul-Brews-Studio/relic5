@@ -61,7 +61,8 @@ export default function Map3D({ points, colors, dim, selected, onHover, onSelect
     const hotPos = new Float32Array(hotIdx.length * 3), hotCol = new Float32Array(hotIdx.length * 3);
     hotGeo.setAttribute("position", new BufferAttribute(hotPos, 3));
     hotGeo.setAttribute("color", new BufferAttribute(hotCol, 3));
-    const hotCloud = new Points(hotGeo, new PointsMaterial({ size: 0.11, vertexColors: true, map: sprite, transparent: true, alphaTest: 0.05, depthWrite: false }));
+    const hotMat = new PointsMaterial({ size: 0.11, vertexColors: true, map: sprite, transparent: true, alphaTest: 0.05, depthWrite: false });
+    const hotCloud = new Points(hotGeo, hotMat);
     hotCloud.frustumCulled = false;
     { const c = new Color(); hotIdx.forEach((p, j) => { c.set(colors[p] ?? "#ffffff"); hotCol[j * 3] = c.r; hotCol[j * 3 + 1] = c.g; hotCol[j * 3 + 2] = c.b; }); }
     hotIdx.forEach((p, j) => { hotPos[j * 3] = pos[p * 3]; hotPos[j * 3 + 1] = pos[p * 3 + 1]; hotPos[j * 3 + 2] = pos[p * 3 + 2]; });
@@ -120,13 +121,13 @@ export default function Map3D({ points, colors, dim, selected, onHover, onSelect
         hotGeo.attributes.position.needsUpdate = true;
         if (t >= 1) { growing = false; geo.computeBoundingSphere(); }
       }
-      if (!document.hidden) { controls.update(); renderer.render(scene, camera); }
+      if (!document.hidden && el.offsetParent !== null) { controls.update(); renderer.render(scene, camera); }
       raf = requestAnimationFrame(tick);
     };
     tick();
     return () => {
       cancelAnimationFrame(raf); ro.disconnect(); controls.dispose();
-      geo.dispose(); selGeo.dispose(); hotGeo.dispose(); mat.dispose(); sprite.dispose(); renderer.dispose(); renderer.domElement.remove();
+      geo.dispose(); selGeo.dispose(); hotGeo.dispose(); hotMat.dispose(); (sel.material as PointsMaterial).dispose(); mat.dispose(); sprite.dispose(); renderer.dispose(); renderer.forceContextLoss(); renderer.domElement.remove();
     };
   }, [points]);
 

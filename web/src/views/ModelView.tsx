@@ -27,9 +27,9 @@ export default function ModelView({ url, label }: { url: string; label: string }
     const size = () => { const w = el.clientWidth, h = el.clientHeight; renderer.setSize(w, h, false); renderer.domElement.style.width = "100%"; renderer.domElement.style.height = "100%"; camera.aspect = w / Math.max(h, 1); camera.updateProjectionMatrix(); };
     const ro = new ResizeObserver(size); ro.observe(el); size();
     let raf = 0;
-    const tick = () => { if (!document.hidden) { controls.update(); renderer.render(scene, camera); } raf = requestAnimationFrame(tick); };
+    const tick = () => { if (!document.hidden && el.offsetParent !== null) { controls.update(); renderer.render(scene, camera); } raf = requestAnimationFrame(tick); };
     tick();
-    return () => { cancelAnimationFrame(raf); ro.disconnect(); controls.dispose(); renderer.dispose(); renderer.domElement.remove(); };
+    return () => { cancelAnimationFrame(raf); ro.disconnect(); controls.dispose(); renderer.dispose(); renderer.forceContextLoss(); renderer.domElement.remove(); };
   }, [url]);
   return (
     <div className="relative h-full w-full" role="img" aria-label={label}>
