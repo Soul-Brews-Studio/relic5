@@ -2,7 +2,8 @@
 # relic5 push: copy this machine's relic-extract parts to the hub, under parts/<machine>/.
 #
 #   bin/relic5-push                         # RELIC5_HUB=nat@white.follow-rankine.ts.net, machine = short hostname
-#   RELIC5_MACHINE=mba bin/relic5-push      # name the machine yourself
+#   RELIC5_MACHINE=mba bin/relic5-push      # name the machine yourself (or once: echo mba > ~/.config/relic5/machine)
+#   RELIC5_NEW_MACHINE=1 bin/relic5-push    # the first push of a new machine: the hub refuses an unknown name otherwise
 #   bin/relic5-push -n                      # dry run: list what would move, send nothing
 #
 # Ported from agent-relic-v3 hub/push.sh (commit 6a6d9d8). Kept from it: rsync over ssh, -a so mtimes travel
@@ -21,7 +22,10 @@ HUB="${RELIC5_HUB_SSH:-${RELIC5_HUB:-nat@white.follow-rankine.ts.net}}"
 case "$HUB" in http://*|https://*) h=${HUB#*://}; h=${h%%/*}; HUB="nat@${h%%:*}";; esac
 SRC="${RELIC5_SRC:-$HOME/.relic-extract}"
 DEST="${RELIC5_DEST:-relic5/parts}"            # relative to the hub user's home
-MACHINE="${RELIC5_MACHINE:-$(hostname -s | tr 'A-Z' 'a-z')}"
+# The name: RELIC5_MACHINE, else ~/.config/relic5/machine (one line, written once per machine), else the short hostname.
+# 2026-10-25: a push run by hand on the MacBook Air took its hostname and opened parts/nats-macbook-air beside mba.
+NAMEFILE="${RELIC5_MACHINE_FILE:-$HOME/.config/relic5/machine}"
+MACHINE="${RELIC5_MACHINE:-$( [ -s "$NAMEFILE" ] && head -1 "$NAMEFILE" | tr -d ' \n' || hostname -s | tr 'A-Z' 'a-z')}"
 STREAMS="${RELIC5_STREAMS:-text thinking tools vault}"
 DRY=""
 [ "${1:-}" = "-n" ] && DRY="-n"
@@ -41,6 +45,13 @@ if [ "$HUB" = local ]; then R=""; on_hub() { sh -c "$1"; }; else R="$HUB:"; on_h
 
 home=$(on_hub 'printf %s "$HOME"') || { echo "cannot reach $HUB" >&2; exit 1; }
 target="$home/$DEST/$MACHINE"
+# A machine the hub has never seen is a new folder for good: only on purpose (RELIC5_NEW_MACHINE=1), never by a
+# hostname fallback.
+if [ -z "${RELIC5_NEW_MACHINE:-}" ] && ! on_hub "test -d '$target'"; then
+  echo "refuse: the hub has no machine '$MACHINE' yet. Name this machine (RELIC5_MACHINE=<name>, or put the name in $NAMEFILE)," >&2
+  echo "        or start a new one on purpose with RELIC5_NEW_MACHINE=1." >&2
+  exit 2
+fi
 real=$(on_hub "mkdir -p '$target' && realpath '$target'") || exit 1
 [ "$real" = "$target" ] || { echo "refuse: on $HUB $target resolves to $real" >&2; exit 1; }
 

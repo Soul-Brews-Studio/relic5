@@ -24,7 +24,8 @@ def env(tmp_path):
     (fb / "ssh").write_text(FAKE_SSH)
     (fb / "ssh").chmod(0o755)
     e = dict(os.environ, PATH=f"{fb}:{os.environ['PATH']}", FAKE_HUB_HOME=str(hub), RELIC5_SRC=str(src),
-             RELIC5_HUB="hub", RELIC5_MACHINE="m5", RELIC5_GIT="0")   # never walk this machine's real ghq tree
+             RELIC5_HUB="hub", RELIC5_MACHINE="m5", RELIC5_GIT="0",
+             RELIC5_NEW_MACHINE="1", RELIC5_MACHINE_FILE=str(tmp_path / "no-name-file"))   # never walk this machine's real ghq tree
     return src, hub, e
 
 
@@ -178,3 +179,18 @@ def test_git_repo_paths_always_carry_the_host(env, tmp_path):
     r = push(dict(e, RELIC5_GIT="1", RELIC5_GIT_CACHE=str(tmp_path / "c")))
     assert r.returncode == 0, r.stderr
     assert (hub / "relic5/parts/m5/git/github.com/acme/widget.log").exists()
+
+
+def test_an_unknown_machine_name_is_refused_unless_new_on_purpose(env, tmp_path):
+    """2026-10-25: a push run by hand on the Air took its hostname and opened parts/nats-macbook-air beside mba."""
+    src, hub, e = env
+    e = {k: v for k, v in e.items() if k not in ("RELIC5_NEW_MACHINE", "RELIC5_MACHINE")}
+    r = push(e)
+    assert r.returncode == 2 and "has no machine" in r.stderr and not (hub / "relic5/parts").exists()
+    name = tmp_path / "machine"
+    name.write_text("mba\n")
+    e["RELIC5_MACHINE_FILE"] = str(name)
+    assert push(e).returncode == 2                      # the name file names it, but mba is new to this hub too
+    assert push(e | {"RELIC5_NEW_MACHINE": "1"}).returncode == 0 and (hub / "relic5/parts/mba/text").is_dir()
+    r = push(e)                                         # known now: pushes without the flag
+    assert r.returncode == 0, r.stderr
