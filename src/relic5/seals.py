@@ -19,6 +19,7 @@ from typing import Callable, TypedDict
 
 from .parts import MONTH_STREAMS, Parts
 from .types_ import Json, SealRecord
+from . import store as rfs
 
 Record = dict[str, dict[str, SealRecord]]
 """index/_seals/seals.json: {machine: {month: SealRecord}}."""
@@ -51,7 +52,7 @@ def machine_seals(parts: Parts, machine: str) -> dict[str, Json]:
     """{month: entry} of the sealed months a machine reported (empty when its relic-scan predates seals)."""
     p = os.path.join(parts.dir, machine, "meta", "months.json")
     try:
-        months = json.load(open(p)).get("months", [])
+        months = rfs.read_json(p).get("months", [])
     except (OSError, ValueError):
         return {}
     return {m["month"]: m for m in months if m.get("sealed") and m.get("sealed_keys")}
@@ -63,14 +64,15 @@ def held(parts: Parts, machine: str, month: str) -> dict[str, list[int]]:
     out: dict[str, list[int]] = {}
     for s in MONTH_STREAMS:
         for _, _, f in parts.files(s, month, machine):
-            st = os.stat(f)
-            out[s] = [st.st_size, int(st.st_mtime), pq.ParquetFile(f).metadata.num_rows]
+            size, mtime = parts.stat(f)
+            with rfs.open_input(f) as fh:
+                out[s] = [size, int(mtime), pq.ParquetFile(fh).metadata.num_rows]
     return out
 
 
 def load(root: str) -> Record:
     p = os.path.join(_dir(root), "seals.json")
-    rec: Record = json.load(open(p)) if os.path.exists(p) else {}
+    rec: Record = rfs.read_json(p) if rfs.exists(p) else {}
     return rec
 
 
@@ -87,7 +89,7 @@ def retire(root: str, machine: str, why: str, succeeded_by: str) -> int:
     if months is None:
         return 0
     p = os.path.join(_dir(root), "retired.json")
-    old: dict[str, Json] = json.load(open(p)) if os.path.exists(p) else {}
+    old: dict[str, Json] = rfs.read_json(p) if rfs.exists(p) else {}
     at = time.gmtime()
     old[f"{machine}@{time.strftime('%Y%m%dT%H%M%SZ', at)}"] = {"why": why, "succeeded_by": succeeded_by, "months": months}
     _save(root, "retired.json", old)
@@ -100,11 +102,7 @@ def retire(root: str, machine: str, why: str, succeeded_by: str) -> int:
 
 
 def _save(root: str, name: str, obj: Record | Verify | dict[str, Json]) -> None:
-    os.makedirs(_dir(root), exist_ok=True)
-    p = os.path.join(_dir(root), name)
-    with open(p + ".tmp", "w") as f:
-        json.dump(obj, f, indent=1)
-    os.replace(p + ".tmp", p)
+    rfs.write_json(os.path.join(_dir(root), name), obj, indent=1)
 
 
 def update(root: str, log: Callable[[str], object] = print) -> tuple[list[str], Verify]:
@@ -169,4 +167,4 @@ def summary(root: str) -> Summary:
         per[m] = {"sealed": len(months), "newest_sealed_at": max((r.get("sealed_at") or "" for r in months.values()), default=None),
                   "resealed": sum(1 for r in months.values() if r.get("resealed")), "months": sorted(months)}
     p = os.path.join(_dir(root), "verify.json")
-    return {"machines": per, "verify": json.load(open(p)) if os.path.exists(p) else None}
+    return {"machines": per, "verify": rfs.read_json(p) if rfs.exists(p) else None}

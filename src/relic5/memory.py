@@ -18,6 +18,7 @@ from datetime import datetime, timedelta, timezone
 from typing import TypedDict
 
 from .types_ import MemoryRow
+from . import store as rfs
 
 FRONT = re.compile(r"\A---\n(.*?)\n---\n?", re.S)
 KEY = re.compile(r"^\s*([A-Za-z_][\w-]*):\s*(.*)$")
@@ -56,24 +57,26 @@ def parse(text: str) -> tuple[dict[str, str], str]:
     return meta, text[m.end():].strip()
 
 
+_STAT: dict[str, tuple[int, float]] = {}   # path -> (bytes, mtime) from the last listing, for sig() without a stat each
+
+
 def files(root: str) -> list[tuple[str, str, str, str]]:
-    """[(machine, home, project, path)] of every pushed note."""
+    """[(machine, home, project, path)] of every pushed note: parts/<machine>/memory/<home>/<project>/memory/*.md,
+    from one listing of parts/ (one round trip per folder level on S3, not one per folder)."""
     out: list[tuple[str, str, str, str]] = []
     pdir = os.path.join(root, "parts")
-    if not os.path.isdir(pdir):
+    if not rfs.isdir(pdir):
         return out
-    for machine in sorted(os.listdir(pdir)):
-        base = os.path.join(pdir, machine, "memory")
-        if not os.path.isdir(base):
+    base = pdir.rstrip("/") + "/"
+    for path, size, mtime in rfs.files(pdir):
+        rel = path[len(base):].split("/")
+        if len(rel) != 6 or rel[1] != "memory" or rel[4] != "memory":
             continue
-        for home in sorted(os.listdir(base)):
-            hd = os.path.join(base, home)
-            for project in sorted(os.listdir(hd)) if os.path.isdir(hd) else []:
-                md = os.path.join(hd, project, "memory")
-                for f in sorted(os.listdir(md)) if os.path.isdir(md) else []:
-                    if f.endswith(".md") and f != "MEMORY.md" and not f.startswith("."):
-                        out.append((machine, home, project, os.path.join(md, f)))
-    return out
+        f = rel[5]
+        if f.endswith(".md") and f != "MEMORY.md" and not f.startswith("."):
+            _STAT[path] = (size, mtime)
+            out.append((rel[0], rel[2], rel[3], path))
+    return sorted(out)
 
 
 def short(project: str) -> str:
@@ -84,7 +87,7 @@ def short(project: str) -> str:
 def rows(root: str) -> list[MemoryRow]:
     out: dict[str, MemoryRow] = {}
     for machine, home, project, path in files(root):
-        text = open(path, encoding="utf-8", errors="replace").read()
+        text = rfs.read_text(path)
         meta, body = parse(text)
         name = meta.get("name") or os.path.basename(path)[:-3]
         typ = meta.get("type") if meta.get("type") in TYPES else "note"
@@ -94,7 +97,7 @@ def rows(root: str) -> list[MemoryRow]:
             ts = datetime.fromisoformat(when.replace("Z", "+00:00")) if when else None
         except ValueError:
             ts = None
-        ts = ts or datetime.fromtimestamp(os.path.getmtime(path), timezone.utc)
+        ts = ts or datetime.fromtimestamp(_STAT.get(path, (0, 0.0))[1] or rfs.getmtime(path), timezone.utc)
         ts = ts.astimezone(timezone.utc)
         iso = ts.strftime("%Y-%m-%dT%H:%M:%S.000Z")
         th = (ts + timedelta(hours=7)).strftime("%Y-%m-%dT%H:%M:%S.000+07:00")
@@ -111,7 +114,8 @@ def rows(root: str) -> list[MemoryRow]:
 
 
 def sig(root: str) -> list[list[str | int]]:
-    return [[os.path.relpath(p, root), os.path.getsize(p), int(os.path.getmtime(p))] for _, _, _, p in files(root)]
+    return [[os.path.relpath(p, root), *(lambda st: [st[0], int(st[1])])(_STAT.get(p) or (rfs.getsize(p), rfs.getmtime(p)))]
+            for _, _, _, p in files(root)]
 
 
 def build(root: str) -> str | None:
@@ -122,25 +126,21 @@ def build(root: str) -> str | None:
     s = sig(root)
     if not s:
         return None
-    if os.path.exists(p) and os.path.exists(sp) and json.load(open(sp)) == s:
+    if rfs.exists(p) and rfs.exists(sp) and rfs.read_json(sp) == s:
         return p
-    os.makedirs(d, exist_ok=True)
-    pq.write_table(pa.Table.from_pylist(rows(root)), p + ".tmp")
-    os.replace(p + ".tmp", p)
-    with open(sp + ".tmp", "w") as f:
-        json.dump(s, f)
-    os.replace(sp + ".tmp", sp)
+    rfs.write_parquet(pa.Table.from_pylist(rows(root)), p)
+    rfs.write_json(sp, s)
     return p
 
 
 def counts(root: str) -> dict[str, int]:
     """{type: notes} of the built table, for relic_status."""
     p = os.path.join(root, "index", "_memory", "notes.parquet")
-    if not os.path.exists(p):
+    if not rfs.exists(p):
         return {}
     import pyarrow.parquet as pq
     out: dict[str, int] = {}
-    for role in pq.read_table(p, columns=["role"]).column("role").to_pylist():
+    for role in rfs.read_parquet(p, columns=["role"]).column("role").to_pylist():
         out[role[7:]] = out.get(role[7:], 0) + 1
     return out
 
@@ -149,13 +149,13 @@ def listing(root: str) -> Listing:
     """Every note without its body, newest first, for the hub's Memory tab: title, description, type, project, when,
     machines, link. The body is one relic_show away."""
     p = os.path.join(root, "index", "_memory", "notes.parquet")
-    if not os.path.exists(p):
+    if not rfs.exists(p):
         return {"notes": [], "types": {}, "projects": {}}
     import pyarrow.parquet as pq
     notes: list[Note] = []
     types: dict[str, int] = {}
     projects: dict[str, int] = {}
-    for r in pq.read_table(p, columns=["msgkey", "month", "ts", "role", "cat", "title", "text", "machines", "engine"]).to_pylist():
+    for r in rfs.read_parquet(p, columns=["msgkey", "month", "ts", "role", "cat", "title", "text", "machines", "engine"]).to_pylist():
         typ = r["role"][7:]
         head = (r["text"] or "").split("\n\n", 1)[0]
         desc = head[len(r["title"]) + 2:] if head.startswith(r["title"] + ": ") else head

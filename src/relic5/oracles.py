@@ -18,6 +18,7 @@ from collections import Counter
 from typing import TYPE_CHECKING
 
 from .types_ import Json
+from . import store as rfs
 
 if TYPE_CHECKING:
     from .query import Relic5
@@ -37,10 +38,10 @@ def inside(section: str, tops: tuple[str, ...]) -> bool:
 
 def _vaults(root: str) -> list[Json]:
     out: list[Json] = []
-    for f in sorted(glob.glob(os.path.join(root, "parts", "*", "meta", "vaults.json"))):
+    for f in sorted(rfs.glob(os.path.join(root, "parts", "*", "meta", "vaults.json"))):
         machine = f.split(os.sep)[-3]
         try:
-            vs = json.load(open(f)).get("vaults", [])
+            vs = rfs.read_json(f).get("vaults", [])
         except (OSError, ValueError, AttributeError):
             continue
         for v in vs:
@@ -73,7 +74,7 @@ def listing(relic: "Relic5") -> Json:
 
 
 def _notes(relic: "Relic5", name: str, sections: tuple[str, ...], limit: int) -> list[Json]:
-    files = glob.glob(os.path.join(relic.parts.root, "parts", "*", "vault", "notes.parquet"))
+    files = rfs.glob(os.path.join(relic.parts.root, "parts", "*", "vault", "notes.parquet"))
     if not files:
         return []
     lst = ", ".join("'" + f.replace("'", "''") + "'" for f in files)
@@ -108,9 +109,9 @@ _PORTRAITS: dict[tuple[object, ...], Json] = {}
 
 def _stamp(root: str) -> tuple[float, ...]:
     """What a portrait is made from, by file time: every machine's vault notes and vaults.json, and the memory index."""
-    fs = sorted(glob.glob(os.path.join(root, "parts", "*", "vault", "notes.parquet")) + glob.glob(os.path.join(root, "parts", "*", "meta", "vaults.json"))
+    fs = sorted(rfs.glob(os.path.join(root, "parts", "*", "vault", "notes.parquet")) + rfs.glob(os.path.join(root, "parts", "*", "meta", "vaults.json"))
                 + [os.path.join(root, "index", "_memory", "notes.parquet")])
-    return tuple(os.path.getmtime(f) for f in fs if os.path.exists(f))
+    return tuple(rfs.getmtime(f) for f in fs if rfs.exists(f))
 
 
 def portrait(relic: "Relic5", name: str) -> Json:

@@ -18,6 +18,7 @@ COPY --chown=relic:relic pyproject.toml uv.lock README.md ./
 RUN uv sync --frozen --no-dev --no-install-project
 COPY --chown=relic:relic src ./src
 RUN uv sync --frozen --no-dev
-ENV PATH=/app/.venv/bin:$PATH RELIC5_ROOT=/data RELIC5_TOKENS=/config/tokens RELIC5_TOKENS_JSON=/config/tokens.json HOME=/home/relic
+ENV PATH=/app/.venv/bin:$PATH RELIC5_ROOT=/data RELIC5_TOKENS=/config/tokens RELIC5_TOKENS_JSON=/config/tokens.json HOME=/home/relic \
+    RELIC5_STORAGE=/config/storage.json RELIC5_S3_KEY=/config/s3-live RELIC5_CACHE=/data/.cache-s3
 EXPOSE 8795
 CMD ["relic5", "serve", "--root", "/data", "--host", "127.0.0.1,100.103.52.67", "--port", "8795"]

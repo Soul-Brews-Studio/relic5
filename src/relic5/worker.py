@@ -17,6 +17,7 @@ from typing import Callable, TypedDict
 
 from .encode import encode
 from .types_ import Json
+from . import store as rfs
 
 HUB = os.environ.get("RELIC5_HUB_SSH", "nat@white.follow-rankine.ts.net")
 RELIC4 = os.environ.get("RELIC5_RELIC4", "/opt/Code/github.com/Soul-Brews-Studio/agent-relic-v4")
@@ -42,7 +43,7 @@ POLICY: Policy = {"backlog_gb300": 50000, "small": "ane", "big": "gb300", "query
 
 def policy() -> Policy:
     p = POLICY.copy()
-    if os.path.exists(CONFIG):
+    if rfs.exists(CONFIG):
         import tomllib
         p |= tomllib.load(open(CONFIG, "rb")).get("embed", {})
     return p
@@ -98,7 +99,7 @@ PARITY_TTL_S = 86400
 def parity_fresh(model: str, engine: str, now: float | None = None) -> bool:
     """A passed parity probe for this engine and model in the last day (the probe cost 6 s of every embed)."""
     try:
-        at = float(json.load(open(PARITY))[f"{model}|{engine}"]["at"])
+        at = float(rfs.read_json(PARITY)[f"{model}|{engine}"]["at"])
     except (OSError, ValueError, KeyError, TypeError):
         return False
     return (now or time.time()) - at < PARITY_TTL_S
@@ -106,7 +107,7 @@ def parity_fresh(model: str, engine: str, now: float | None = None) -> bool:
 
 def parity_ok(model: str, engine: str, p05: float) -> None:
     try:
-        d: dict[str, Json] = json.load(open(PARITY))
+        d: dict[str, Json] = rfs.read_json(PARITY)
     except (OSError, ValueError):
         d = {}
     d[f"{model}|{engine}"] = {"at": time.time(), "p05": p05}

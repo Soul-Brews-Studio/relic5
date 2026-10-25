@@ -17,6 +17,7 @@ import base64, hashlib, json, os, re, threading, time
 
 from .query import NotFound, UsageError
 from .types_ import Json
+from . import store as rfs
 
 KINDS = {"png": ("image", "image/png"), "jpg": ("image", "image/jpeg"), "jpeg": ("image", "image/jpeg"),
          "webp": ("image", "image/webp"), "gif": ("image", "image/gif"), "svg": ("image", "image/svg+xml"),
@@ -50,19 +51,14 @@ def put(root: str, oracle: str, title: str, ext: str, data: bytes, note: str | N
             if r["sha256"] == sha:
                 found: Json = r | {"dedup": True}
                 return found
-        files = os.path.join(_dir(root), "files")
-        os.makedirs(files, exist_ok=True)
-        path = os.path.join(files, f"{aid}.{ext}")
-        if not os.path.exists(path):
-            with open(path + ".tmp", "wb") as f:
-                f.write(data)
-            os.replace(path + ".tmp", path)
+        path = os.path.join(_dir(root), "files", f"{aid}.{ext}")
+        if not rfs.exists(path):
+            rfs.write_bytes(path, data)
         kind, mime = KINDS[ext]
         rec: Json = {"id": aid, "oracle": oracle, "title": (title or "").strip()[:200] or f"{kind} for {oracle}", "kind": kind,
                      "ext": ext, "mime": mime, "bytes": len(data), "sha256": sha, "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                      "by": by, "note": (note or "")[:2000] or None, "prompt": (prompt or "")[:8000] or None, "session": session}
-        with open(os.path.join(_dir(root), "index.jsonl"), "a", encoding="utf-8") as f:
-            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        rfs.append_line(os.path.join(_dir(root), "index.jsonl"), json.dumps(rec, ensure_ascii=False), 0o644)
     return rec | {"url": f"/api/artifact/{aid}", "page": f"/#tab=oracles&oracle={oracle}"}
 
 
@@ -85,8 +81,8 @@ def listing(root: str, oracle: str | None = None, limit: int = 500) -> Json:
     """Newest first; one oracle's, or every oracle's with a count per oracle."""
     p = os.path.join(_dir(root), "index.jsonl")
     rows: list[Json] = []
-    if os.path.exists(p):
-        for line in open(p, encoding="utf-8"):
+    if True:
+        for line in rfs.read_lines(p):
             try:
                 r = json.loads(line)
             except ValueError:
@@ -107,6 +103,6 @@ def file_of(root: str, aid: str) -> tuple[str, str, str]:
     for r in listing(root)["artifacts"]:
         if r["id"] == aid:
             path = os.path.join(_dir(root), "files", f"{aid}.{r['ext']}")
-            if os.path.isfile(path):
+            if rfs.isfile(path):
                 return path, r["mime"], r["kind"]
     raise NotFound("no such artifact")

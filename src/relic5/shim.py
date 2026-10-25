@@ -12,6 +12,7 @@ import json, os, sys, urllib.request
 from typing import Callable, TextIO
 
 from .types_ import Json
+from . import store as rfs
 
 Encoder = Callable[[list[str], str], list[list[float]]]
 """encode.encode's shape as add_vector calls it: (texts, model) -> unit vectors."""
@@ -22,7 +23,7 @@ MODEL = os.environ.get("RELIC5_MODEL", "unsloth--embeddinggemma-300m@806f5f90")
 def forward(url: str, msg: object) -> object:
     req = urllib.request.Request(f"{url}/mcp", data=json.dumps(msg).encode(), headers={"Content-Type": "application/json"})
     tok = os.path.expanduser(os.environ.get("RELIC5_TOKEN_FILE", "~/.config/relic5/token"))
-    if os.environ.get("RELIC5_USE_TOKEN") and os.path.exists(tok):
+    if os.environ.get("RELIC5_USE_TOKEN") and rfs.exists(tok):
         req.add_header("Authorization", "Bearer " + open(tok).read().strip())
     with urllib.request.urlopen(req, timeout=180) as r:
         body = r.read()

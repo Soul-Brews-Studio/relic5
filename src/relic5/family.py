@@ -15,6 +15,7 @@ from collections import Counter
 from typing import TYPE_CHECKING
 
 from .types_ import Json
+from . import store as rfs
 
 if TYPE_CHECKING:
     from .query import Relic5
@@ -22,11 +23,11 @@ if TYPE_CHECKING:
 
 def lineage(root: str) -> Json:
     """-> {source, scanned, nodes: [{name, repo, org, parent, origin, date, awakened, commits, children}], roots}."""
-    fs = sorted(glob.glob(os.path.join(root, "parts", "*", "meta", "lineage.json")), key=os.path.getmtime, reverse=True)
+    fs = sorted(rfs.glob(os.path.join(root, "parts", "*", "meta", "lineage.json")), key=rfs.getmtime, reverse=True)
     if not fs:
         return {"source": None, "scanned": None, "nodes": [], "roots": []}
     try:
-        rows = json.load(open(fs[0]))
+        rows = rfs.read_json(fs[0])
     except (OSError, ValueError):
         rows = []
     rows = [r for r in rows if isinstance(r, dict) and r.get("child") and r.get("canonical", True)]
@@ -40,7 +41,7 @@ def lineage(root: str) -> Json:
     import time
     newest = max((str(r.get("date") or "") for r in rows), default="")
     return {"source": fs[0].split(os.sep)[-3], "newest_birth": newest or None,
-            "pushed": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(os.path.getmtime(fs[0]))),
+            "pushed": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(rfs.getmtime(fs[0]))),
             "nodes": nodes, "roots": roots}
 
 

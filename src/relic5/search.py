@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 from .types_ import Json
 from .window import HORIZONS, window
+from . import store as rfs
 
 if TYPE_CHECKING:   # for annotations only: query.py imports this module
     from .fts import Index
@@ -306,10 +307,10 @@ def freshness(root: str) -> Json:
     from .fts import search_dir
     sd = search_dir(root)
     cur = os.path.join(sd, "current.json")
-    built = datetime.fromtimestamp(os.path.getmtime(cur), timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") if os.path.exists(cur) else None
+    built = datetime.fromtimestamp(rfs.getmtime(cur), timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") if rfs.exists(cur) else None
     vp = os.path.join(sd, "vectors.json")
     try:
-        vs = json.load(open(vp))
+        vs = rfs.read_json(vp)
         pending: int | None = sum(int(v["pending"]) for w in vs.get("models", {}).values() for v in w.values())
         vat, counted = vs.get("at"), vs.get("counted_at")
     except (OSError, ValueError, KeyError):

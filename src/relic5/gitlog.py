@@ -24,6 +24,7 @@ Claude Code"), commit-codex for Codex, else commit; sid = "git:<host>/<org>/<rep
 import fnmatch, hashlib, json, os, re
 from datetime import datetime, timedelta, timezone
 from typing import TypedDict
+from . import store as rfs
 
 CLAUDE = re.compile(r"co-authored-by:\s*claude|generated with \[?claude code|noreply@anthropic\.com", re.I)
 CODEX = re.compile(r"co-authored-by:\s*codex|generated with \[?codex|noreply@openai\.com", re.I)
@@ -58,12 +59,12 @@ class CommitRow(TypedDict):
 
 def own_file() -> str:
     return os.environ.get("RELIC5_GIT_OWN") or next(
-        (p for p in ("/config/git-own", os.path.expanduser("~/.config/relic5/git-own")) if os.path.exists(p)), "")
+        (p for p in ("/config/git-own", os.path.expanduser("~/.config/relic5/git-own")) if rfs.exists(p)), "")
 
 
 def own_patterns() -> list[str]:
     p = own_file()
-    if not p or not os.path.exists(p):
+    if not p or not rfs.exists(p):
         return []
     return [l.strip().lower() for l in open(p) if l.strip() and not l.startswith("#")]
 
@@ -72,9 +73,9 @@ def files(root: str) -> list[tuple[str, str, str]]:
     """[(machine, repo, path)] of every pushed log; repo = '<host>/<org>/<repo>'."""
     out: list[tuple[str, str, str]] = []
     pdir = os.path.join(root, "parts")
-    for machine in sorted(os.listdir(pdir)) if os.path.isdir(pdir) else []:
+    for machine in sorted(rfs.listdir(pdir)) if rfs.isdir(pdir) else []:
         base = os.path.join(pdir, machine, "git")
-        for d, _, fs in sorted(os.walk(base)):
+        for d, _, fs in sorted(rfs.walk(base)):
             for f in sorted(fs):
                 if f.endswith(".log") and not f.startswith("."):
                     p = os.path.join(d, f)
@@ -113,7 +114,7 @@ def rows(root: str) -> list[CommitRow]:
     def org(repo: str) -> str:
         return "/".join(repo.split("/")[:2])
 
-    logs = [(machine, repo, parse(open(path, encoding="utf-8", errors="replace").read()), path) for machine, repo, path in files(root)]
+    logs = [(machine, repo, parse(rfs.read_text(path)), path) for machine, repo, path in files(root)]
     total: dict[str, int] = {}
     mine: dict[str, int] = {}
     for _, repo, cs, _ in logs:
@@ -153,7 +154,7 @@ def table(root: str) -> str:
 
 def sig(root: str) -> list[list[str | int]]:
     """The pushed logs, plus the git-own patterns: a new identity rebuilds the table."""
-    logs: list[list[str | int]] = [[os.path.relpath(p, root), os.path.getsize(p), int(os.path.getmtime(p))] for _, _, p in files(root)]
+    logs: list[list[str | int]] = [[os.path.relpath(p, root), rfs.getsize(p), int(rfs.getmtime(p))] for _, _, p in files(root)]
     return logs + [["git-own", *own_patterns()]] if logs else []
 
 
@@ -165,14 +166,10 @@ def build(root: str) -> str | None:
     s = sig(root)
     if not s:
         return None
-    if os.path.exists(p) and os.path.exists(sp) and json.load(open(sp)) == s:
+    if rfs.exists(p) and rfs.exists(sp) and rfs.read_json(sp) == s:
         return p
-    os.makedirs(os.path.dirname(p), exist_ok=True)
-    pq.write_table(pa.Table.from_pylist(rows(root)), p + ".tmp")
-    os.replace(p + ".tmp", p)
-    with open(sp + ".tmp", "w") as f:
-        json.dump(s, f)
-    os.replace(sp + ".tmp", sp)
+    rfs.write_parquet(pa.Table.from_pylist(rows(root)), p)
+    rfs.write_json(sp, s)
     return p
 
 
@@ -189,10 +186,10 @@ class Counts(TypedDict):
 def counts(root: str) -> Counts | None:
     """For relic_status: commits, how many Claude or Codex co-wrote, the first Claude commit, and per Bangkok month."""
     p = table(root)
-    if not os.path.exists(p):
+    if not rfs.exists(p):
         return None
     import pyarrow.parquet as pq
-    t = pq.read_table(p, columns=["role", "month", "ts_th", "repo", "ours"]).to_pylist()
+    t = rfs.read_parquet(p, columns=["role", "month", "ts_th", "repo", "ours"]).to_pylist()
     months: dict[str, dict[str, int]] = {}
     for r in t:
         m = months.setdefault(r["month"], {"commits": 0, "claude": 0, "codex": 0})

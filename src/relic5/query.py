@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, TypedDict
 from .parts import STREAMS, Parts
 from .types_ import Json
 from .window import window
+from . import store as rfs
 
 if TYPE_CHECKING:   # for annotations only: the connection comes from the caller
     import duckdb
@@ -74,7 +75,7 @@ class Relic5:
     def __init__(self, root: str, con: "duckdb.DuckDBPyConnection") -> None:
         from .fts import Index
         self.parts = Parts(root)
-        self.con = con
+        self.con = rfs.duck(con, self.parts.root)   # an S3 root: the connection reads s3:// through httpfs
         self.index = Index(root)
 
     def _rows(self, sql: str, params: Sequence[object] = ()) -> list[Json]:
@@ -110,7 +111,7 @@ class Relic5:
     def _names(self, sids: Collection[str]) -> dict[str, str]:
         from .names import path
         p = path(self.parts.root)
-        if not sids or not os.path.exists(p):
+        if not sids or not rfs.exists(p):
             return {}
         return {r["sid"]: r["name"] for r in self._rows(f"SELECT sid, name FROM read_parquet('{p}') WHERE sid IN (SELECT unnest(?))", [list(sids)])}
 
@@ -239,7 +240,7 @@ class Relic5:
         """An old relic3:// link or 40-hex uid -> (msgkey, how) through resolve/relic3.parquet, or None."""
         m = re.search(r"([0-9a-f]{40})$", ident)
         p = os.path.join(self.parts.root, "resolve", "relic3.parquet")
-        if not m or not os.path.exists(p):
+        if not m or not rfs.exists(p):
             return None
         rows = self._rows(f"SELECT sid, ts, role, layer, msgkey FROM read_parquet('{p}') WHERE uid = ?", [m.group(1)])
         if not rows:
@@ -323,7 +324,7 @@ class Relic5:
         # a memory note (memory.py) or a git commit (gitlog.py): its own table, no session neighbours
         for side, (d, f), what in (("memory", ("_memory", "notes.parquet"), "memory note"), ("git", ("_git", "commits.parquet"), "git commit")):
             mp = os.path.join(self.parts.root, "index", d, f)
-            if parts or not os.path.exists(mp):
+            if parts or not rfs.exists(mp):
                 continue
             hit = self._rows(f"SELECT * EXCLUDE (machine) FROM read_parquet('{mp}') WHERE msgkey = ?", [msgkey])
             if hit:

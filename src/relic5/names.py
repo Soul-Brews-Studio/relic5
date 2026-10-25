@@ -9,6 +9,7 @@ these remain: the host's title wins (rule 1, from relic-scan's meta `title` when
 """
 import os, re
 from typing import TYPE_CHECKING
+from . import store as rfs
 
 if TYPE_CHECKING:
     import duckdb
@@ -57,7 +58,11 @@ def build(root: str, con: "duckdb.DuckDBPyConnection", parts: "Parts") -> int:
     con.execute("CREATE OR REPLACE TEMP TABLE _names(sid VARCHAR, name VARCHAR, first_ts VARCHAR)")
     con.executemany("INSERT INTO _names VALUES (?, ?, ?)", [(s, tt.get(s) or name_of(t), f) for s, t, f in rows])
     p = path(root)
-    os.makedirs(os.path.dirname(p), exist_ok=True)
-    con.execute(f"COPY _names TO '{p}.tmp' (FORMAT parquet)")
-    os.replace(p + ".tmp", p)
+    if rfs.is_s3(p):   # one PUT on S3 is whole already; DuckDB writes s3:// through httpfs
+        rfs.duck(con, p)
+        con.execute(f"COPY _names TO '{p}' (FORMAT parquet)")
+    else:
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        con.execute(f"COPY _names TO '{p}.tmp' (FORMAT parquet)")
+        os.replace(p + ".tmp", p)
     return len(rows)

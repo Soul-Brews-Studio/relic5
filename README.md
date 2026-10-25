@@ -141,3 +141,28 @@ Search is keyword: every word must occur, with ILIKE over the parquet in place. 
 ## License
 
 GNU AGPL v3 or later (`LICENSE`), the same as Relic Scan (relic4-scan). If you run a changed hub as a service for others, share the changes.
+
+
+## Storage: a disk or S3
+
+The hub's data can live in a folder or in an S3 bucket, with the same code (`src/relic5/store.py`). Parts stay
+parquet, the index stays LanceDB, DuckDB reads both from either place.
+
+```sh
+RELIC5_ROOT=s3://relic5-live/hub relic5 serve        # or: relic5 serve --root s3://relic5-live/hub
+RELIC5_ROOT=s3://relic5-live/hub relic5 index
+RELIC5_HUB=s3://relic5-live/hub bin/relic5-push       # a machine pushes into the bucket (aws CLI, push-only key)
+```
+
+- **Keys:** the hub reads `RELIC5_S3_KEY` (default `~/.config/relic5/s3-live`: line 1 the key, line 2 the secret),
+  endpoint `RELIC5_S3_ENDPOINT` (default black's RustFS, `http://black.follow-rankine.ts.net:9200`). Machines push with
+  a key that can put, list and get, never delete (`~/.config/relic5/s3-push`).
+- **Logs on S3:** S3 has no append, so each log line is one small object under `<log>.d/`; the hub rolls them into a
+  chunk every 10 minutes. Readers see the same lines either way.
+- **Indexing on S3:** nothing sees a push land, so an S3 hub checks for changed parts every 2 minutes and runs
+  `relic5 index` itself (`RELIC5_AUTO_INDEX=0` turns it off).
+- **Mirror and switch** (Disk page, or `GET/POST /api/storage`): a mirror copies the data to the other kind of home on
+  a clock, only what changed, never deleting there. Verify compares the data file by file (logs and the index are
+  counted as behind, not failed). After a clean verify, "Switch at next start" moves the hub there when it restarts,
+  and the old home becomes the mirror. The choice is kept in `storage.json` (`/config` in the container).
+- **Tests:** `RELIC5_TEST_S3=s3://relic5-live/test uv run pytest tests/test_s3.py` runs a whole hub on the bucket.

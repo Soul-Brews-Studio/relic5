@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, TypedDict
 
 from .parts import Parts, sql_list, this_month
 from .types_ import Json
+from . import store as rfs
 
 if TYPE_CHECKING:   # for annotations only: duckdb and lancedb are loaded where they are used
     import duckdb
@@ -60,7 +61,7 @@ def search_dir(root: str) -> str:
 
 def current(root: str) -> dict[str, str]:
     p = os.path.join(search_dir(root), "current.json")
-    return json.load(open(p)) if os.path.exists(p) else {}
+    return rfs.read_json(p) if rfs.exists(p) else {}
 
 
 def _select(parts: Parts, layer: str, months: Collection[str]) -> str | None:
@@ -68,7 +69,7 @@ def _select(parts: Parts, layer: str, months: Collection[str]) -> str | None:
     git, already folded by memory.py and gitlog.py)."""
     if layer in SIDE:
         p = os.path.join(parts.root, "index", *SIDE[layer])
-        if "history" not in months or not os.path.exists(p):
+        if "history" not in months or not rfs.exists(p):
             return None
         return f"""SELECT msgkey AS uid, msgkey, chunk, key, month, sid, ts, ts_th, role, engine, cat, '{layer}' AS layer,
                    machines, text, title FROM read_parquet({sql_list([p])}) ORDER BY ts, msgkey"""
@@ -96,8 +97,8 @@ def _sig(parts: Parts, layer: str, months: Collection[str]) -> Json:
     sig: Json = {}
     for m in months:
         p = parts.manifest_path(m)
-        if os.path.exists(p):
-            st = json.load(open(p))["streams"]
+        if rfs.exists(p):
+            st = rfs.read_json(p)["streams"]
             sig[m] = {s: st[s] for s in LAYERS[layer] if s in st}
     return sig
 
@@ -115,9 +116,10 @@ def build(root: str, con: "duckdb.DuckDBPyConnection", log: Callable[[str], obje
     months = parts.months()
     groups = {"history": [m for m in months if m != "undated" and m < cur_month] + ["undated"], "open": [m for m in months if m >= cur_month]}
     sd = search_dir(root)
-    os.makedirs(sd, exist_ok=True)
+    rfs.makedirs(sd)
+    rfs.duck(con, root)
     state_p = os.path.join(sd, "state.json")
-    state = json.load(open(state_p)) if os.path.exists(state_p) else {}
+    state = rfs.read_json(state_p) if rfs.exists(state_p) else {}
     vault = [p for _, _, p in parts.files("vault")]
     from . import gitlog, memory
     if lane == "fts":
@@ -128,7 +130,7 @@ def build(root: str, con: "duckdb.DuckDBPyConnection", log: Callable[[str], obje
     for layer in (LAYERS if lane == "fts" else ()):
         for part, ms in groups.items():
             name = f"{layer}_{part}"
-            sig = _sig(parts, layer, ms) | ({"vault": [os.path.getmtime(p) for p in vault]} if layer == "prose" and part == "history" else {})
+            sig = _sig(parts, layer, ms) | ({"vault": [rfs.getmtime(p) for p in vault]} if layer == "prose" and part == "history" else {})
             if layer in SIDE:
                 if part != "history" or not next(iter(side_sig[layer].values())):   # no notes / no logs pushed: no table
                     continue
@@ -140,7 +142,7 @@ def build(root: str, con: "duckdb.DuckDBPyConnection", log: Callable[[str], obje
     for model in (V.models(root) if lane == "vectors" else ()):
         layer = "vec_" + V.slug(model)
         sm = V.shard_months(root, model, con, parts)
-        sizes = {os.path.basename(f): os.path.getsize(f) for f in V.shards(root, model)}
+        sizes = {os.path.basename(f): rfs.getsize(f) for f in V.shards(root, model)}
         for part, ms in groups.items():
             name = f"{layer}_{part}"
             mine = set(ms) | ({"undated", None} if part == "history" else set())
@@ -154,7 +156,7 @@ def build(root: str, con: "duckdb.DuckDBPyConnection", log: Callable[[str], obje
     # UTC, always: the native venv and the container disagree on the local zone, and "newest" is by name
     gen = time.strftime("%Y%m%d-%H%M%S", time.gmtime()) + f"-{os.getpid()}"   # unique even for two runs in one second
     gdir = os.path.join(sd, gen)
-    db = lancedb.connect(gdir)
+    db = rfs.lancedb_connect(gdir)
     cur = dict(current(root))
     done = []
     for name, (layer, ms, sig) in plan.items():
@@ -183,23 +185,22 @@ def build(root: str, con: "duckdb.DuckDBPyConnection", log: Callable[[str], obje
         log(f"fts {name}: {tab.num_rows:,} rows ({time.time() - t:.1f}s)")
     # the other lane may have published meanwhile: merge on the newest files, keep only this lane's tables from us
     cur = {k: v for k, v in current(root).items() if (k.startswith("vec_")) != (lane == "vectors")} | {k: v for k, v in cur.items() if (k.startswith("vec_")) == (lane == "vectors")}
-    if os.path.exists(state_p):
-        state = {k: v for k, v in json.load(open(state_p)).items() if (k.startswith("vec_")) != (lane == "vectors")} | {k: v for k, v in state.items() if (k.startswith("vec_")) == (lane == "vectors")}
+    if rfs.exists(state_p):
+        state = {k: v for k, v in rfs.read_json(state_p).items() if (k.startswith("vec_")) != (lane == "vectors")} | {k: v for k, v in state.items() if (k.startswith("vec_")) == (lane == "vectors")}
     for p, obj in ((state_p, state), (os.path.join(sd, "current.json"), cur)):   # current.json last: the publish point
-        with open(p + ".tmp", "w") as f:
-            json.dump(obj, f, indent=1)
-        os.replace(p + ".tmp", p)
+        rfs.write_json(p, obj, indent=1)
     _prune(sd, cur)
     return done
 
 
 def _prune(sd: str, cur: dict[str, str]) -> None:
     live = {v.split("/")[0] for v in cur.values()}
-    gens = sorted((d for d in os.listdir(sd) if os.path.isdir(os.path.join(sd, d)) and d[:8].isdigit()),
-                  key=lambda d: os.path.getmtime(os.path.join(sd, d)))   # by age on disk, not by name
-    for g in gens[:-KEEP]:
+    names = [d for d in rfs.listdir(sd) if d[:8].isdigit() and rfs.isdir(os.path.join(sd, d))]
+    # by age on disk, not by name, where a folder has an age; on S3 a prefix has none, and the names are UTC times
+    gens = names if rfs.is_s3(sd) else sorted(names, key=lambda d: rfs.getmtime(os.path.join(sd, d)))
+    for g in sorted(gens)[:-KEEP] if rfs.is_s3(sd) else gens[:-KEEP]:
         if g not in live:
-            shutil.rmtree(os.path.join(sd, g))
+            rfs.rmtree(os.path.join(sd, g))
 
 
 class Index:
@@ -210,19 +211,19 @@ class Index:
     _mx_seen: float | None
 
     def __init__(self, root: str) -> None:
-        self.root = os.path.abspath(os.path.expanduser(root))
+        self.root = rfs.root_of(root)
         self.seen, self.tables = None, {}
 
     def _load(self) -> "dict[str, lancedb.table.Table]":
         p = os.path.join(search_dir(self.root), "current.json")
-        m = os.path.getmtime(p) if os.path.exists(p) else None
+        m = rfs.getmtime(p) if rfs.exists(p) else None
         if m != self.seen:
             import lancedb
             cur = current(self.root)
             tabs: dict[str, lancedb.table.Table] = {}
             for name, rel in cur.items():
                 gen, fname = rel.split("/")
-                tabs[name] = lancedb.connect(os.path.join(search_dir(self.root), gen)).open_table(fname[:-6])
+                tabs[name] = rfs.lancedb_connect(os.path.join(search_dir(self.root), gen)).open_table(fname[:-6])
             self.tables, self.seen = tabs, m
         return self.tables
 

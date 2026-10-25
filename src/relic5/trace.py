@@ -17,16 +17,19 @@ and can we support the trace and trace chained trace log?", "trace log trace cha
 The log stays on the hub (0600), never in git: the same rule as selfknow.py.
 """
 import json, os, secrets, threading, time
+from typing import Any
 from collections.abc import Callable, Iterable
 
 from .types_ import Json
+from . import store as rfs
 
 TOP = 10
 KEEP_ROWS = 200_000          # parsed rows held in memory (about 10 weeks at the hub's present rate)
 SEEN = 500                   # links remembered per saved search, to tell new hits from old ones
 _lock = threading.Lock()
 _cache: dict[str, tuple[int, list[Json]]] = {}   # log path -> (bytes read, rows)
-_roots: dict[str, dict[str, str]] = {}           # log path -> {record id: its chain's root}
+_roots: dict[str, dict[str, str]] = {}
+_follow: dict[str, dict[str, Any]] = {}            # log path -> store.follow's state           # log path -> {record id: its chain's root}
 
 
 def new_id() -> str:
@@ -40,22 +43,16 @@ def _log(root: str) -> str:
 def rows(root: str) -> list[Json]:
     """Every line of the query log, oldest first, read incrementally: only bytes appended since the last call are parsed."""
     p = _log(root)
-    try:
-        size = os.path.getsize(p)
-    except OSError:
-        return []
     with _lock:
+        st = _follow.setdefault(p, {})
+        lines, restarted = rfs.follow(p, st)
         done, have = _cache.get(p, (0, []))
-        if size < done:            # rotated or rewritten: start again
-            done, have = 0, []
+        if restarted:            # rotated or rewritten: start again
+            have = []
             _roots.pop(p, None)
-        if size > done:
-            with open(p, "rb") as f:
-                f.seek(done)
-                chunk = f.read(size - done)
-            end = chunk.rfind(b"\n") + 1   # a half-written last line waits for the next call
+        if lines:
             fresh: list[Json] = []
-            for line in chunk[:end].decode("utf-8", "replace").splitlines():
+            for line in lines:
                 try:
                     fresh.append(json.loads(line))
                 except ValueError:
@@ -65,7 +62,7 @@ def rows(root: str) -> list[Json]:
             for r in fresh:
                 if r.get("id"):
                     ids[str(r["id"])] = str(r.get("root") or r["id"])
-            done += end
+            done += len(lines)
         _cache[p] = (done, have)
         return have
 
@@ -174,27 +171,18 @@ def tag(root: str, target: str, add: list[str] | None = None, remove: list[str] 
     if not add_ and not rem_:
         raise UsageError("give tags to add or to remove")
     p = _tags_path(root)
-    os.makedirs(os.path.dirname(p), exist_ok=True)
     at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-    fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-    try:
-        for op, ts in (("add", add_), ("remove", rem_)):
-            if ts:
-                os.write(fd, (json.dumps({"at": at, "target": target, "kind": _kind(target), "op": op, "tags": ts, "by": by,
-                                          **({"note": note[:500]} if note and op == "add" else {})}, ensure_ascii=False) + "\n").encode())
-    finally:
-        os.close(fd)
+    for op, ts in (("add", add_), ("remove", rem_)):
+        if ts:
+            rfs.append_line(p, json.dumps({"at": at, "target": target, "kind": _kind(target), "op": op, "tags": ts, "by": by,
+                                           **({"note": note[:500]} if note and op == "add" else {})}, ensure_ascii=False))
     return {"target": target, "tags": tags_of(root).get(target, {}).get("tags", [])}
 
 
 def tags_of(root: str) -> dict[str, Json]:
     """target -> {tags, kind, first, last, notes}: the fold of tags.jsonl."""
     out: dict[str, Json] = {}
-    try:
-        lines = open(_tags_path(root), encoding="utf-8").read().splitlines()
-    except OSError:
-        return out
-    for line in lines:
+    for line in rfs.read_lines(_tags_path(root)):
         try:
             e = json.loads(line)
         except ValueError:
@@ -344,21 +332,14 @@ def _saved_path(root: str) -> str:
 
 def saved(root: str) -> list[Json]:
     try:
-        with open(_saved_path(root), encoding="utf-8") as f:
-            v = json.load(f)
+        v = rfs.read_json(_saved_path(root))
         return v if isinstance(v, list) else []
     except (OSError, ValueError):
         return []
 
 
 def _write_saved(root: str, items: list[Json]) -> None:
-    p = _saved_path(root)
-    os.makedirs(os.path.dirname(p), exist_ok=True)
-    tmp = p + ".tmp"
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        json.dump(items, f, ensure_ascii=False, indent=1)
-    os.replace(tmp, p)
+    rfs.write_json(_saved_path(root), items, 0o600, indent=1)
 
 
 SAVE_KEYS = {"query", "horizon", "since", "until", "repo", "session", "role", "tier", "with", "limit", "sort", "via", "chat",

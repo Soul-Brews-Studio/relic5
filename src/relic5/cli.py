@@ -31,6 +31,7 @@ import json, os, re, secrets, sys, time, urllib.error, urllib.parse, urllib.requ
 from typing import overload
 
 from .types_ import Json
+from . import store as rfs
 
 ROOT = os.environ.get("RELIC5_ROOT", "~/relic5")
 TOKENS = os.environ.get("RELIC5_TOKENS", "~/.config/relic5/tokens")
@@ -54,7 +55,7 @@ def _opt(args: list[str], name: str, default: str | None = None) -> str | None:
 
 def read_tokens(path: str = TOKENS) -> dict[str, str]:
     p = os.path.expanduser(path)
-    if not os.path.exists(p):
+    if not rfs.exists(p):
         return {}
     out: dict[str, str] = {}
     for line in open(p):
@@ -85,6 +86,16 @@ def serve(args: list[str]) -> None:
     import uvicorn
     from .api import make_app
     root = os.path.expanduser(_opt(args, "--root", ROOT))
+    from . import mirror
+    # storage.json is the hub's own choice of home and wins over --root (the container always passes --root /data):
+    # a switch set on the Storage page takes effect at this start, and the old home becomes the mirror (mirror.py)
+    sw = mirror.config().get("switch_to")
+    if sw:
+        print(f"relic5 serve: switching from {root} to {sw} (storage.json switch_to); {root} stays as the mirror", flush=True)
+        mirror.set_config(switched_from=root, switch_to=None, root=sw, mirror=root, verify=None)
+        root = sw
+    elif mirror.config().get("root"):
+        root = mirror.config()["root"]
     hosts = _opt(args, "--host", "127.0.0.1").split(",")
     port = int(_opt(args, "--port", str(PORT)))
     from .doors import Doors
@@ -171,13 +182,16 @@ def _main(argv: list[str] | None = None) -> None:
         import fcntl
         # one index at a time, both lanes (relic3 hub/README.md:76: run one indexer at a time). A kernel flock: it goes
         # away with the process, so a dead run never blocks the next one (relic4-scan LEARNED.md:53). Exit 75 = locked.
-        os.makedirs(fts.search_dir(root), exist_ok=True)
-        lockf = open(os.path.join(fts.search_dir(root), ".lock"), "w")
+        # the lock is a local file: beside the index on a disk, in the local cache for an S3 root (one indexer per
+        # hub machine; a bucket has no locks)
+        lock_dir = rfs.cache_dir(rfs.root_of(root), "index") if rfs.is_s3(root) else fts.search_dir(root)
+        os.makedirs(lock_dir, exist_ok=True)
+        lockf = open(os.path.join(lock_dir, ".lock"), "w")
         try:
             fcntl.flock(lockf, fcntl.LOCK_EX | (0 if wait else fcntl.LOCK_NB))
         except BlockingIOError:
             sys.exit(print("relic5 index: another index is running (exit 75; --wait to queue)", file=sys.stderr) or 75)
-        con = duckdb.connect()
+        con = rfs.duck(duckdb.connect(), rfs.root_of(root))
         if vectors:   # the slow lane, on its own: vector tables and watermarks only
             with job(root, "index-vectors") as j:
                 def echo(m: str) -> None:   # each line printed and kept as the job's progress
@@ -201,10 +215,10 @@ def _main(argv: list[str] | None = None) -> None:
             from . import names as NM
             j.progress(done=NM.build(root, con, Parts(root)), unit="sessions", message="names")
             from . import seals
-            _, v = seals.update(os.path.abspath(root))
+            _, v = seals.update(rfs.root_of(root))
             j.progress(done=v["checked"], unit="seals", message=f"seals: {v['checked']} checked, {len(v['problems'])} problems")
             from . import sealday
-            days = sealday.run(os.path.abspath(root))
+            days = sealday.run(rfs.root_of(root))
             j.progress(done=sum(d["state"] == "reconciled" for d in days), unit="months",
                        message="seal day: " + ", ".join(f"{d['month']} {d['state']}" for d in days if d["state"] != "open")[-300:])
             from . import vec as V
@@ -216,7 +230,7 @@ def _main(argv: list[str] | None = None) -> None:
     elif cmd == "tui":
         from .tui import main as tui
         tok = os.path.expanduser(TOKEN_FILE)
-        tui(URL, open(tok).read().strip() if "--token" in rest and os.path.exists(tok) else None)
+        tui(URL, open(tok).read().strip() if "--token" in rest and rfs.exists(tok) else None)
     elif cmd == "mcp":
         from .shim import serve as shim
         shim(URL)

@@ -15,11 +15,29 @@ set -u
 STAMP=                                          # set by bin/relic5-install on a copy outside this checkout
 # What this push sends, as a number: bumped only when the behaviour changes (streams, meta files, _sync.json, local
 # hub...). relic_status compares this, not the git hash, which differs after every commit (relic4-scan, 2026-10-23).
-PUSH_FORMAT=7
+PUSH_FORMAT=8
 # The ssh target. RELIC5_HUB_SSH wins; RELIC5_HUB may be the hub's HTTP url (relic-chain sets it for its SYNC check):
 # then the ssh target is nat@<its host>, not the url.
 HUB="${RELIC5_HUB_SSH:-${RELIC5_HUB:-nat@white.follow-rankine.ts.net}}"
 case "$HUB" in http://*|https://*) h=${HUB#*://}; h=${h%%/*}; HUB="nat@${h%%:*}";; esac
+# RELIC5_HUB=s3://bucket/prefix: the hub lives in a bucket (relic5 store.py). Every step below writes to a local
+# staging copy of this machine's folder exactly as it would to a hub over ssh, then only the files whose size or
+# mtime changed since the last push go up (aws s3 cp), and each job event is one object (S3 has no append).
+# The key is a push-only one (put, list, get; no delete): RELIC5_S3_KEY, default ~/.config/relic5/s3-push.
+S3HUB=""
+case "$HUB" in s3://*)
+  S3HUB="${HUB%/}"
+  command -v aws >/dev/null 2>&1 || { echo "an s3:// hub needs the aws CLI" >&2; exit 2; }
+  KEYF="${RELIC5_S3_KEY:-$HOME/.config/relic5/s3-push}"
+  [ -r "$KEYF" ] || { echo "no S3 key at $KEYF (line 1 the key, line 2 the secret)" >&2; exit 2; }
+  AWS_ACCESS_KEY_ID=$(sed -n 1p "$KEYF"); AWS_SECRET_ACCESS_KEY=$(sed -n 2p "$KEYF"); export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
+  AWS_DEFAULT_REGION="${RELIC5_S3_REGION:-black-ssd-rustfs}"; export AWS_DEFAULT_REGION
+  EP="${RELIC5_S3_ENDPOINT:-http://black.follow-rankine.ts.net:9200}"
+  STAGE="${RELIC5_STAGE:-$HOME/.cache/relic5/push-stage}"
+  mkdir -p "$STAGE" && STAGE=$(cd "$STAGE" && pwd -P)   # its real path: the symlink guard below compares real paths
+  HUB=local ;;
+esac
+s3() { aws --endpoint-url "$EP" s3 "$@"; }
 SRC="${RELIC5_SRC:-$HOME/.relic-extract}"
 DEST="${RELIC5_DEST:-relic5/parts}"            # relative to the hub user's home
 # The name: RELIC5_MACHINE, else ~/.config/relic5/machine (one line, written once per machine), else the short hostname.
@@ -44,10 +62,14 @@ SSH="ssh -o BatchMode=yes -o ConnectTimeout=10"
 if [ "$HUB" = local ]; then R=""; on_hub() { sh -c "$1"; }; else R="$HUB:"; on_hub() { $SSH "$HUB" "$1"; }; fi
 
 home=$(on_hub 'printf %s "$HOME"') || { echo "cannot reach $HUB" >&2; exit 1; }
+[ -n "$S3HUB" ] && { home="$STAGE"; DEST=parts; }
 target="$home/$DEST/$MACHINE"
+known() {   # does the hub hold this machine already?
+  if [ -n "$S3HUB" ]; then [ -n "$(s3 ls "$S3HUB/parts/$MACHINE/" 2>/dev/null | head -1)" ]; else on_hub "test -d '$target'"; fi
+}
 # A machine the hub has never seen is a new folder for good: only on purpose (RELIC5_NEW_MACHINE=1), never by a
 # hostname fallback.
-if [ -z "${RELIC5_NEW_MACHINE:-}" ] && ! on_hub "test -d '$target'"; then
+if [ -z "${RELIC5_NEW_MACHINE:-}" ] && ! known; then
   echo "refuse: the hub has no machine '$MACHINE' yet. Name this machine (RELIC5_MACHINE=<name>, or put the name in $NAMEFILE)," >&2
   echo "        or start a new one on purpose with RELIC5_NEW_MACHINE=1." >&2
   exit 2
@@ -69,6 +91,11 @@ jobev() {   # state, extra JSON fields (no leading comma)
   [ -n "$DRY" ] && return 0
   line=$(printf '{"job": "%s", "verb": "push", "state": "%s", "at": "%s", "pid": %s, "host": "%s", "message": "machine %s"%s}' \
     "$JOB" "$1" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$$" "$(hostname -s)" "$MACHINE" "${2:+, $2}")
+  if [ -n "$S3HUB" ]; then   # one object per event, named by time like store.append_line, so a listing reads in order
+    ns=$(python3 -c 'import time; print(f"{time.time_ns():020d}")' 2>/dev/null || printf '%010d000000000' "$(date +%s)")
+    printf '%s\n' "$line" | s3 cp - "$S3HUB/logs/jobs.jsonl.d/$ns-$(hostname -s)-$$.jsonl" --only-show-errors || true
+    return 0
+  fi
   on_hub "mkdir -p \"\$HOME/relic5/logs\" && printf '%s\\n' '$line' >> \"\$HOME/relic5/logs/jobs.jsonl\"" || true
 }
 jobev start
@@ -200,6 +227,53 @@ for L in "${RELIC5_CHAIN_LOG:-}" "$HOME/Library/Logs/relic-chain.log" "$HOME/.lo
   rm -f "${TMPDIR:-/tmp}/relic5-sync.$$"
   break
 done
+# An S3 hub: send what changed in the staging copy since the last push (size or mtime), file by file.
+if [ -n "$S3HUB" ] && [ -z "$DRY" ]; then
+  MAN="$STAGE/.uploaded-$MACHINE.tsv"; OK="${TMPDIR:-/tmp}/relic5-up.$$"; : > "$OK"
+  python3 - "$target" "$MAN" > "${TMPDIR:-/tmp}/relic5-changed.$$" <<'PY'
+import os, sys
+base, man = sys.argv[1], sys.argv[2]
+done = {}
+try:
+    for line in open(man):
+        rel, size, mtime = line.rstrip("\n").split("\t")
+        done[rel] = (size, mtime)
+except OSError:
+    pass
+for d, _, fs in os.walk(base):
+    for f in fs:
+        if f.startswith("."):
+            continue
+        p = os.path.join(d, f); st = os.stat(p); rel = os.path.relpath(p, base)
+        if done.get(rel) != (str(st.st_size), str(int(st.st_mtime))):
+            print(f"{rel}\t{st.st_size}\t{int(st.st_mtime)}")
+PY
+  up=0
+  while IFS="$(printf '\t')" read -r rel size mtime; do
+    [ -n "$rel" ] || continue
+    if s3 cp "$target/$rel" "$S3HUB/parts/$MACHINE/$rel" --only-show-errors; then
+      printf '%s\t%s\t%s\n' "$rel" "$size" "$mtime" >> "$OK"; up=$((up + 1)); sent_total=$((sent_total + size))
+    else rc=1; fi
+  done < "${TMPDIR:-/tmp}/relic5-changed.$$"
+  python3 - "$MAN" "$OK" <<'PY'
+import sys
+man, ok = sys.argv[1], sys.argv[2]
+rows = {}
+for p in (man, ok):
+    try:
+        for line in open(p):
+            r = line.rstrip("\n").split("\t")
+            if len(r) == 3:
+                rows[r[0]] = r
+    except OSError:
+        pass
+open(man + ".tmp", "w").write("".join("\t".join(r) + "\n" for r in sorted(rows.values())))
+import os; os.replace(man + ".tmp", man)
+PY
+  rm -f "$OK" "${TMPDIR:-/tmp}/relic5-changed.$$"
+  printf 's3 %s: %s files changed, sent\n' "$S3HUB/parts/$MACHINE" "$up"
+  HUB="$S3HUB"; target="parts/$MACHINE"
+fi
 if [ $rc -eq 0 ]; then jobev done "\"rc\": 0, \"done\": $sent_total, \"unit\": \"bytes\""; else jobev error "\"rc\": $rc"; fi
 printf '%s relic5 push %s -> %s:%s rc=%s %ss%s\n' "$(date '+%F %T')" "$MACHINE" "$HUB" "$target" "$rc" \
   "$(( $(date +%s) - t0 ))" "${DRY:+ (dry run)}"

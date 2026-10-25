@@ -22,6 +22,7 @@ from typing import Literal, TypedDict
 from .parts import BKK, MONTH_STREAMS, Parts, this_month
 from .seals import machine_seals
 from .types_ import Json
+from . import store as rfs
 
 GRACE_DAYS = 3
 
@@ -82,7 +83,7 @@ def receipts(parts: Parts, machine: str) -> dict[str, Json]:
     """{month: {sealed_keys, sealed_rows, parts: {stream: {bytes, sha256}}}} from the machine's last push."""
     p = os.path.join(parts.dir, machine, "meta", "receipts.json")
     try:
-        months: dict[str, Json] = json.load(open(p)).get("months", {})
+        months: dict[str, Json] = rfs.read_json(p).get("months", {})
         return months
     except (OSError, ValueError):
         return {}
@@ -90,7 +91,7 @@ def receipts(parts: Parts, machine: str) -> dict[str, Json]:
 
 def _sha(path: str) -> str:
     h = hashlib.sha256()
-    with open(path, "rb") as f:
+    with rfs.open_input(path) as f:
         for b in iter(lambda: f.read(1 << 20), b""):
             h.update(b)
     return h.hexdigest()
@@ -100,7 +101,7 @@ def _scan_months(parts: Parts, machine: str) -> set[str]:
     """Every month the machine's relic-scan knows (sealed or not)."""
     p = os.path.join(parts.dir, machine, "meta", "months.json")
     try:
-        return {m["month"] for m in json.load(open(p)).get("months", [])}
+        return {m["month"] for m in rfs.read_json(p).get("months", [])}
     except (OSError, ValueError):
         return set()
 
@@ -136,7 +137,7 @@ def check(root: str, month: str) -> tuple[MonthState, dict[str, MachineSeal]]:
             if not fs:
                 st["problems"].append(f"{m} {month} {s}: the machine has it, the hub does not")
                 continue
-            size = os.path.getsize(fs[0])
+            size = rfs.getsize(fs[0])
             if size != r["bytes"] or _sha(fs[0]) != r["sha256"]:
                 st["problems"].append(f"{m} {month} {s}: the hub's copy differs from the machine's ({size:,} vs {r['bytes']:,} bytes)")
                 continue
@@ -149,9 +150,9 @@ def check(root: str, month: str) -> tuple[MonthState, dict[str, MachineSeal]]:
 
 def _folded(root: str, month: str) -> dict[str, int]:
     p = Parts(root).manifest_path(month)
-    if not os.path.exists(p):
+    if not rfs.exists(p):
         return {}
-    streams: dict[str, Json] = json.load(open(p)).get("streams", {})
+    streams: dict[str, Json] = rfs.read_json(p).get("streams", {})
     return {s: int(v["rows"]) for s, v in streams.items() if s in MONTH_STREAMS}
 
 
@@ -162,18 +163,14 @@ def _fingerprint(machines: dict[str, MachineSeal], folded: dict[str, int]) -> st
 
 def load(root: str, month: str) -> Day | None:
     p = os.path.join(_days_dir(root), f"{month}.json")
-    if not os.path.exists(p):
+    if not rfs.exists(p):
         return None
-    d: Day = json.load(open(p))
+    d: Day = rfs.read_json(p)
     return d
 
 
 def _save(root: str, day: Day) -> None:
-    os.makedirs(_days_dir(root), exist_ok=True)
-    p = os.path.join(_days_dir(root), f"{day['month']}.json")
-    with open(p + ".tmp", "w") as f:
-        json.dump(day, f, indent=1)
-    os.replace(p + ".tmp", p)
+    rfs.write_json(os.path.join(_days_dir(root), f"{day['month']}.json"), day, indent=1)
 
 
 def _log(root: str, msg: str) -> None:
@@ -219,21 +216,17 @@ def run(root: str) -> list[MonthState]:
     parts = Parts(root)
     months = sorted({mo for m in live_machines(parts) for mo in _scan_months(parts, m)} | set(parts.months()))
     out = [reconcile(root, mo) for mo in months if mo != "undated"]
-    os.makedirs(os.path.dirname(_days_dir(root)), exist_ok=True)
-    p = os.path.join(os.path.dirname(_days_dir(root)), "months.json")
-    with open(p + ".tmp", "w") as f:
-        json.dump({"at": _now(), "months": out}, f, indent=1)
-    os.replace(p + ".tmp", p)
+    rfs.write_json(os.path.join(os.path.dirname(_days_dir(root)), "months.json"), {"at": _now(), "months": out}, indent=1)
     return out
 
 
 def summary(root: str) -> list[MonthState]:
     p = os.path.join(root, "index", "_seals", "months.json")
-    if not os.path.exists(p):
+    if not rfs.exists(p):
         return []
-    months: list[MonthState] = json.load(open(p)).get("months", [])
+    months: list[MonthState] = rfs.read_json(p).get("months", [])
     for m in months:   # written by bin/relic5-month-recap after the month reconciled (it may come later than the record)
-        m["recap"] = os.path.isfile(recap_path(root, m["month"]))
+        m["recap"] = rfs.isfile(recap_path(root, m["month"]))
     return months
 
 

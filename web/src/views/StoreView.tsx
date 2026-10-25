@@ -2,6 +2,7 @@ import { ago, bytes, num, sum } from "../format";
 import { DataTable } from "../components/DataTable";
 import { PageHead, SectionHead } from "../components/ui";
 import { Resources } from "../components/Resources";
+import { StoragePanel } from "../components/StoragePanel";
 import type { Status } from "../types";
 
 type Line = { what: string; size: number | null; detail: string };
@@ -18,6 +19,7 @@ export function StoreView({ s }: { s: Status }) {
   return (
     <>
       <PageHead title="Store" sub="What the hub holds on white's disk, what it costs the machine, and how far each index has caught up." />
+      <StoragePanel />
       <Resources s={s} />
       <DataTable rows={lines} rowKey={l => l.what} cols={[
         { key: "w", head: "what", cell: l => <b>{l.what}</b> },
