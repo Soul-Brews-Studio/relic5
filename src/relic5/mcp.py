@@ -100,7 +100,7 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {"month": STR}, "additionalProperties": False}},
     {"name": "relic_activity", "description": "How much happened when, ready to chart: message counts (each message once) "
      "by a time bucket and optionally split by one dimension. by: day | week | month | hour | hour_of_day | weekday (1 = Mon) | weekday_hour ('1-09' = Mon 09h, a heatmap in one call); "
-     "group: none | role (user = the human typed it) | project | machine | engine | tool; stream: text (messages, default) | "
+     "group: none | role (user = the human typed it) | project | machine | engine | tool | file (edited files; more in relic_files); stream: text (messages, default) | "
      "tools (tool calls; group tool = which tool) | thinking | git (commits; role commit-claude = Claude co-wrote it); filters since/until ('YYYY-MM-DD', "
      "Bangkok time), role, project (substring), machine; top: how many groups before 'other' (default 12). "
      "Use it for activity charts, heatmaps, busiest hours, which projects took the time.",

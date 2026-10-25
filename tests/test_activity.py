@@ -48,3 +48,14 @@ def test_files_changed_most(root):
     assert [(x["file"], x["calls"], x["sessions"], x["days"]) for x in f["files"]] == [("/x/a.py", 2, 2, 2), ("/x/b.md", 1, 1, 1)]
     assert f["files"][0]["tools"] == ["Edit", "Write"] and f["total_calls"] == 3
     assert [x["file"] for x in files(Relic5(root, duckdb.connect()), contains=".md")["files"]] == ["/x/b.md"]
+
+
+def test_group_by_file(root):
+    import duckdb
+    from conftest import COLS, row, write_parquet
+    from relic5.query import Relic5
+    write_parquet(f"{root}/parts/m5/tools/2026-07.parquet", COLS, [
+        dict(row('{"file_path": "/x/a.py"}', "2026-07-01T10:11:00.000Z", sid="r1-x", role=""), name="Edit"),
+        dict(row('{"command": "ls"}', "2026-07-01T10:12:00.000Z", sid="r1-x", role=""), name="Bash")])
+    a = activity(Relic5(root, duckdb.connect()), by="month", group="file", stream="tools")
+    assert [(s["name"], s["total"]) for s in a["series"]] == [("/x/a.py", 1)]
