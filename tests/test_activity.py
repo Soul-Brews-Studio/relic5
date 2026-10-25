@@ -59,3 +59,12 @@ def test_group_by_file(root):
         dict(row('{"command": "ls"}', "2026-07-01T10:12:00.000Z", sid="r1-x", role=""), name="Bash")])
     a = activity(Relic5(root, duckdb.connect()), by="month", group="file", stream="tools")
     assert [(s["name"], s["total"]) for s in a["series"]] == [("/x/a.py", 1)]
+
+
+def test_usage_by_month_and_engine(relic):
+    from relic5.activity import usage
+    u = usage(relic)
+    assert u["rows"] and {"period", "engine", "sessions", "subagents", "tool_calls"} <= u["rows"][0].keys()
+    assert u["totals"]["sessions"] == 2 and u["totals"]["subagents"] == 1
+    with pytest.raises(ValueError):
+        usage(relic, group="model")
