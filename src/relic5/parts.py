@@ -48,7 +48,7 @@ def sql_list(files: list[str]) -> str:
 class Parts:
     """The parts on a disk or in an S3 bucket (store.py). One listing of parts/ answers machines(), files() and every
     size and mtime, kept a few seconds (on S3 each listing is a round trip; a disk listing is cheap but the same)."""
-    TTL = {"s3": 15.0, "disk": 0.0}
+    TTL = {"s3": 15.0, "disk": 1.0}
 
     def __init__(self, root: str) -> None:
         self.root = rfs.root_of(root)
@@ -60,7 +60,31 @@ class Parts:
         """{path: (bytes, mtime)} of every file under parts/ (one listing, cached TTL seconds)."""
         ttl = self.TTL["s3" if rfs.is_s3(self.root) else "disk"]
         if fresh or time.time() - self._snap[0] > ttl:
-            self._snap = (time.time(), {p: (n, m) for p, n, m in rfs.files(self.dir)} if rfs.isdir(self.dir) else {})
+            # only the folders parts are read from: parts/<machine>/<stream>/ and meta/. Never the whole tree: memory/
+            # and git/ under each machine hold thousands of notes and logs, and walking them on every call made
+            # /api/status take over a minute on white (2026-10-25)
+            snap: dict[str, tuple[int, float]] = {}
+            for m in rfs.listdir(self.dir) if rfs.isdir(self.dir) else []:
+                if not MACHINE.match(m):
+                    continue
+                for s in STREAMS + ("meta",):
+                    d = os.path.join(self.dir, m, s)
+                    if rfs.is_s3(d):
+                        snap.update({p: (n, t) for p, n, t in rfs.files(d) if p.count("/") == d.count("/") + 1})
+                        continue
+                    try:
+                        names = os.listdir(d)
+                    except OSError:
+                        continue
+                    for f in names:
+                        q = os.path.join(d, f)
+                        try:
+                            st = os.stat(q)
+                        except OSError:
+                            continue
+                        if not os.path.isdir(q):
+                            snap[q] = (st.st_size, st.st_mtime)
+            self._snap = (time.time(), snap)
         return self._snap[1]
 
     def stat(self, p: str) -> tuple[int, float]:
