@@ -82,3 +82,18 @@ def test_an_oauth_token_opens_only_mcp_on_the_hub_itself(hub, monkeypatch):
     tok = oauth.token({"grant_type": "authorization_code", "code": code, "client_id": reg["client_id"], "redirect_uri": CB, "code_verifier": v})
     c = TestClient(hub.app, base_url="http://testserver")
     assert c.get("/api/status", headers={"Authorization": f"Bearer {tok['access_token']}"}).status_code == 401
+
+
+def test_two_public_names_each_describe_themselves(root, tmp_path, monkeypatch):
+    monkeypatch.setenv("RELIC5_OAUTH_JSON", str(tmp_path / "oauth.json"))
+    monkeypatch.setenv("RELIC5_PUBLIC_URL", "https://mcp.new.example, https://old.example.com")
+    import importlib
+    from relic5 import api
+    importlib.reload(api)
+    from relic5.doors import Doors
+    app = api.make_app(root, {"m5": "secret-m5"}, Doors({"m5": "secret-m5"}, enabled=False))
+    for base in ("https://mcp.new.example", "https://old.example.com"):
+        c = TestClient(app, base_url=base)
+        assert c.get("/.well-known/oauth-protected-resource").json()["resource"] == base + "/mcp"   # its own name
+        assert c.get("/api/status", headers={"Authorization": "Bearer secret-m5"}).status_code == 404   # /mcp only
+        assert c.get("/favicon.ico").status_code == 200

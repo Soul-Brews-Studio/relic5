@@ -373,8 +373,11 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
 
     # the public address a tunnel gives the hub (RELIC5_PUBLIC_URL, e.g. https://relic5.example.com): on that host only
     # /mcp and the OAuth endpoints answer; the page and the rest of the API stay on the tailnet
-    PUBLIC = os.environ.get("RELIC5_PUBLIC_URL", "").rstrip("/")
-    PUBLIC_HOST = (urlparse(PUBLIC).hostname or "").lower() if PUBLIC else ""
+    # the tunnel's https address(es), comma-separated, the first the one to show; more than one while a connector
+    # moves from one name to another (2026-10-25: relic5-mcp.buildwithoracle.com -> mcp.oraclenet.org)
+    PUBLICS = {(urlparse(u).hostname or "").lower(): u.strip().rstrip("/")
+               for u in os.environ.get("RELIC5_PUBLIC_URL", "").split(",") if u.strip()}
+    PUBLIC = next(iter(PUBLICS.values()), "")
     OPEN = ("/.well-known/oauth-protected-resource", "/.well-known/oauth-authorization-server", "/oauth/")
     # the hub's icon, open to anyone and on the public host too: claude.ai shows it beside the connector
     ICONS = {"/favicon.ico": ("favicon.ico", "image/x-icon"), "/favicon.svg": ("favicon.svg", "image/svg+xml"),
@@ -382,7 +385,7 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
              "/icon-512.png": ("icon-512.png", "image/png")}
 
     def base_of(request: Request) -> str:
-        return PUBLIC or f"{request.url.scheme}://{request.url.netloc}"
+        return PUBLICS.get((request.url.hostname or "").lower()) or PUBLIC or f"{request.url.scheme}://{request.url.netloc}"
 
     def where(request: Request) -> tuple[str, str]:
         """The caller's address: through the tunnel, cloudflared connects from loopback and names the real one."""
@@ -409,7 +412,7 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
             name, mime = ICONS[path]
             return Response(open(os.path.join(os.path.dirname(__file__), "icons", name), "rb").read(), media_type=mime,
                             headers={"cache-control": "public, max-age=86400"})
-        if PUBLIC_HOST and (request.url.hostname or "").lower() == PUBLIC_HOST and not (path == "/mcp" or path.startswith(OPEN)):
+        if (request.url.hostname or "").lower() in PUBLICS and not (path == "/mcp" or path.startswith(OPEN)):
             return JSONResponse({"error": "not found"}, status_code=404)   # the tunnel shows only the MCP door
         if path == "/login" or path.startswith(OPEN):
             return await call_next(request)   # they check the token themselves, or need none

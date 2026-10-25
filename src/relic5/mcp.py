@@ -18,7 +18,7 @@ from .status import status
 from .types_ import Json
 
 SERVER_INFO: Json = {"name": "relic5", "title": "relic5", "version": __version__}
-_PUB = os.environ.get("RELIC5_PUBLIC_URL", "").rstrip("/")
+_PUB = os.environ.get("RELIC5_PUBLIC_URL", "").split(",")[0].strip().rstrip("/")
 if _PUB:   # the icon a client such as claude.ai shows beside the connector (MCP Implementation.icons)
     SERVER_INFO |= {"websiteUrl": "https://relic5.buildwithoracle.com", "icons": [
         {"src": f"{_PUB}/icon-512.png", "mimeType": "image/png", "sizes": ["512x512"]},

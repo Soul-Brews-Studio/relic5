@@ -1,4 +1,4 @@
-// relic5's public page as a static-assets Worker on relic5.buildwithoracle.com, the same shape as relic-scan's
+// relic5's public page as a static-assets Worker on oraclenet.org and relic5.buildwithoracle.com, the same shape as relic-scan's
 // (relic4-scan site/wrangler.jsonc). Deploy from this folder, on m5 (its wrangler login): npx -y wrangler@4 deploy
 // custom_domain: Cloudflare makes the DNS record and the certificate for the name in the buildwithoracle.com zone.
 {
@@ -6,5 +6,8 @@
   "compatibility_date": "2026-10-01",
   "account_id": "a5eabdc2b11aae9bd5af46bd6a88179e",
   "assets": { "directory": "./public", "html_handling": "auto-trailing-slash" },
-  "routes": [{ "pattern": "relic5.buildwithoracle.com", "custom_domain": true }]
+  // oraclenet.org is relic5's own domain (2026-10-25): claude.ai shows a connector's icon from its domain's root,
+  // so the root serves this page and its Ψ favicon, and mcp.oraclenet.org is the hub's MCP (tunnel white4)
+  "routes": [{ "pattern": "relic5.buildwithoracle.com", "custom_domain": true },
+             { "pattern": "oraclenet.org", "custom_domain": true }]
 }
