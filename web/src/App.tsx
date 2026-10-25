@@ -23,6 +23,7 @@ const JobsView = lazy(() => import("./views/JobsView").then(m => ({ default: m.J
 const QueriesView = lazy(() => import("./views/QueriesView").then(m => ({ default: m.QueriesView })));
 const CompareView = lazy(() => import("./views/CompareView").then(m => ({ default: m.CompareView })));
 const IncidentsView = lazy(() => import("./views/IncidentsView").then(m => ({ default: m.IncidentsView })));
+const PerfView = lazy(() => import("./views/PerfView").then(m => ({ default: m.PerfView })));
 const SettingsView = lazy(() => import("./views/SettingsView").then(m => ({ default: m.SettingsView })));
 const StoreView = lazy(() => import("./views/StoreView").then(m => ({ default: m.StoreView })));
 
@@ -144,6 +145,7 @@ export function App() {
           {st.view === "compare" && <CompareView on />}
           {st.view === "store" && (s ? <StoreView s={s} /> : <p className="text-muted">Reading the hub…</p>)}
           {st.view === "incidents" && <IncidentsView s={s ?? null} error={status.error} />}
+          {st.view === "perf" && <PerfView on />}
           {st.view === "settings" && <SettingsView theme={theme} setTheme={setTheme} layout={layout} setLayout={setLayout} />}
           </Suspense>
         </main>

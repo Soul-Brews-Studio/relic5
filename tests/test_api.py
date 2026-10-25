@@ -1,4 +1,4 @@
-import json
+import json, os
 
 import pytest
 from fastapi.testclient import TestClient
@@ -169,3 +169,16 @@ def test_big_answers_are_gzipped(client):
     assert r.status_code == 200 and r.headers.get("content-encoding") == "gzip"     # the page's JS: gzipped
     small = client.get("/health", headers={**H, "Accept-Encoding": "gzip"})
     assert small.headers.get("content-encoding") is None                            # under 1 KB: as it is
+
+
+def test_every_request_is_timed_and_written(client, root):
+    from relic5 import perf
+    perf.RING.clear(); perf._PENDING.clear()
+    client.get("/api/status", headers=H)
+    client.get("/api/search", params={"q": "hub", "t": "secret"}, headers=H)
+    assert client.get("/api/status").status_code == 401                       # refused before timing: not logged
+    p = client.get("/api/perf", headers=H).json()
+    routes = {r["route"]: r for r in p["routes"]}
+    assert routes["/api/status"]["count"] == 1 and routes["/api/search"]["p50"] is not None
+    assert "secret" not in json.dumps(p) and p["recent"][0]["route"] == "/api/search" and p["rss_mb"] > 0
+    assert perf.flush(root) == 2 and len(open(os.path.join(root, "logs", "requests", sorted(os.listdir(os.path.join(root, "logs", "requests")))[-1])).read().splitlines()) == 2
