@@ -66,6 +66,10 @@ function Overall({ on, pick }: { on: boolean; pick: (d: string) => void }) {
           })}
         </svg>
       </div>
+      <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
+        <MonthlyMessages on={on} />
+        <WhenTyping on={on} />
+      </div>
       {month && one.data && (
         <div className="mt-4 rounded-2xl border border-line bg-panel p-5">
           <div className="mb-3 flex items-baseline gap-3"><b className="font-mono text-lg text-text">{month}</b>
@@ -85,6 +89,71 @@ function Overall({ on, pick }: { on: boolean; pick: (d: string) => void }) {
             <div className="mt-3 max-w-[80ch] text-sm"><Markdown text={one.data.recap} /></div></details>}
         </div>)}
     </section>
+  );
+}
+
+interface Act { buckets: string[]; series: { name: string; total: number; counts: Record<string, number> }[]; total: number }
+
+/** Messages per month, typed by Nat (role user) against written by an agent, as two bars side by side. */
+function MonthlyMessages({ on }: { on: boolean }) {
+  const a = usePoll<Act>("/api/activity?by=month&group=role", 0, on);
+  const d = a.data;
+  if (!d?.buckets.length) return null;
+  const get = (n: string, b: string) => d.series.find(s => s.name === n)?.counts[b] ?? 0;
+  const max = Math.max(...d.buckets.map(b => Math.max(get("user", b), get("assistant", b))), 1);
+  const H = 140, W = 14, G = 14;
+  return (
+    <div className="min-w-0">
+      <div className="mb-2 flex flex-wrap items-center gap-x-4 text-xs text-muted">
+        <b className="text-soft">Messages per month</b>
+        <span className="inline-flex items-center gap-1.5"><span className="size-2.5 rounded-sm bg-[var(--user)]" />typed by Nat</span>
+        <span className="inline-flex items-center gap-1.5"><span className="size-2.5 rounded-sm bg-[var(--assistant)]" />written by an agent</span>
+      </div>
+      <div className="overflow-x-auto">
+        <svg width={d.buckets.length * (2 * W + G)} height={H + 22} role="img" aria-label="Messages per month by who wrote them">
+          {d.buckets.map((b, i) => {
+            const x = i * (2 * W + G), u = get("user", b), as = get("assistant", b);
+            return (
+              <g key={b}>
+                <title>{`${b}: ${num(u)} typed by Nat, ${num(as)} by agents`}</title>
+                <rect x={x} y={H - (u / max) * H} width={W - 2} height={Math.max((u / max) * H, 1)} rx={2} fill="var(--user)" />
+                <rect x={x + W} y={H - (as / max) * H} width={W - 2} height={Math.max((as / max) * H, 1)} rx={2} fill="var(--assistant)" />
+                <text x={x + W} y={H + 14} textAnchor="middle" fontSize={9} className="fill-[var(--muted)] font-mono">{b.slice(2)}</text>
+              </g>);
+          })}
+        </svg>
+      </div>
+    </div>
+  );
+}
+
+/** When Nat types: weekday (rows) by hour of day (columns), one cell per pair, darker = more. */
+function WhenTyping({ on }: { on: boolean }) {
+  const a = usePoll<Act>("/api/activity?by=hour_of_day&role=user", 0, on);
+  const w = usePoll<Act>("/api/activity?by=weekday&role=user", 0, on);
+  const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  const hours = a.data?.series[0]?.counts ?? {};
+  const wk = w.data?.series[0]?.counts ?? {};
+  if (!a.data?.total) return null;
+  const hm = Math.max(...Object.values(hours), 1), wm = Math.max(...Object.values(wk), 1);
+  return (
+    <div className="min-w-0">
+      <div className="mb-2 text-xs text-muted"><b className="text-soft">When Nat types</b> · by hour of day (Bangkok) and by weekday, all time</div>
+      <div className="flex gap-[3px]">
+        {Array.from({ length: 24 }, (_, h) => String(h).padStart(2, "0")).map(h => (
+          <div key={h} className="flex flex-col items-center gap-1" title={`${h}:00 · ${num(hours[h] ?? 0)} typed`}>
+            <div className="h-16 w-3.5 rounded-sm" style={{ background: "var(--user)", opacity: 0.08 + 0.92 * ((hours[h] ?? 0) / hm) }} />
+            <span className="font-mono text-[9px] text-faint">{h}</span>
+          </div>))}
+      </div>
+      <div className="mt-3 flex gap-1.5">
+        {days.map((dn, i) => (
+          <div key={dn} className="flex flex-col items-center gap-1" title={`${dn} · ${num(wk[String(i + 1)] ?? 0)} typed`}>
+            <div className="h-6 w-9 rounded-sm" style={{ background: "var(--user)", opacity: 0.08 + 0.92 * ((wk[String(i + 1)] ?? 0) / wm) }} />
+            <span className="text-[10px] text-faint">{dn}</span>
+          </div>))}
+      </div>
+    </div>
   );
 }
 
