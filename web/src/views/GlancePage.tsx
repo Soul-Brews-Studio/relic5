@@ -148,26 +148,27 @@ function Searched({ q, search }: { q: Queries | null; search: (q: string) => voi
   // what a person would type: no eval fragments, no message links or bare message ids (a human never typed those)
   const real = (r: { query: string; client?: string | null; tool?: string }) => r.query && r.query.length < 70 && !(r.client ?? "").startsWith("eval")
     && !r.query.startsWith("relic5://") && !/^[0-9a-f]{16,}$/i.test(r.query.trim());
-  const top = q.top.filter(t => real(t)).slice(0, 24);
+  const top = q.top.filter(t => real(t)).slice(0, 40);
   const recent = [...new Map([...(q.searches ?? []).map(r => ({ ...r, tool: "relic_search" })), ...q.last].filter(r => r.tool === "relic_search" && real(r)).map(r => [r.query.trim(), r] as const)).values()].slice(0, 8);
   if (!top.length && !recent.length) return null;
   const max = Math.max(...top.map(t => t.n), 1);
-  const size = (n: number) => (n / max > 0.66 ? "text-lg font-bold" : n / max > 0.33 ? "text-base font-semibold" : "text-sm");
+  // one smooth scale (log of times asked), 14 to 34 px, so the cloud fills the card instead of three small sizes
+  const px = (n: number) => 14 + 20 * (Math.log1p(n - 1) / Math.log1p(Math.max(1, max - 1)));
   const kinds = top.reduce((m, t) => m.add(kindOf(t.query)), new Set<Kind>());
   return (
     <section className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
-      <div className="rounded-2xl border border-line bg-panel px-6 py-5">
+      <div className="flex flex-col rounded-2xl border border-line bg-panel px-6 py-5">
         <div className="mb-4 flex flex-wrap items-baseline gap-x-4 gap-y-1">
           <h2 className="m-0 text-base font-bold text-text">Searched most</h2>
           {KINDS.filter(k => kinds.has(k.k)).map(k => <span key={k.k} className="inline-flex items-center gap-1.5 text-xs text-muted"><i className="inline-block size-2 rounded-full" style={{ background: k.c }} />{k.label}</span>)}
         </div>
-        <div className="flex flex-wrap items-baseline gap-x-4 gap-y-2">
+        <div className="flex flex-1 flex-wrap content-center items-baseline gap-x-5 gap-y-2.5">
           {top.map(t => {
             const k = KIND[kindOf(t.query)], w = t.n / max;
             return (
               <button key={t.query} type="button" onClick={() => search(t.query)} title={`${k.label}: asked ${t.n} times`}
-                style={{ color: `color-mix(in srgb, ${k.c} ${Math.round(55 + 45 * w)}%, var(--muted))` }}
-                className={cx("rounded-md px-1 py-0.5 text-left leading-snug transition-[background-color,filter] hover:bg-raised hover:brightness-125", size(t.n))}>
+                style={{ color: `color-mix(in srgb, ${k.c} ${Math.round(55 + 45 * w)}%, var(--muted))`, fontSize: `${px(t.n)}px`, fontWeight: w > 0.5 ? 700 : w > 0.2 ? 600 : 400 }}
+                className="rounded-md px-1 py-0.5 text-left leading-tight tracking-[-0.01em] transition-[background-color,filter] hover:bg-raised hover:brightness-125">
                 {t.query}<sup className="ml-0.5 font-mono text-xs font-normal text-faint">{t.n}</sup>
               </button>
             );
