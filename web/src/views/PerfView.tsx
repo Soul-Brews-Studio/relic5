@@ -9,7 +9,8 @@ import { bytes, num, recent } from "../format";
 interface Req { at: string; method: string; path: string; route: string; status: number; ms: number; bytes: number | null; door: string | null; q: string }
 interface Route { route: string; count: number; p50: number | null; p95: number | null; max: number; errors: number; slow: number; bytes: number }
 interface Sample { at: string; rss_mb: number; load: number; per_min: number }
-interface Perf { minutes: number; requests: number; routes: Route[]; slowest: Req[]; recent: Req[]; samples: Sample[]; rss_mb: number; load: number[]; cpus: number }
+interface Query { name: string; kind: string; count: number; p50: number | null; p95: number | null; max: number; total: number; rows: number; routes: string[]; sql: string }
+interface Perf { minutes: number; requests: number; routes: Route[]; queries?: Query[]; slowest: Req[]; recent: Req[]; samples: Sample[]; rss_mb: number; load: number[]; cpus: number }
 
 const ms = (v: number | null | undefined) => (v == null ? "—" : v >= 1000 ? `${(v / 1000).toFixed(v >= 10000 ? 0 : 1)} s` : `${Math.round(v)} ms`);
 const tone = (v: number | null | undefined) => (v == null ? "text-muted" : v >= 3000 ? "text-danger" : v >= 800 ? "text-warning" : "text-text");
@@ -73,6 +74,16 @@ export function PerfView({ on }: { on: boolean }) {
           { key: "mx", head: "max", num: true, w: "w-20", cell: r => <span className={tone(r.max)}>{ms(r.max)}</span> },
           { key: "s", head: "slow", num: true, w: "w-16", cell: r => (r.slow ? <span className="text-warning">{r.slow}</span> : "") },
           { key: "e", head: "5xx", num: true, w: "w-16", cell: r => (r.errors ? <span className="text-danger">{r.errors}</span> : "") },
+        ]} />
+        <SectionHead sub="every SQL, BM25 (LanceDB) and vector query the hub ran, named by the code that ran it, the most total time first; the SQL shown is the slowest run">Queries</SectionHead>
+        <DataTable rows={d.queries ?? []} rowKey={q => q.name} empty="No queries in the window." cols={[
+          { key: "n", head: "query", lead: true, cell: q => <span className="min-w-0"><span className="font-mono text-xs font-semibold text-text">{q.name}</span> <Chip>{q.kind}</Chip><span className="mt-0.5 block truncate font-mono text-[11px] text-faint" title={q.sql}>{q.sql}</span></span> },
+          { key: "c", head: "count", num: true, w: "w-16", cell: q => num(q.count) },
+          { key: "50", head: "p50", num: true, w: "w-20", cell: q => <span className={tone(q.p50)}>{ms(q.p50)}</span> },
+          { key: "95", head: "p95", num: true, w: "w-20", cell: q => <b className={tone(q.p95)}>{ms(q.p95)}</b> },
+          { key: "t", head: "total", num: true, w: "w-20", cell: q => ms(q.total) },
+          { key: "r", head: "rows", num: true, w: "w-16", cell: q => num(q.rows) },
+          { key: "ro", head: "from", w: "w-40", cell: q => <span className="text-xs text-muted" title={q.routes.join(", ")}>{q.routes.slice(0, 2).join(", ")}{q.routes.length > 2 ? ` +${q.routes.length - 2}` : ""}</span> },
         ]} />
         <SectionHead sub={route ? <>only <code className="font-mono">{route}</code> · <button type="button" className="font-semibold text-accent" onClick={() => setRoute("")}>show every route</button></> : "the 50 slowest in the window"}>Slowest</SectionHead>
         <DataTable rows={d.slowest} rowKey={(r, i) => r.at + i} cols={reqCols} empty="No requests in the window." />

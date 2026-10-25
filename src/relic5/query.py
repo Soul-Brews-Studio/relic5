@@ -107,10 +107,16 @@ class Relic5:
         self.index = Index(root)
 
     def _rows(self, sql: str, params: Sequence[object] = ()) -> list[Json]:
+        """Every hub read in SQL comes through here, and is timed under the name of the method that asked (perf.query):
+        the Performance page lists them by cost."""
+        from . import perf
+        t0 = time.perf_counter()
         cur = self.con.cursor()   # a cursor per call: the HTTP handlers run in threads
         res = cur.execute(sql, list(params))
         names = [d[0] for d in res.description]
-        return [dict(zip(names, r)) for r in res.fetchall()]
+        out = [dict(zip(names, r)) for r in res.fetchall()]
+        perf.query("sql", (time.perf_counter() - t0) * 1000, len(out), sql)
+        return out
 
     def _meta(self) -> str | None:
         fs = self.parts.meta()
