@@ -1,7 +1,7 @@
 [project]
 license = "AGPL-3.0-or-later"
 name = "relic5"
-version = "26.10.25a1106"
+version = "26.10.25a1203"
 description = "One hub on white for every machine's extracted history and vectors: push, import, embed, serve"
 requires-python = ">=3.12"
 dependencies = [
