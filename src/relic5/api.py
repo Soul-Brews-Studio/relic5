@@ -12,9 +12,9 @@ no loopback exemption. A hub serves many machines, and a proxy on the same box w
 Parts arrive over ssh (bin/relic5-push), never over HTTP. The routes that write are the hub's own records: tokens
 (Connect), artifacts, and saved searches (trace.py); a POST that changes settings needs X-Relic5-Request: 1.
 """
-import hmac, json, os, time
+import functools, hmac, json, os, time
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import duckdb
 from fastapi import FastAPI, Request
@@ -25,6 +25,7 @@ from . import mcp
 from .query import Relic5
 from .types_ import JobEvent, Json
 from . import store as rfs
+from . import swr
 
 if TYPE_CHECKING:
     from .doors import Doors
@@ -63,6 +64,15 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
     perf.keep(root)
     relic = Relic5(root, con)
     app = FastAPI(title="relic5", docs_url=None, redoc_url=None, openapi_url=None)
+
+    def cached(ttl: float) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+        """A GET answer kept ttl seconds and refreshed behind the reader (swr.py); the key is the route and its args."""
+        def deco(fn: Callable[..., Any]) -> Callable[..., Any]:
+            @functools.wraps(fn)
+            def wrapped(*a: Any, **kw: Any) -> Any:
+                return swr.get(f"{fn.__name__}?{sorted(kw.items())}", ttl, lambda: fn(*a, **kw))
+            return wrapped
+        return deco
     # gzip what is worth it (the page's JS and CSS went out as 142 KB raw over tailscale, measured 2026-10-25; gz
     # they are about 42 KB), and API answers over 1 KB. Small replies stay as they are.
     from starlette.middleware.gzip import GZipMiddleware
@@ -131,6 +141,7 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
         return {"name": name, "action": action, **({"token": secret} if secret else {})}
 
     @app.get("/api/clients", response_model=None)
+    @cached(60)
     def clients_route() -> Json:
         from . import selfknow
         return selfknow.clients(relic.parts.root)
@@ -204,6 +215,7 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
         _mirror.keep_mirrored(relic.parts.root)
 
     @app.get("/api/homes", response_model=None)
+    @cached(60)
     def homes_route() -> Json:
         """Every .claude (or .codex) the history came from, per machine (query.homes)."""
         return relic.homes()
@@ -422,6 +434,7 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
         return Response(rfs.read_text(p), media_type="text/markdown; charset=utf-8")
 
     @app.get("/api/artifacts", response_model=None)
+    @cached(60)
     def artifacts_route(oracle: str | None = None, limit: int = 500) -> Json:
         from . import artifacts
         return artifacts.listing(relic.parts.root, oracle, max(1, min(limit, 2000)))
@@ -458,6 +471,7 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
         return JSONResponse(rec)
 
     @app.get("/api/lineage", response_model=None)
+    @cached(120)
     def lineage_route() -> Json:
         from . import family
         return family.lineage(relic.parts.root)
@@ -468,6 +482,7 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
         return family.team(relic, max(7, min(days, 400)))
 
     @app.get("/api/oracles", response_model=None)
+    @cached(60)
     def oracles_route() -> Json:
         from . import oracles
         return oracles.listing(relic)
@@ -481,6 +496,7 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
         return JSONResponse(out, status_code=404) if "error" in out else out   # type: ignore[return-value]
 
     @app.get("/api/map", response_model=None)
+    @cached(120)
     def map_route(model: str | None = None, limit: int = 3000) -> Json:
         """The sessions as points: per-session mean vector, PCA to 3D (universe.py), for the Map view."""
         from . import universe
@@ -508,6 +524,7 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
             return JSONResponse({"error": str(ex)}, status_code=400)
 
     @app.get("/api/memory", response_model=None)
+    @cached(60)
     def memory_route() -> "Listing":
         from . import memory
         return memory.listing(relic.parts.root)
@@ -541,10 +558,12 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
         return read(root)[0][:min(max(n, 1), 1000)]
 
     @app.get("/api/tail", response_model=None)
+    @cached(5)
     def tail(n: int = 50, session: str = "", machine: str = "", since: str = "") -> Json:
         return relic.tail(min(max(n, 1), 500), session or None, machine or None, since or None)
 
     @app.get("/api/queries", response_model=None)
+    @cached(15)
     def queries_route() -> Json:
         return selfknow.queries(relic.parts.root)
 
@@ -619,11 +638,19 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
     def mcp_get() -> Response:
         return Response(status_code=405)       # no server-initiated stream
 
+    SWR_TOOLS = {"relic_status": 10, "relic_sessions": 30}   # seconds an answer stays fresh (swr.py)
+
     def make_route(tool: str) -> Callable[[Request], Response]:
         """The tool is bound by the closure, never a parameter: FastAPI would read a defaulted `tool` argument as a
         query parameter, and ?tool=... could pick which tool runs (found by the mypy pass, 2026-10-24)."""
+        ttl = SWR_TOOLS.get(tool)
+
         def route(request: Request) -> Response:
-            ok, r = logged(relic, tool, args_of(request.query_params), request.state.door, client_of(request, "http"))
+            if ttl and not request.query_params.get("parent"):   # the page's polls, not a traced call
+                ok, r = swr.get(f"{tool}?{sorted(request.query_params.multi_items())}", ttl, lambda: logged(
+                    relic, tool, args_of(request.query_params), request.state.door, client_of(request, "http")))
+            else:
+                ok, r = logged(relic, tool, args_of(request.query_params), request.state.door, client_of(request, "http"))
             if ok:
                 return Response(dumps(r), media_type="application/json")
             return JSONResponse({"error": r[1]}, status_code=STATUS_OF[r[0]])

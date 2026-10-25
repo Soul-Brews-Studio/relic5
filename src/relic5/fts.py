@@ -117,6 +117,7 @@ def seed_local(root: str, log: Callable[[str], object] = print) -> int:
     return len(todo)
 
 
+_MX_LOCK = threading.Lock()
 SEEDING: dict[str, str] = {}   # root -> when its local index began copying from the bucket
 
 
@@ -339,17 +340,20 @@ class Index:
         """The in-memory vector matrices (open, history) of one model, made on first use per generation."""
         from . import vec as V
         tabs = self._load()
-        if getattr(self, "_mx_seen", None) != self.seen:
-            self._mx, self._mx_seen = {}, self.seen
-        out: list[V.Matrix] = []
-        for part in ("open", "history"):
-            name = f"vec_{V.slug(model)}_{part}"
-            if name not in tabs:
-                continue
-            if name not in self._mx:
-                self._mx[name] = V.Matrix(tabs[name])
-            out.append(self._mx[name])
-        return out
+        # one builder at a time: a hub's first page asks several routes at once, and each thread built its own copy of
+        # the same 3.4 GB matrix (white's serve peaked at 38 GB after a restart, 2026-10-25)
+        with _MX_LOCK:
+            if getattr(self, "_mx_seen", None) != self.seen:
+                self._mx, self._mx_seen = {}, self.seen
+            out: list[V.Matrix] = []
+            for part in ("open", "history"):
+                name = f"vec_{V.slug(model)}_{part}"
+                if name not in tabs:
+                    continue
+                if name not in self._mx:
+                    self._mx[name] = V.Matrix(tabs[name])
+                out.append(self._mx[name])
+            return out
 
     def vector(self, model: str, vector: Sequence[float], filt: "VecFilter", limit: int) -> list[Json]:
         """Nearest prose rows to a unit query vector: exact, in memory (vec.Matrix), best first; _score = cosine."""

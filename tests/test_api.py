@@ -182,3 +182,26 @@ def test_every_request_is_timed_and_written(client, root):
     assert routes["/api/status"]["count"] == 1 and routes["/api/search"]["p50"] is not None
     assert "secret" not in json.dumps(p) and p["recent"][0]["route"] == "/api/search" and p["rss_mb"] > 0
     assert perf.flush(root) == 2 and len(open(os.path.join(root, "logs", "requests", sorted(os.listdir(os.path.join(root, "logs", "requests")))[-1])).read().splitlines()) == 2
+
+
+def test_heavy_answers_are_served_stale_while_they_refresh(monkeypatch):
+    import threading, time
+    from relic5 import swr
+    monkeypatch.setenv("RELIC5_SWR", "1")
+    swr.clear()
+    calls, gate = [], threading.Event()
+    def slow():
+        calls.append(1)
+        if len(calls) > 1:
+            gate.wait(5)
+        return len(calls)
+    assert swr.get("k", 0.05, slow) == 1 and swr.get("k", 0.05, slow) == 1 and len(calls) == 1   # fresh: memory
+    time.sleep(0.06)
+    t = time.time()
+    assert swr.get("k", 0.05, slow) == 1 and time.time() - t < 0.5                           # stale: at once
+    gate.set()
+    for _ in range(50):
+        if swr.get("k", 60, slow) == 2:
+            break
+        time.sleep(0.02)
+    assert swr.get("k", 60, slow) == 2 and len(calls) == 2                                    # refreshed behind
