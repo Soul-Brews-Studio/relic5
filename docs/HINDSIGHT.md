@@ -12,8 +12,9 @@ relic5 memory …  ──►  hindsight-embed daemon (m5, 127.0.0.1:8888, profil
                         │ LLM (fact extraction): qwen3.8-27b, vLLM on gb300, through the tunnel (127.0.0.1:11510)
                         │ embeddings + rerank ▼
                       embed/embed-router.py (m5, 127.0.0.1:11436)
-                        ├─ ≥ 32 texts: gb300 first ─► embed/gb300-serve.py (gb300 GPU, bf16, through the tunnel 11437)
-                        ├─ < 32 texts: ANE first   ─► ANEEmbedBar (m5, 127.0.0.1:11435, w8a16)
+                        ├─ ≥ 32 texts: split by speed, both at once ─► embed/gb300-serve.py (gb300 GPU, bf16, tunnel 11437)
+                        │                                            └─► ANEEmbedBar (m5, 127.0.0.1:11435, w8a16)
+                        ├─ < 32 texts: ANE first, gb300 if it fails
                         └─ /rerank ─► gb300's BAAI/bge-reranker-v2-m3 (multilingual); gb300 down: given order, score 0
 ```
 
@@ -37,7 +38,15 @@ relic5 memory status                             # documents, memories, queue wi
 relic5 memory import <session> [...] [--wait]    # a relic5 session's user/assistant turns, queued (async)
 relic5 memory recall "what did we decide about X" [--limit 10] [--json]
 relic5 memory retain "a fact" [--context C]
+relic5 memory import --since 30d [--min-events 6] [--max N] [--wait]   # a window, newest first; skips imported ones
 ```
+
+**Split:** a big batch goes to both engines at once, sized by their measured speed (EWMA, in `/health` as `rate`).
+Measured 2026-10-26: 3,000 texts at 1,130 texts/s split, against 1,032 on gb300 alone. The ANE adds about 100 texts/s
+beside gb300's 1,100; for small batches the ANE on m5 is the quicker answer (no network round trip).
+
+**Throughput:** Hindsight's `WORKER_MAX_SLOTS` (default 10) caps parallel retains; the profile sets 32, with
+`RETAIN_LLM_MAX_CONCURRENT=32`, which the qwen3.8-27b vLLM on gb300 absorbs.
 
 `import` reads the session from the hub (`/api/conversation`), keeps user and assistant turns, and sends blocks of
 about 3,000 characters (Hindsight's retain chunk), each its own document `<session>#<n>` with the session in
