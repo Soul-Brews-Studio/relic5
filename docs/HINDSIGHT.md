@@ -134,6 +134,26 @@ its items, newest first, while the bank has fewer than 40 open operations, and r
 Tool output stays out: 3.97M rows of command output, little to learn as facts. At 88 blocks a minute (qwen3.8-27b on
 gb300 is the limit) memory takes ~2 h, the vault ~42 h, git and thinking ~3 h each, sessions ~3 days.
 
+## Backup
+
+```sh
+relic5 hindsight backup        # bin/relic5-hindsight-backup
+```
+
+`pg_dump -Fc -Z 3` of the hindsight-embed daemon's pg0 Postgres into relic5's backup volume (`bin/relic5-backup-volume`,
+the case-sensitive sparse bundle on m5) at `<volume>/hindsight/hindsight-<profile>-<stamp>.dump`, written as `.partial`
+and renamed only on success, then read back with `pg_restore --list`. The profile file (0600) and `workers.json` are
+copied beside it; the newest 3 dumps stay. By hand, no timer. First run 2026-10-26: a 26 GB bank → 6.9 GB dump,
+202 archive entries, 183 s.
+
+Restore (the daemon stopped, into a fresh pg0 instance or the same one):
+
+```sh
+hindsight-embed daemon stop
+D=~/relic5-backup-cs/hindsight/hindsight-relic-<stamp>.dump
+PGPASSWORD=hindsight ~/.pg0/installation/18.1.0/bin/pg_restore -h 127.0.0.1 -p 5432 -U hindsight -d hindsight --clean --if-exists "$D"
+```
+
 ## Who owns what
 
 - `embed/gb300-serve.py`, `embed/embed-router.py`, `embed/start.sh`, `relic5 hindsight` (`cli/src/memory.rs`): relic5.

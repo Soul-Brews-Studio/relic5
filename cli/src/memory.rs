@@ -7,6 +7,7 @@
 //!   relic5 hindsight import  <session> [<session> ...] [--bank B] [--wait]   a relic5 session's turns, queued (async)
 //!   relic5 hindsight import  --source memory|vault|git|thinking   a whole relic5 source from the hub, paced and resumable
 //!                         (runs embed/hindsight-import.py; Nat, 2026-10-26: "memory first then vault, git, thinking")
+//!   relic5 hindsight backup                             pg_dump of the bank into relic5's backup volume (newest 3 kept)
 //!   relic5 hindsight top                                   live TUI: bank, queue + sparkline + ETA, workers, feeder log
 //!   relic5 hindsight workers [list]                       every worker: up, busy, utilization and work done (last minute, total)
 //!   relic5 hindsight workers add embed|llm|rerank <name> <url> [--model M] [--slots N] [--api ollama|openai] [--batch N]
@@ -190,7 +191,19 @@ pub fn main(rest: Vec<String>, json_out: bool) -> Result<(), Fail> {
         "import" => import(&bank, a, json_out),
         "workers" => workers(a, json_out),
         "top" => std::process::exit(crate::top::top(&bank)),
-        other => Err(Fail::Other(format!("relic5 hindsight: unknown '{other}' (status, retain, recall, import, workers, top)"), 2)),
+        "backup" => {
+            // bin/relic5-hindsight-backup: pg_dump of the bank into relic5's backup volume, verified, newest 3 kept
+            use std::os::unix::process::CommandExt;
+            let home = std::env::var("HOME").unwrap_or_default();
+            let script = ["/opt/Code/github.com/Soul-Brews-Studio/relic5/bin".to_string(), format!("{home}/relic5/app/bin")]
+                .into_iter()
+                .map(|d| format!("{d}/relic5-hindsight-backup"))
+                .find(|p| std::path::Path::new(p).is_file())
+                .ok_or_else(|| Fail::Other("relic5 hindsight: bin/relic5-hindsight-backup not found".into(), 1))?;
+            let err = std::process::Command::new(script).exec();
+            Err(Fail::Other(format!("relic5 hindsight backup: {err}"), 1))
+        }
+        other => Err(Fail::Other(format!("relic5 hindsight: unknown '{other}' (status, retain, recall, import, workers, top, backup)"), 2)),
     }
 }
 
