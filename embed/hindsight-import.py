@@ -8,7 +8,8 @@ It runs embed/hindsight-source.py on the hub (ssh white, the hub venv's python),
 skips every document already queued (ledger ~/.cache/relic5/hindsight-<bank>-<source>.done), and posts async batches
 to the hindsight-embed daemon while its queue stays under --max-pending operations, so a long run never floods the
 database. One progress line a minute: queued / total, documents in the bank, blocks a minute, ETA. Stop it any time;
-the next run picks up after the last queued batch. Stdlib only.
+the next run picks up after the last queued batch. Pacing is on this run's own count (items sent minus documents
+created), since the bank's pending count lags an async post. Stdlib only.
 """
 import argparse, json, os, subprocess, sys, time, urllib.error, urllib.request
 
@@ -33,6 +34,8 @@ def main() -> None:
     ap.add_argument("source", choices=["memory", "vault", "git", "thinking"])
     ap.add_argument("--bank", default="relic5")
     ap.add_argument("--max-pending", type=int, default=40, help="hold back while the bank has this many open operations")
+    ap.add_argument("--max-inflight", type=int, default=600,
+                    help="hold back while this many items sent here are not yet documents in the bank")
     ap.add_argument("--batch", type=int, default=40)
     a = ap.parse_args()
 
@@ -57,7 +60,10 @@ def main() -> None:
     i = 0
     while i < len(todo):
         st = stats(a.bank)
-        if st.get("pending_operations", 0) >= a.max_pending:
+        # The bank's pending count lags an async post (its operations appear a moment later: on 2026-10-26 it read 1
+        # while 9,495 items went in), so pace on what this run knows: items sent minus documents created since.
+        inflight = sent - (st.get("total_documents", 0) - docs0)
+        if st.get("pending_operations", 0) >= a.max_pending or inflight >= a.max_inflight:
             time.sleep(5)
         else:
             batch = todo[i:i + a.batch]
@@ -83,6 +89,7 @@ def main() -> None:
             eta = f"{left_docs / rate / 60:.1f} h" if rate > 0 else "measuring"
             print(f"{time.strftime('%H:%M')} {a.source}: queued {i:,}/{len(todo):,} · bank {st.get('total_documents', 0):,} docs, "
                   f"{st.get('total_nodes', 0):,} memories · open ops {st.get('pending_operations', 0)} · "
+                  f"in flight {sent - (st.get('total_documents', 0) - docs0):,} · "
                   f"{rate:.0f} docs/min · ETA {eta}", flush=True)
     print(f"{a.source}: all {len(todo):,} queued; the bank finishes the queue on its own (relic5 memory status)", flush=True)
 
