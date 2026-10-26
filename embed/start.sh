@@ -39,7 +39,7 @@ fi
 if up 127.0.0.1:11436/health; then
   echo "embed router: up"
 else
-  tmux new-session -d -s embed-router "python3 $HERE/embed-router.py" && echo "embed router: started (tmux attach -t embed-router)"
+  tmux new-session -d -s embed-router "python3 $HERE/embed-router.py --big 8" && echo "embed router: started (tmux attach -t embed-router)"
 fi
 
 for i in $(seq 1 60); do up 127.0.0.1:11437/health && break; sleep 2; done
