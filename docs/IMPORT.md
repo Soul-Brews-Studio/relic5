@@ -1,31 +1,36 @@
 # IMPORT: feeding the hub by hand
 
-Nat, 2026-10-26: "remove all auto run", then "we will manual and make this cool later", then "we just do manual".
-On m5 nothing feeds the relic5 hub by itself any more. An import runs when someone runs it.
+Nat, 2026-10-26: "remove all auto run", then "we just do manual", then "go fully manual, no auto import".
+No machine feeds the relic5 hub by itself any more: m5's LaunchAgent is retired, white's `relic-chain.timer` is
+disabled and mba's `studio.soulbrews.relic-chain` is booted out (relic4-scan, `docs/MANUAL.md` there). An import runs
+when someone runs it, so the hub does not warn about an old push: `push_age_s` just says how old it is.
 
 ## Run one
 
 ```sh
-RELIC5_MACHINE=m5 bin/relic5-import        # from the relic5 checkout
-~/relic5-reboot-test/m5-import.sh          # the same, on m5 (sets RELIC5_MACHINE=m5)
+relic5-import                      # ~/.local/bin/relic5-import -> <relic5 checkout>/bin/relic5-import
 ```
 
+Once per machine: `echo m5 > ~/.config/relic5/machine` (the same file `relic5-push` reads), and
+`ln -sf <relic5 checkout>/bin/relic5-import ~/.local/bin/relic5-import`. `RELIC5_MACHINE=…` still overrides the file.
+
 `bin/relic5-import` is a Bun script (`#!/usr/bin/env bun`, written with `Bun.$`); bun 1.3+ must be on the machine.
-`RELIC5_MACHINE` is required: it is the name the hub files the rows under. A wrong name puts the rows under
+The machine name is required (no hostname fallback): it is the name the hub files the rows under. A wrong name puts the rows under
 another machine (that happened once, see `m5-nat` in docs/RETIRED.md). `RELIC5_HUB_URL` defaults to white
 (`http://white.follow-rankine.ts.net:8795`).
 
 ## What it does
 
-The same five steps as `~/.local/bin/relic-chain`, once:
+relic-chain's steps, once, with one push:
 
 | step | command | what it does |
 |---|---|---|
 | scan | `relic-scan run` | finds every agent home, parses new and grown transcripts, writes `~/.relic-scan/meta` and the map. Draws its own RELIC·SCAN box on the terminal; the import reads the run's summary from the last `job: "index"` line of `~/.relic-scan/_scans.jsonl` |
-| extract | `relic-extract run` | cuts the new rows into chunks; its after hook pushes to white and runs `relic5 index --wait` there |
-| push | `bin/relic5-push` | pushes again so the hub's per-machine versions refresh even when nothing was cut (a few seconds) |
+| extract | `relic-extract run` | cuts the new rows into chunks. Its `after` hook is not used: on m5 it is commented out in `~/.arra/relic.toml` (old line kept there, backup `relic.toml.bak-20261026-after`) |
+| push | `bin/relic5-push` | sends this machine's parts to white (only changed months move) |
+| index | `ssh nat@white relic5 index --wait` | the hub takes the push into its index, so the sync below sees it at once |
 | embed | `relic5 embed --limit 20000` | vectors for chunks that have none, on the ANE. AC power only; skipped on battery |
-| sync | `relic-extract status --json` against `/api/status` | waits (up to 3 minutes) until the hub holds the same text, thinking and tools chunks as this machine. Both sides are read again on every try, since another scan may run beside this one. A stream that reports `error` never matches |
+| sync | `relic-extract status --json` against `/api/status` | waits (up to 3 minutes) until, for each of text, thinking and tools, the hub holds at least what this run pushed and at most what this machine holds now (another pass may cut more beside this one). A stream that reports `error` never matches |
 
 Every stage shows a spinner and its time, then `✓` or `✗ rc=N` with its last line. The run ends with one
 RELIC5·IMPORT box: the hub's counts for this machine, the scan and cut figures, when it pushed, the newest row and
@@ -51,7 +56,7 @@ The MCP tool `relic_status` shows the same per machine.
 1. Log in, open herdr.
 2. `~/relic5-reboot-test/m5-start.sh`: brings back the herdr sessions (neo, laris-co, arkkra, phd). It does not
    import.
-3. `~/relic5-reboot-test/m5-import.sh` when the hub should catch up.
+3. `relic5-import` when the hub should catch up.
 
 The autostarts that used to do this, and everything else that started by itself on m5, are recorded in
 docs/RETIRED.md (2026-10-26).
