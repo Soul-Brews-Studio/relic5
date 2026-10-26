@@ -1,0 +1,28 @@
+[package]
+name = "relic5"
+# the version is pyproject's (one source); build.rs turns it into the CalVer `relic5 --version` prints
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.89"
+license = "AGPL-3.0-only"
+repository = "https://github.com/Soul-Brews-Studio/relic5"
+description = "relic5 command line: the hub client in Rust; every hub-side command goes to the Python core (relic5-core)"
+
+[[bin]]
+name = "relic5"
+path = "src/main.rs"
+
+[dependencies]
+# same crates as relic4-scan and relic-extract
+ureq = { version = "3", default-features = false, features = ["rustls"] }
+# preserve_order: keys print in the hub's order; arbitrary_precision: numbers print as the hub wrote them,
+# so `--json` output is the same bytes as the Python CLI's json.dumps(indent=1)
+serde_json = { version = "1.0.154", features = ["preserve_order", "arbitrary_precision"] }
+libc = "0.2"
+serde = "1"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true

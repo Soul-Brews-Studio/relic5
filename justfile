@@ -51,3 +51,18 @@ web-dev hub="http://white.follow-rankine.ts.net:8795":
 # Pet Studio (pet-studio/, from esp32-oracle): the desk-pet designer + its MCP, on the Mac that holds the pets.
 pet-studio:
     cd pet-studio && bun install && bun run build && bun server/index.ts
+
+# The Rust CLI (cli/): build it, install the Python core as relic5-core (uv tool), then put the Rust binary at
+# ~/.local/bin/relic5 (the uv tool writes a Python `relic5` there too; the Rust one replaces it, the old file kept as
+# relic5.bak-<its version>). Rerun after `uv tool upgrade relic5`, which puts the Python one back.
+cli:
+    cd cli && cargo build --release
+    uv tool install --force --reinstall "$(pwd)"
+    @f="$HOME/.local/bin/relic5"; v=$("$f" --version 2>/dev/null | sed 's/^[^ ]* //'); [ -e "$f" ] && cp -p "$f" "$f.bak-${v:-old}"; true
+    rm -f "$HOME/.local/bin/relic5" && cp cli/target/release/relic5 "$HOME/.local/bin/relic5"
+    @"$HOME/.local/bin/relic5" --version && command -v relic5-core && relic5-core --version
+
+# Rust CLI against the Python CLI on a test hub (same output, same exit codes)
+cli-test:
+    cd cli && cargo test --release && cargo build --release
+    uv run pytest -q tests/test_rust_cli.py
