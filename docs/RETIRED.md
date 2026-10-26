@@ -13,7 +13,13 @@ So retiring something takes three steps, and all three are written down:
 2. **Keep as record.** Move it, don't delete it. Write where it is kept and how to bring it back.
 3. **Name what succeeded it.** Write what does its job now. If nothing does, write "nothing", together with the reason.
 
-A retirement that is missing any of the three is not finished. Add one row below for each retirement, in the same
+A retirement that is missing any of the three is not finished.
+
+**Cease means unloaded, not only deleted.** Removing a launchd plist (or a systemd unit file) does not stop a job that
+is already loaded: on m5, 2026-10-26, 36 of beta's retired jobs were still loaded after their plists were gone, and
+the retired `studio.soulbrews.relic-chain` ran a pass beside a manual import at 08:19. Boot the job out
+(`launchctl bootout gui/<uid>/<label>`, `systemctl --user disable --now <unit>`) and check with `launchctl print
+gui/<uid>` / `systemctl --user list-timers --all` that it is gone. Add one row below for each retirement, in the same
 change that retires the thing.
 
 On the hub, `relic5 seals --retire <machine> --why W --succeeded-by S` records step 3 for a machine's seals, next to
