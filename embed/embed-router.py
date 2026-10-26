@@ -218,7 +218,6 @@ def llm(body: dict) -> tuple[str, bytes]:
         with lock:
             c["open"].append(t)
         req = {k: v for k, v in body.items() if k not in ("chat_template_kwargs", "stream")} | {"model": w["model"]} | (w.get("extra") or {})
-        t = time.time()
         try:
             r = urllib.request.urlopen(urllib.request.Request(w["url"], json.dumps(req).encode(), {"Content-Type": "application/json"}),
                                        timeout=900)
