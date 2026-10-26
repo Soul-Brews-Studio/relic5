@@ -1,0 +1,44 @@
+#!/bin/sh
+# relic5-hindsight-backup: one backup of the Hindsight bank on this machine (the hindsight-embed daemon's own pg0
+# Postgres), into relic5's backup volume (bin/relic5-backup-volume: a case-sensitive sparse bundle on macOS).
+#
+#   bin/relic5-hindsight-backup            # or: relic5 hindsight backup
+#
+# pg_dump -Fc (compressed, restorable with pg_restore) into <volume>/hindsight/hindsight-<profile>-<stamp>.dump, written
+# as .partial and renamed only when pg_dump succeeded; then `pg_restore --list` must read it back. The profile file
+# (~/.hindsight/profiles/<profile>.env, 0600) and the dispatcher's workers.json are copied beside it. The newest
+# HINDSIGHT_KEEP (default 3) dumps stay; older ones are removed only after a new one verified. By hand, never a timer
+# (m5 is manual-start, docs/IMPORT.md). Restore: docs/HINDSIGHT.md "Backup".
+set -u
+PROFILE="${HINDSIGHT_PROFILE:-relic}"
+KEEP="${HINDSIGHT_KEEP:-3}"
+INST="$HOME/.pg0/instances/hindsight-embed-$PROFILE/instance.json"
+[ -f "$INST" ] || { echo "no pg0 instance for profile $PROFILE ($INST)" >&2; exit 1; }
+read -r PORT USERNAME PASSWORD DB BIN <<EOF
+$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(d['port'], d['username'], d['password'], d['database'], d['installation_dir'] + '/' + d['version'] + '/bin')" "$INST")
+EOF
+[ -x "$BIN/pg_dump" ] || BIN=$(dirname "$(find "$HOME/.pg0/installation" -name pg_dump -maxdepth 4 | head -1)")
+VOL=$("$(dirname "$0")/relic5-backup-volume") || { echo "backup volume not available" >&2; exit 1; }
+DIR="$VOL/hindsight"
+mkdir -p "$DIR" && chmod 700 "$DIR"
+STAMP=$(date +%Y%m%d-%H%M%S)
+OUT="$DIR/hindsight-$PROFILE-$STAMP.dump"
+T0=$(date +%s)
+echo "hindsight backup: $DB on 127.0.0.1:$PORT -> $OUT"
+if ! PGPASSWORD="$PASSWORD" "$BIN/pg_dump" -h 127.0.0.1 -p "$PORT" -U "$USERNAME" -Fc -Z 3 -f "$OUT.partial" "$DB"; then
+  echo "pg_dump failed; the .partial file is left for inspection: $OUT.partial" >&2
+  exit 1
+fi
+mv "$OUT.partial" "$OUT"
+N=$("$BIN/pg_restore" --list "$OUT" 2>/dev/null | grep -c ';') || N=0
+[ "$N" -gt 0 ] || { echo "verify failed: pg_restore --list read 0 entries from $OUT" >&2; exit 1; }
+cp -p "$HOME/.hindsight/profiles/$PROFILE.env" "$DIR/hindsight-$PROFILE-$STAMP.env" 2>/dev/null && chmod 600 "$DIR/hindsight-$PROFILE-$STAMP.env"
+cp -p "$HOME/.config/relic5/workers.json" "$DIR/workers-$STAMP.json" 2>/dev/null
+# keep the newest $KEEP verified dumps (with their side files)
+ls -1t "$DIR"/hindsight-"$PROFILE"-*.dump 2>/dev/null | tail -n +$((KEEP + 1)) | while read -r old; do
+  s=${old%.dump}; s=${s##*-"$PROFILE"-}
+  rm -f "$old" "$DIR/hindsight-$PROFILE-$s.env" "$DIR/workers-$s.json"
+  echo "  removed older backup $(basename "$old")"
+done
+SIZE=$(du -h "$OUT" | cut -f1)
+echo "hindsight backup OK: $(basename "$OUT") · $SIZE · $N archive entries · $(( $(date +%s) - T0 ))s · kept newest $KEEP in $DIR"
