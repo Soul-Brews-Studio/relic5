@@ -7,6 +7,7 @@
 //!   relic5 hindsight import  <session> [<session> ...] [--bank B] [--wait]   a relic5 session's turns, queued (async)
 //!   relic5 hindsight import  --source memory|vault|git|thinking   a whole relic5 source from the hub, paced and resumable
 //!                         (runs embed/hindsight-import.py; Nat, 2026-10-26: "memory first then vault, git, thinking")
+//!   relic5 hindsight speed [--watch]                    embed + summarize speed per machine (m5, gb300), relic-scan look
 //!   relic5 hindsight banks                              every bank (relic5, one per Discord server) with its counts
 //!   relic5 hindsight backup                             pg_dump of the bank into relic5's backup volume (newest 3 kept)
 //!   relic5 hindsight top                                   live TUI: bank, queue + sparkline + ETA, workers, feeder log
@@ -156,6 +157,7 @@ pub fn main(rest: Vec<String>, json_out: bool) -> Result<(), Fail> {
     let sub = if a.0.is_empty() { "status".to_string() } else { a.0.remove(0) };
     match sub.as_str() {
         "status" => status(&bank, json_out),
+        "speed" => speed(a.has("--watch")),
         "banks" => {
             // every bank on the daemon with its counts: relic5 (all of relic5) and one bank per Discord server
             let list = http("GET", &format!("{}/v1/default/banks", base()), None, 30)?;
@@ -228,7 +230,7 @@ pub fn main(rest: Vec<String>, json_out: bool) -> Result<(), Fail> {
             let err = std::process::Command::new(script).exec();
             Err(Fail::Other(format!("relic5 hindsight backup: {err}"), 1))
         }
-        other => Err(Fail::Other(format!("relic5 hindsight: unknown '{other}' (status, banks, retain, recall, import, workers, top, backup)"), 2)),
+        other => Err(Fail::Other(format!("relic5 hindsight: unknown '{other}' (status, speed, banks, retain, recall, import, workers, top, backup)"), 2)),
     }
 }
 
@@ -372,6 +374,87 @@ fn import(bank: &str, mut a: Args, json_out: bool) -> Result<(), Fail> {
 
 fn router() -> String {
     std::env::var("RELIC5_EMBED_ROUTER").unwrap_or_else(|_| "http://127.0.0.1:11436".into()).trim_end_matches('/').to_string()
+}
+
+/// Speed per machine (Nat, 2026-10-26: "embed and summarize show me the speed we have m5 and gb300 make cli cool"):
+/// every dispatcher worker grouped by the machine it runs on, embedding in texts/s, summarizing (LLM extraction) in
+/// tokens/s and calls a minute, a utilization bar each; --watch redraws every 2 s.
+fn speed(watch: bool) -> Result<(), Fail> {
+    let (p, c, g, gr, am, z, b) = ("\x1b[38;2;255;60;172m", "\x1b[38;2;0;214;255m", "\x1b[38;2;128;136;156m",
+                                   "\x1b[38;2;80;220;140m", "\x1b[38;2;245;183;59m", "\x1b[0m", "\x1b[1m");
+    let bar = |u: f64, w: usize| -> String {
+        let cells = (u.clamp(0.0, 1.0) * (w * 8) as f64).round() as usize;
+        let mut s = "█".repeat(cells / 8);
+        if cells % 8 > 0 {
+            s.push(['▏', '▎', '▍', '▌', '▋', '▊', '▉'][cells % 8 - 1]);
+        }
+        format!("{s:<w$}")
+    };
+    loop {
+        let h = http("GET", &format!("{}/health", router()), None, 30)
+            .map_err(|_| Fail::Other(format!("relic5 hindsight: the dispatcher is not up at {} (embed/start.sh)", router()), 1))?;
+        let mut lines: Vec<(String, String)> = Vec::new();   // (machine, line)
+        let (mut emb_s, mut tok_s, mut calls_m) = (0.0f64, 0.0f64, 0i64);
+        for kind in ["embed", "llm", "rerank"] {
+            for w in h["workers"][kind].as_array().cloned().unwrap_or_default() {
+                let name = s(&w["name"]);
+                let url = s(&w["url"]);
+                let machine = if name.contains("gb300") || url.contains(":11437") || url.contains(":11510") { "gb300" } else { "m5" };
+                let util = w["util"].as_f64().unwrap_or(0.0);
+                let up = w["up"] == "ok";
+                let (role, rate) = match kind {
+                    "embed" => {
+                        let r = w["texts_1m"].as_f64().unwrap_or(0.0) / 60.0;
+                        emb_s += r;
+                        ("embed    ", format!("{r:>7.1} texts/s"))
+                    }
+                    "llm" => {
+                        let r = w["tokens_1m"].as_f64().unwrap_or(0.0) / 60.0;
+                        tok_s += r;
+                        calls_m += w["requests_1m"].as_i64().unwrap_or(0);
+                        ("summarize", format!("{r:>7.0} tok/s  {:>3} calls/min", w["requests_1m"].as_i64().unwrap_or(0)))
+                    }
+                    _ => ("rerank   ", format!("{:>7.1} texts/s", w["texts_1m"].as_f64().unwrap_or(0.0) / 60.0)),
+                };
+                let model = if w["model"].is_null() { name.clone() } else { s(&w["model"]) };
+                let color = if util > 0.9 { am } else { c };
+                lines.push((machine.to_string(), format!(
+                    "  {p}{role}{z} {:<8} {color}{}{z} {b}{:>4.0}%{z}  {gr}{rate}{z}  {g}{} total · {}/{} busy · {}{z}{}",
+                    name, bar(util, 16), util * 100.0, if kind == "llm" { commas(&w["tokens"]) + " tok" } else { commas(&w["texts"]) + " texts" },
+                    w["inflight"], w["slots"].as_i64().unwrap_or(1), head(&model, 28), if up { String::new() } else { format!(" {am}DOWN{z}") })));
+            }
+        }
+        if watch {
+            print!("\x1b[2J\x1b[H");
+        }
+        println!("{p}{b} ▓▒░ RELIC5·SPEED ░▒▓ {z}{g} embed + summarize · last minute · {}{z}", clock_now());
+        for m in ["m5", "gb300"] {
+            let ls: Vec<&String> = lines.iter().filter(|(mm, _)| mm == m).map(|(_, l)| l).collect();
+            if ls.is_empty() {
+                continue;
+            }
+            let about = if m == "m5" { "M5 Max · ANE + GPU" } else { "GB300 · shared GPU, through the tunnel" };
+            println!("{c}╭─ {b}{m}{z}{c} · {about} {}{z}", "─".repeat(60usize.saturating_sub(about.len())));
+            for l in ls {
+                println!("{c}│{z}{l}");
+            }
+            println!("{c}╰{}{z}", "─".repeat(66));
+        }
+        println!("  {b}total{z}  embed {gr}{emb_s:.1} texts/s{z} · summarize {gr}{tok_s:.0} tok/s{z} ({calls_m} calls/min)");
+        if !watch {
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_secs(2));
+    }
+}
+
+fn clock_now() -> String {
+    unsafe {
+        let t = libc::time(std::ptr::null_mut());
+        let mut tm: libc::tm = std::mem::zeroed();
+        libc::localtime_r(&t, &mut tm);
+        format!("{:02}:{:02}:{:02}", tm.tm_hour, tm.tm_min, tm.tm_sec)
+    }
 }
 
 /// The dispatcher's workers: list (with utilization and work done), add, rm
