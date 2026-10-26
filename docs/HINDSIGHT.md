@@ -56,6 +56,27 @@ about 3,000 characters (Hindsight's retain chunk), each its own document `<sessi
 in the last hour. It says "unknown" until two have finished. First run, 2026-10-26: session 0f7f08a8 (370 turns) →
 90 blocks → 607 memories in about 1.5 minutes, 27.6 blocks a minute, LLM-bound on gb300.
 
+## Everything relic5 holds (Nat, 2026-10-26: "memory first then vault, git, thinking, then sessions")
+
+```sh
+relic5 memory import --source memory     # then vault, git, thinking; then: relic5 memory import --since 3650d
+```
+
+`embed/hindsight-source.py` runs on the hub and reads `~/relic5/parts`; `embed/hindsight-import.py` on m5 queues
+its items, newest first, while the bank has fewer than 40 open operations, and records each queued document in
+`~/.cache/relic5/hindsight-<bank>-<source>.done`, so a stopped run resumes. Tags: `relic5`, `source:<name>`.
+
+| source | what one item is | items (2026-10-26) | ~blocks |
+|---|---|---|---|
+| memory | one memory note (.md), MEMORY.md indexes skipped | 9,495 | 9.5k |
+| vault | one ψ vault note, its chunks joined | 82,850 | 223k |
+| git | our commits in one repo on one day (40 a block) | 15,348 | 6.3k |
+| thinking | a session's thinking, ~3,000 characters | 13,178 | 11.6k |
+| sessions | user + assistant turns, ~3,000 characters | 73,657 sessions | ~400k |
+
+Tool output stays out: 3.97M rows of command output, little to learn as facts. At 88 blocks a minute (qwen3.8-27b on
+gb300 is the limit) memory takes ~2 h, the vault ~42 h, git and thinking ~3 h each, sessions ~3 days.
+
 ## Who owns what
 
 - `embed/gb300-serve.py`, `embed/embed-router.py`, `embed/start.sh`, `relic5 memory` (`cli/src/memory.rs`): relic5.
