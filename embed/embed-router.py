@@ -197,6 +197,53 @@ def embed(texts: list[str], big: int, prefer: str | None) -> tuple[str, list[lis
     return "+".join(w["name"] for w, _, _ in parts) if not errs else "fallback", vecs
 
 
+# ── coalescing: many small concurrent requests become one batch ───────────────────────────────────────────────────
+# Hindsight embeds ~3 texts a call from many workers at once (2026-10-26: 795 texts in 236 calls a minute), which
+# leaves gb300 (fast only in big batches) idle and the ANE at 100%. Requests below --big wait up to WAIT_S for others;
+# the merged batch goes through embed(), so at >= --big it is split over every worker by speed.
+WAIT_S, MAX_BATCH = 0.015, 256
+pending: list[tuple[list[str], threading.Event, dict]] = []
+pending_cv = threading.Condition()
+
+
+def coalescer(big: int) -> None:
+    while True:
+        with pending_cv:
+            while not pending:
+                pending_cv.wait()
+            deadline = time.time() + WAIT_S
+            while sum(len(t) for t, _, _ in pending) < MAX_BATCH and time.time() < deadline:
+                pending_cv.wait(max(0.0, deadline - time.time()))
+            batch, n = [], 0
+            while pending and n + len(pending[0][0]) <= MAX_BATCH or (pending and not batch):
+                item = pending.pop(0)
+                batch.append(item)
+                n += len(item[0])
+        texts = [t for ts, _, _ in batch for t in ts]
+        try:
+            engine, vecs = embed(texts, big, None)
+            k = 0
+            for ts, ev, box in batch:
+                box["engine"], box["vecs"] = engine + (f" (merged {len(batch)})" if len(batch) > 1 else ""), vecs[k:k + len(ts)]
+                k += len(ts)
+                ev.set()
+        except Exception as ex:   # noqa: BLE001 - every waiter gets the error
+            for _, ev, box in batch:
+                box["err"] = ex
+                ev.set()
+
+
+def embed_merged(texts: list[str]) -> tuple[str, list[list[float]]]:
+    ev, box = threading.Event(), {}
+    with pending_cv:
+        pending.append((texts, ev, box))
+        pending_cv.notify_all()
+    ev.wait()
+    if "err" in box:
+        raise RuntimeError(str(box["err"]))
+    return box["engine"], box["vecs"]
+
+
 # ── LLM ────────────────────────────────────────────────────────────────────────────────────────────────────────────
 def llm(body: dict) -> tuple[str, bytes]:
     """one chat completion on the worker with the most free slots; waits for a slot; retries on another"""
@@ -403,7 +450,13 @@ def main() -> None:
             if not isinstance(texts, list) or not all(isinstance(t, str) for t in texts):
                 return self.send(400, {"error": "input must be a string or a list of strings"})
             try:
-                engine, vecs = embed(texts, a.big, self.headers.get("X-Embed-Prefer")) if texts else ("none", [])
+                prefer = self.headers.get("X-Embed-Prefer")
+                if not texts:
+                    engine, vecs = "none", []
+                elif prefer or len(texts) >= a.big:
+                    engine, vecs = embed(texts, a.big, prefer)
+                else:
+                    engine, vecs = embed_merged(texts)
             except RuntimeError as ex:
                 return self.send(503, {"error": str(ex)[:300]})
             if p == "/api/embed":
@@ -416,7 +469,8 @@ def main() -> None:
         request_queue_size = 256   # the default 5 refused connections under Hindsight's 32 workers plus a test burst
         daemon_threads = True
 
-    print(f"embed-router: http://{a.host}:{a.port} · workers {reg_file} · split at >= {a.big} texts", flush=True)
+    threading.Thread(target=coalescer, args=(a.big,), daemon=True).start()
+    print(f"embed-router: http://{a.host}:{a.port} · workers {reg_file} · split at >= {a.big} texts · small ones merged ({WAIT_S * 1000:.0f} ms)", flush=True)
     Server((a.host, a.port), H).serve_forever()
 
 
