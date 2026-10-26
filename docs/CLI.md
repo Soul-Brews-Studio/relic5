@@ -40,7 +40,8 @@ between two Python calls; `recap.py` now breaks ties by name.
 ## Install
 
 ```sh
-just cli         # cargo build --release, uv tool install (relic5-core), then the Rust binary at ~/.local/bin/relic5
+just cli         # a client: uv tool install (relic5-core), then the Rust binary at ~/.local/bin/relic5
+just cli-bin     # the hub (white): the Rust binary only; its core is the hub venv's relic5-core
 just cli-test    # cargo test, then the Rust-vs-Python comparison
 ```
 
