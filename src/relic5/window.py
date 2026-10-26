@@ -3,6 +3,7 @@
   YYYY-MM-DD   a UTC day: since = 00:00:00Z of it, until = through 23:59:59.999Z of it
   ISO time     as given (2026-10-23T10:00:00Z, or with an offset)
   Nd / Nh / Nm N days / hours / minutes before now (1m = one minute, as relic3)
+  Nw / Nmo     N weeks / months (30 days) before now (#95: `--since 3m` meant 3 minutes and found nothing)
 
 horizon (7d | 15d | 1m | 3m | archive) is a window that starts N before now; archive = no start. Here 1m and 3m
 of a horizon are 30 and 90 days. Every bound comes back as UTC ISO text with milliseconds and Z, the form of the
@@ -33,10 +34,12 @@ def bound(v: str | None, end: bool = False, now: datetime | None = None) -> str 
     if v is None or v == "":
         return None
     now = now or utcnow()
-    m = re.fullmatch(r"(\d+)([dhm])", v)
+    m = re.fullmatch(r"(\d+)(mo|[dhmw])", v)
     if m:
         n, u = int(m.group(1)), m.group(2)
-        return iso(now - timedelta(**{{"d": "days", "h": "hours", "m": "minutes"}[u]: n}))
+        if u == "mo":
+            return iso(now - timedelta(days=30 * n))
+        return iso(now - timedelta(**{{"d": "days", "h": "hours", "m": "minutes", "w": "weeks"}[u]: n}))
     if re.fullmatch(r"\d{4}-\d{2}-\d{2}", v):
         try:
             d = datetime.strptime(v, "%Y-%m-%d").replace(tzinfo=timezone.utc)
@@ -46,7 +49,7 @@ def bound(v: str | None, end: bool = False, now: datetime | None = None) -> str 
     try:
         d = datetime.fromisoformat(v.replace("Z", "+00:00"))
     except ValueError:
-        raise WindowError(f"{v}: expected YYYY-MM-DD (a UTC day), an ISO time, or Nd/Nh/Nm")
+        raise WindowError(f"{v}: expected YYYY-MM-DD (a UTC day), an ISO time, or Nd/Nh/Nm/Nw/Nmo")
     if d.tzinfo is None:
         d = d.replace(tzinfo=timezone.utc)
     return iso(d)

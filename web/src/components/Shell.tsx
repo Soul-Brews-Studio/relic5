@@ -1,29 +1,39 @@
 // The hub's shell, after the old ARRA Oracle Studio: a sticky top header on desktop, a bottom tab bar on a phone, and a Cmd/Ctrl-K palette to jump or search from anywhere.
 import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
 import { cx } from "./ui";
-import { Alert, Pulse, Asked, Close, Gear, Globe, Psi, Tree, Columns, Menu, Rows, Disk, Home, Jobs, Live, Mark, More, Moon, Note, Plug, Search, Session, Sun } from "./Icons";
+import { Alert, Pulse, Asked, Clock, Close, Gear, Globe, Psi, Tree, Columns, Menu, Rows, Disk, Home, Jobs, Live, Mark, More, Moon, Note, Plug, Search, Session, Sun } from "./Icons";
 
-export type View = "home" | "search" | "map" | "oracles" | "family" | "live" | "memory" | "jobs" | "queries" | "compare" | "store" | "connect" | "incidents" | "settings" | "perf";
+export type View = "home" | "search" | "hours" | "map" | "oracles" | "family" | "live" | "memory" | "jobs" | "queries" | "compare" | "store" | "connect" | "incidents" | "settings" | "perf";
 export type Theme = "dark" | "paper";
 export type Layout = "top" | "side";
 
-export const VIEWS: { id: View; label: string; icon: ComponentType<{ size?: number }>; phone?: boolean; group: 0 | 1 }[] = [
+/** Order (Nat, 2026-10-26: "organize and sort / order the menu"): the main views by how often they are used, then the
+ *  rest in three named sections: looking around (Explore), the hub's own health (Hub), and setting it up (Setup). */
+export type Section = "Explore" | "Hub" | "Setup";
+export const VIEWS: { id: View; label: string; icon: ComponentType<{ size?: number }>; phone?: boolean; group: 0 | 1; section?: Section }[] = [
   { id: "home", label: "Home", icon: Home, phone: true, group: 0 },
   { id: "search", label: "Search", icon: Search, phone: true, group: 0 },
-  { id: "map", label: "Map", icon: Globe, group: 0 },
   { id: "live", label: "Live", icon: Live, phone: true, group: 0 },
+  { id: "hours", label: "Hours", icon: Clock, phone: true, group: 0 },
   { id: "memory", label: "Knowledge", icon: Note, phone: true, group: 0 },
   { id: "oracles", label: "Oracles", icon: Psi, group: 0 },
-  { id: "family", label: "Family", icon: Tree, group: 1 },
-  { id: "jobs", label: "Jobs", icon: Jobs, group: 1 },
-  { id: "store", label: "Disk", icon: Disk, group: 1 },
-  { id: "queries", label: "Asked", icon: Asked, group: 1 },
-  { id: "compare", label: "Quality", icon: Columns, group: 1 },
-  { id: "connect", label: "Connect", icon: Plug, group: 1 },
-  { id: "perf", label: "Performance", icon: Pulse, group: 1 },
-  { id: "incidents", label: "Incidents", icon: Alert, group: 1 },
-  { id: "settings", label: "Settings", icon: Gear, group: 1 },
+  { id: "map", label: "Map", icon: Globe, group: 0 },
+  { id: "family", label: "Family", icon: Tree, group: 1, section: "Explore" },
+  { id: "queries", label: "Asked", icon: Asked, group: 1, section: "Explore" },
+  { id: "jobs", label: "Jobs", icon: Jobs, group: 1, section: "Hub" },
+  { id: "incidents", label: "Incidents", icon: Alert, group: 1, section: "Hub" },
+  { id: "perf", label: "Performance", icon: Pulse, group: 1, section: "Hub" },
+  { id: "compare", label: "Quality", icon: Columns, group: 1, section: "Hub" },
+  { id: "store", label: "Disk", icon: Disk, group: 1, section: "Hub" },
+  { id: "connect", label: "Connect", icon: Plug, group: 1, section: "Setup" },
+  { id: "settings", label: "Settings", icon: Gear, group: 1, section: "Setup" },
 ];
+const SECTIONS: { id: Section; label: string }[] = [{ id: "Explore", label: "Explore" }, { id: "Hub", label: "Hub health" }, { id: "Setup", label: "Setup" }];
+
+/** The views of group 1 under their section labels; `head` draws a label (hidden when the rail is icons only). */
+function sectioned<T>(item: (v: (typeof VIEWS)[number]) => T, head: (label: string) => T): T[] {
+  return SECTIONS.flatMap(sec => [head(sec.label), ...VIEWS.filter(v => v.group === 1 && v.section === sec.id).map(item)]);
+}
 
 export type HubState = "ok" | "warning" | "failed" | "unknown";
 const dot: Record<HubState, string> = { ok: "bg-ok", warning: "bg-warning", failed: "bg-danger", unknown: "bg-muted" };
@@ -65,7 +75,7 @@ export function Sidebar({ view, go, state, foot, theme, setTheme, badges, onPale
       <nav aria-label="Views" className="flex flex-col gap-0.5">
         {VIEWS.filter(v => v.group === 0).map(item)}
         <div className="mx-2.5 my-3 h-px bg-line" />
-        {VIEWS.filter(v => v.group === 1).map(item)}
+        {sectioned(item, l => <div key={l} className="px-2.5 pt-3 pb-1 text-xs font-bold tracking-[0.14em] text-faint uppercase first:pt-0 max-[1100px]:hidden">{l}</div>)}
       </nav>
       <div className="mt-auto flex flex-col gap-3 px-2 max-[1100px]:items-center max-[1100px]:px-0">
         <div className="flex gap-2 max-[1100px]:flex-col">
@@ -141,7 +151,7 @@ export function NavDrawer({ open, onClose, view, go, state, foot, badges, onPale
         <nav aria-label="Views" className="flex flex-col gap-0.5">
           {VIEWS.filter(v => v.group === 0).map(item)}
           <div className="mx-3 my-3 h-px bg-line" />
-          {VIEWS.filter(v => v.group === 1).map(item)}
+          {sectioned(item, l => <div key={l} className="px-3 pt-3 pb-1 text-xs font-bold tracking-[0.14em] text-faint uppercase first:pt-0">{l}</div>)}
         </nav>
         <div className="mt-auto px-3 text-xs leading-relaxed text-muted">
           <b className="flex items-center gap-2 text-xs font-bold tracking-[0.14em] text-text uppercase"><span className={cx("size-2 rounded-full", dot[state])} />{word[state]}</b>
@@ -152,8 +162,8 @@ export function NavDrawer({ open, onClose, view, go, state, foot, badges, onPale
   );
 }
 
-/** Everything past the six main views (Family, Jobs, Disk, Asked, Quality, Connect) in one "More" menu, so the
- *  top bar holds six items (Nat, 2026-10-24: "too long menu"; relic4-scan's review: 5-7 visible). Escape or a click
+/** Everything past the seven main views in one "More" menu, under Explore, Hub health and Setup, so the
+ *  top bar holds seven items (Nat, 2026-10-24: "too long menu"; relic4-scan's review: 5-7 visible). Escape or a click
  *  outside closes it. */
 function HubMenu({ view, go, badges }: { view: View; go: (v: View) => void; badges?: Partial<Record<View, number>> }) {
   const [open, setOpen] = useState(false);
@@ -178,7 +188,7 @@ function HubMenu({ view, go, badges }: { view: View; go: (v: View) => void; badg
       </button>
       {open && (
         <div role="menu" className="absolute top-full left-0 z-30 mt-1.5 w-56 rounded-xl border border-line-strong bg-panel p-1.5 shadow-[var(--shadow-pop)]">
-          {items.map(v => {
+          {sectioned(v => {
             const I = v.icon, on = view === v.id;
             return (
               <a key={v.id} role="menuitem" href={`#tab=${v.id}`} onClick={e => { e.preventDefault(); go(v.id); setOpen(false); }}
@@ -187,7 +197,7 @@ function HubMenu({ view, go, badges }: { view: View; go: (v: View) => void; badg
                 {!!badges?.[v.id] && <span className="ml-auto rounded-full bg-accent px-1.5 text-xs font-bold text-on-accent">{badges[v.id]}</span>}
               </a>
             );
-          })}
+          }, l => <div key={l} role="presentation" className="px-3 pt-3 pb-1 text-xs font-bold tracking-[0.14em] text-faint uppercase first:pt-1.5">{l}</div>)}
         </div>
       )}
     </div>

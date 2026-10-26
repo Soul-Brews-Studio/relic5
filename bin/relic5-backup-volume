@@ -1,0 +1,24 @@
+#!/bin/sh
+# Where relic5 backups live on this machine, on a CASE-SENSITIVE file system; prints that folder.
+#
+# The hub (Linux) holds folders that differ only by case: parts/white/git/github.com/soul-brews-studio and
+# .../Soul-Brews-Studio, arkkra-co and Arkkra-Co (white has both clones). On the Mac's default case-insensitive APFS
+# they are one folder: rsync --delete, copying the lowercase one, removed the uppercase one's subfolders as extra, then
+# could not write into them (mkstemp ... No such file or directory, rsync code 23), and every nightly backup since
+# 2026-10-24 ended as .partial. On macOS the snapshots go into a Case-sensitive APFS sparse bundle in the home folder,
+# attached here when it is not (no system change, no repartition); elsewhere the home folder is already case-sensitive.
+#
+#   RELIC5_BACKUP_IMAGE  the image (default ~/relic5-backup.sparsebundle, created on first use, grows as needed)
+#   RELIC5_BACKUP_MOUNT  where it is attached (default ~/relic5-backup-cs)
+set -u
+if [ "$(uname)" != Darwin ]; then echo "$HOME/relic5-backup"; exit 0; fi
+IMG="${RELIC5_BACKUP_IMAGE:-$HOME/relic5-backup.sparsebundle}"
+MNT="${RELIC5_BACKUP_MOUNT:-$HOME/relic5-backup-cs}"
+if ! mount | grep -q " on $MNT ("; then
+  if [ ! -d "$IMG" ]; then
+    hdiutil create -quiet -size 300g -type SPARSEBUNDLE -fs "Case-sensitive APFS" -volname relic5-backup "$IMG" >&2 || exit 1
+  fi
+  mkdir -p "$MNT"
+  hdiutil attach -quiet -nobrowse -owners on -mountpoint "$MNT" "$IMG" >&2 || exit 1
+fi
+echo "$MNT"

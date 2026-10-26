@@ -40,6 +40,10 @@ class SearchKw(TypedDict):
     cursor: str | None
 
 
+NEEDS_QUERY = ("search needs a query (words to find). For counts over time use relic_activity (stream text | tools | "
+               "thinking | git: commits), for a day relic_hours, for a month relic_month, for a whole session relic_conversation")
+
+
 class UsageError(ValueError):
     pass
 
@@ -123,10 +127,12 @@ class Relic5:
         if not fs:
             return None
         lst = ", ".join("'" + f.replace("'", "''") + "'" for f in fs)
-        # one row per sid: a main session over a subagent copy, then the first machine by name, then the most complete
-        # copy (latest last_ts, most rows, then by file name). Without the last three a sid held twice on one machine
-        # (~/.claude and a mirror) picked a copy at random, and relic_sessions' total moved between calls (2026-10-24).
-        return f"""(SELECT * EXCLUDE (rn) FROM (SELECT *, row_number() OVER (PARTITION BY sid ORDER BY tier <> 'main', machine,
+        # one row per sid: a main session over a subagent copy, a real machine over a one-time import (*-import), then
+        # the first machine by name, then the most complete copy (latest last_ts, most rows, then by file name). Without
+        # the last three a sid held twice on one machine (~/.claude and a mirror) picked a copy at random, and
+        # relic_sessions' total moved between calls (2026-10-24). Without the import rule "jsonl-truth-import" sorted
+        # before "m5" and its copies, every counter 0, won for 43,326 July sessions (2026-10-26, ChatGPT saw July as empty).
+        return f"""(SELECT * EXCLUDE (rn) FROM (SELECT *, row_number() OVER (PARTITION BY sid ORDER BY tier <> 'main', machine LIKE '%-import', machine,
                    last_ts DESC NULLS LAST, n_rows DESC NULLS LAST, base) AS rn
                    FROM (SELECT regexp_extract(filename, '/parts/([^/]+)/', 1) AS machine, * EXCLUDE (filename)
                    FROM read_parquet([{lst}], union_by_name = true, filename = true))) WHERE rn = 1)"""
@@ -186,7 +192,7 @@ class Relic5:
         """BM25 over the published index (search.py); ILIKE over the parts when none is built or FTS cannot parse
         the query (relic3 falls back the same way, query.ts:127-140)."""
         if query is None or not query.split():   # None or blank
-            raise UsageError("search needs a query")
+            raise UsageError(NEEDS_QUERY)
         kw = SearchKw(since=since, until=until, horizon=horizon, repo=repo, session=session, role=role, tier=tier, with_=with_,
                        limit=limit, cursor=cursor)
         if vector is not None:
@@ -214,7 +220,7 @@ class Relic5:
                      with_: str | None = None, limit: int = DEFAULT_LIMIT, cursor: str | None = None) -> Json:
         words = (query or "").split()
         if not words:
-            raise UsageError("search needs a query")
+            raise UsageError(NEEDS_QUERY)
         streams = ["text"] + ([s for s in with_.split(",") if s] if with_ else [])
         if with_ == "all":
             streams = list(STREAMS)
@@ -414,8 +420,11 @@ class Relic5:
         return [link(r) for r in reversed(b)], [link(r) for r in a]
 
     # ---- tail ----
-    def tail(self, n: int = 50, session: str | None = None, machine: str | None = None, since: str | None = None) -> Json:
-        """The newest messages as they land (open month first), every machine or one session: chunk 0 of each."""
+    def tail(self, n: int = 50, session: str | None = None, machine: str | None = None, since: str | None = None,
+             full: bool = False) -> Json:
+        """The newest messages as they land (open month first), every machine or one session: chunk 0 of each, its first
+        600 characters; full: the whole message, every chunk joined in order (Nat, 2026-10-26: "can we get all relic5
+        tail? full from user and agents?")."""
         from .parts import this_month
         mons = sorted(self.parts.months(), reverse=True)[:2]   # the open month, and the last one across a rollover
         src = self.parts.source("text", months=set(mons))
@@ -441,6 +450,13 @@ class Relic5:
             rows = run(where + ["ts > ?"], params + [cut])
         if len(rows) < n:
             rows = run(where, params)
+        if full and rows:
+            keys = [r["msgkey"] for r in rows]
+            whole = {x["msgkey"]: x["text"] for x in self._rows(
+                f"""SELECT msgkey, string_agg(text, '' ORDER BY chunk) AS text FROM {folded(src, "list_contains(?, msgkey)")}
+                    GROUP BY msgkey""", [keys])}
+            for r in rows:
+                r["text"] = whole.get(r["msgkey"], r["text"])
         names = self._names({r["sid"] for r in rows if r["sid"]})
         for r in rows:
             r["session_name"] = names.get(r["sid"])

@@ -74,6 +74,58 @@ TOOLS = [
                      "additionalProperties": False}},
     {"name": "relic_session", "description": "Resolve a session id prefix to its session record and subagent tree.",
      "inputSchema": {"type": "object", "properties": {"id": STR, "parent": PARENT}, "required": ["id"], "additionalProperties": False}},
+    {"name": "relic_conversation", "description": "One session's whole conversation in order, every turn in full: the human's "
+     "turns and the agent's replies (a prompt Claude Code stored twice shows once); tools=true also puts each tool call between "
+     "them (name, what the agent said it was doing, the command or file; results are not on the hub). Long sessions page: "
+     "pass next_offset back as offset. role: user | assistant | tool; since/until: Bangkok time 'YYYY-MM-DDTHH:MM'.",
+     "inputSchema": {"type": "object", "properties": {"id": STR, "offset": INT, "limit": INT, "role": STR, "since": STR, "until": STR,
+                     "tools": {"type": "boolean"}, "parent": PARENT}, "required": ["id"], "additionalProperties": False}},
+    {"name": "relic_readings", "description": "What relic-extract's models (gb300 qwen3:14b, z.ai glm-5.3, and the trial models) made of "
+     "each stretch of time: per window (day, 3h, 1h, 15m, across every session in it) type, focus, distraction, work, agents, "
+     "pattern, en and th summaries, and for deep readings friction and lesson. Newest first. since/until: 'YYYY-MM-DD' or "
+     "'YYYY-MM-DD HH:MM' Bangkok time, on the window's start; grain: day | 3h | 1h | 15m; model: substring (gb300, zai); "
+     "q: words that must all appear. Answers are a model's reading, not the transcript: open the window with relic_search "
+     "or relic_conversation for what was said.",
+     "inputSchema": {"type": "object", "properties": {"since": STR, "until": STR, "grain": STR, "model": STR, "q": STR,
+                     "limit": INT, "offset": INT}, "additionalProperties": False}},
+    {"name": "relic_hours", "description": "What happened on a day (Bangkok time), hour by hour: odin-oracle's Huginn "
+     "hourly flights (who typed what, commits, which oracles worked, the hour's theme) and its daily roll-up, Munin's searches, "
+     "and what z.ai / gb300 made of each hour (relic_readings). Start here for 'what happened today / yesterday'. date: "
+     "YYYY-MM-DD (default today); hour: 'HH' for that hour in full.",
+     "inputSchema": {"type": "object", "properties": {"date": STR, "hour": STR}, "additionalProperties": False}},
+    {"name": "relic_month", "description": "The long view. Without month: every month, with how many days the models read "
+     "(relic_readings), how many Huginn daily roll-ups, what kind of days (build / fix / ops / mixed counts) and whether a "
+     "sealed month recap exists. With month 'YYYY-MM': its recap and each day as Huginn's daily opening lines plus each "
+     "model's day focus. Then relic_hours {date} for one day hour by hour.",
+     "inputSchema": {"type": "object", "properties": {"month": STR}, "additionalProperties": False}},
+    {"name": "relic_activity", "description": "How much happened when, ready to chart: message counts (each message once) "
+     "by a time bucket and optionally split by one dimension. by: day | week | month | hour | hour_of_day | weekday (1 = Mon) | weekday_hour ('1-09' = Mon 09h, a heatmap in one call); "
+     "group: none | role (user = the human typed it) | project | machine | engine | tool | file (edited files; more in relic_files); stream: text (messages, default) | "
+     "tools (tool calls; group tool = which tool) | thinking | git (commits; role commit-claude = Claude co-wrote it); filters since/until ('YYYY-MM-DD', "
+     "Bangkok time), role, project (substring), machine; top: how many groups before 'other' (default 12). "
+     "Use it for activity charts, heatmaps, busiest hours, which projects took the time.",
+     "inputSchema": {"type": "object", "properties": {"by": STR, "group": STR, "since": STR, "until": STR, "role": STR,
+                     "project": STR, "machine": STR, "top": INT, "stream": STR}, "additionalProperties": False}},
+    {"name": "relic_usage", "description": "AI usage over time from the session table: per period (day | week | month | "
+     "year) and group (engine: claude / codex / omp / thclaws | tier | project | via | version | model | none) the sessions "
+     "and subagent sessions with any activity, empty_sessions (placeholders with no message or tool call, kept apart), "
+     "messages typed by the human and written by the agent, thinking blocks, tool calls, tool results and tool_errors "
+     "(results flagged is_error: a failed command, a refused edit), back to the first month (Sep 2025). When relic-scan "
+     "carries them: group model (each session's main model) and in_tokens / out_tokens / cache_read_tokens / "
+     "cache_write_tokens, summed over the tokens_known sessions (older months read NULL until re-indexed; Codex has no tokens).",
+     "inputSchema": {"type": "object", "properties": {"by": STR, "group": STR, "since": STR, "until": STR}, "additionalProperties": False}},
+    {"name": "relic_files", "description": "The files the agents changed most: Edit / Write / MultiEdit / NotebookEdit "
+     "calls by file path, with calls, sessions, days, first and last time (Bangkok), the tools and the projects. Filters "
+     "since/until, project (substring), contains (a path substring, e.g. 'relic5/src' or '.md'); top (default 30).",
+     "inputSchema": {"type": "object", "properties": {"since": STR, "until": STR, "project": STR, "contains": STR, "top": INT},
+                     "additionalProperties": False}},
+    {"name": "relic_team", "description": "Sessions started per project per Bangkok day over the last N days (default 90), "
+     "and which projects ran on the same days (pairs): who worked with whom, for a timeline or a co-activity chart.",
+     "inputSchema": {"type": "object", "properties": {"days": INT}, "additionalProperties": False}},
+    {"name": "relic_oracles", "description": "The oracles (agents with a ψ vault). Without name: every oracle with its notes "
+     "count, sections and machines. With name: that oracle's portrait: who it says it is, what it learned, its sessions, "
+     "its rules, and character / enlightenment prompts built from its notes.",
+     "inputSchema": {"type": "object", "properties": {"name": STR}, "additionalProperties": False}},
     {"name": "relic_trace", "description": "The trace log. With id (a trace.id from any result): the whole chain it belongs to, oldest "
      "first: each search with its first 10 hits as links, each message or session opened from it, the narrower searches after "
      "it and the saved-search runs made from it, with depth by parent. Without id: the newest chains.",
@@ -258,6 +310,71 @@ def run_tool(relic: Relic5, name: str, a: Json, door: str | None = None) -> Json
     if name == "relic_session":
         _check(a, ["id"])
         return relic.session(_str(a, "id"))
+    if name == "relic_conversation":
+        from .recap import conversation
+        _check(a, ["id", "offset", "limit", "role", "since", "until", "tools"])
+        lim = _int(a, "limit", 1)
+        return conversation(relic, _str(a, "id") or "", offset=_int(a, "offset") or 0, limit=min(lim or 200, 1000),
+                            tools=a.get("tools") is True, role=_str(a, "role"), since=_str(a, "since"), until=_str(a, "until"))
+    if name == "relic_hours":
+        import time as _time
+        from . import ravens
+        _check(a, ["date", "hour"])
+        try:
+            return ravens.brief(relic, _str(a, "date") or _time.strftime("%Y-%m-%d", _time.gmtime(_time.time() + 7 * 3600)), _str(a, "hour"))
+        except ValueError as ex:
+            raise UsageError(str(ex)) from ex
+    if name == "relic_month":
+        from . import ravens
+        _check(a, ["month"])
+        try:
+            return ravens.months(relic, _str(a, "month"))
+        except ValueError as ex:
+            raise UsageError(str(ex)) from ex
+    if name == "relic_activity":
+        from . import activity
+        _check(a, ["by", "group", "since", "until", "role", "project", "machine", "top", "stream"])
+        try:
+            return activity.activity(relic, _str(a, "by") or "day", _str(a, "group") or "none", _str(a, "since"), _str(a, "until"),
+                                     _str(a, "role"), _str(a, "project"), _str(a, "machine"), min(_int(a, "top", 1) or 12, 50),
+                                     _str(a, "stream") or "text")
+        except ValueError as ex:
+            raise UsageError(str(ex)) from ex
+    if name == "relic_usage":
+        from . import activity
+        _check(a, ["by", "group", "since", "until"])
+        try:
+            return activity.usage(relic, _str(a, "by") or "month", _str(a, "group") or "engine", _str(a, "since"), _str(a, "until"))
+        except ValueError as ex:
+            raise UsageError(str(ex)) from ex
+    if name == "relic_files":
+        from . import activity
+        _check(a, ["since", "until", "project", "contains", "top"])
+        return activity.files(relic, _str(a, "since"), _str(a, "until"), _str(a, "project"), _str(a, "contains"),
+                              min(_int(a, "top", 1) or 30, 500))
+    if name == "relic_team":
+        from . import family
+        _check(a, ["days"])
+        return family.team(relic, max(7, min(_int(a, "days", 1) or 90, 400)))
+    if name == "relic_oracles":
+        from . import oracles
+        _check(a, ["name"])
+        nm = _str(a, "name")
+        if not nm:
+            return oracles.listing(relic)
+        out = oracles.portrait(relic, nm)
+        if "error" in out:
+            raise NotFound(str(out["error"]))
+        return out
+    if name == "relic_readings":
+        from . import readings
+        _check(a, ["since", "until", "grain", "model", "q", "limit", "offset"])
+        try:
+            return readings.readings(relic.parts.root, since=_str(a, "since"), until=_str(a, "until"), grain=_str(a, "grain"),
+                                     model=_str(a, "model"), q=_str(a, "q"), limit=min(_int(a, "limit", 1) or 50, 500),
+                                     offset=_int(a, "offset") or 0)
+        except ValueError as ex:
+            raise UsageError(str(ex)) from ex
     if name == "relic_artifact_put":
         from . import artifacts
         _check(a, ["oracle", "title", "filename", "ext", "data", "text", "note", "prompt", "session"])

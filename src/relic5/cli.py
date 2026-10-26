@@ -7,6 +7,8 @@
   relic5 seals [--verify]                    on the hub: each machine's sealed months as the hub holds them (exit 1: a seal broke)
   relic5 seals --retire <machine> --succeeded-by S [--why W]   on the hub: a machine moved to the attic (docs/RETIRED.md)
   relic5 seal-day [YYYY-MM]                  on the hub: reconcile closed months end to end (exit 1: one is blocked)
+  relic5 import repair-meta <machine> [--root ~/relic5]   on the hub: fill an import machine's session counters
+                                  from its parts (the old meta kept as sessions.parquet.bak-<stamp>)
   relic5 import relic3 [--weeks 2026W40-2026-09-28,...] [--all] [--out ~/.relic-import/relic3]
                                   old relic3 weeks -> relic-scan month files of the sessions no machine holds
   relic5 tui [--token]            the hub in a terminal: status, live, search (+ show), jobs, queries
@@ -18,9 +20,15 @@
   relic5 serve [--root ~/relic5] [--host 127.0.0.1,100.103.52.67] [--port 8795]
   relic5 search <words> [--with tools] [--limit 20] [--since 7d] [--repo R] [--json]     any machine, over tailscale
   relic5 recap <session> [--limit 20|0] [--json]   what happened: turns asked, tools, files edited, how it ended
+  relic5 show <uid | relic5://… | relic3://…> [--before 2] [--after 2]   one hit in full, with its neighbours
+  relic5 --version
+  relic5 conversation <session> [--tools] [--role user] [--offset 0] [--limit 0]   the whole session, every turn in full
+  relic5 readings [--since D] [--until D] [--grain day|3h|1h|15m] [--model zai] [--q words] [--limit 20]
+                                  what gb300 / z.ai made of each window (relic-extract's readings on the hub)
   relic5 handoff <session> [--role user]   paste-ready block for a new session's first prompt (relic3 tail --handoff)
   relic5 pending                  what is not searchable yet: stale months (BM25), chunks without vectors, push lag
-  relic5 tail [--session S] [--machine M] [--n 50] [-f]   the newest messages as they land (-f: keep following)
+  relic5 tail [--session S] [--machine M] [--n 50] [-f] [--full]   the newest messages as they land, users and agents
+                                  (-f: keep following; --full: each whole message, not its first line)
   relic5 status [--json]
 
 Client settings: RELIC5_URL (default http://white.follow-rankine.ts.net:8795), RELIC5_TOKEN_FILE
@@ -153,6 +161,10 @@ def _main(argv: list[str] | None = None) -> None:
     if not args or args[0] in ("-h", "--help"):
         print(__doc__)
         return
+    if args[0] in ("--version", "-V", "version"):   # #96
+        from . import __version__
+        print(f"relic5 {__version__}")
+        return
     cmd, rest = args[0], args[1:]
     as_json = "--json" in rest
     rest = [a for a in rest if a != "--json"]
@@ -246,6 +258,11 @@ def _main(argv: list[str] | None = None) -> None:
     elif cmd == "mcp":
         from .shim import serve as shim
         shim(URL)
+    elif cmd == "import" and rest[:1] == ["repair-meta"] and rest[1:2]:   # on the hub: an import machine's counters
+        import duckdb
+        from . import importer
+        root = os.path.abspath(os.path.expanduser(_opt(rest, "--root", ROOT)))
+        importer.repair_meta(root, rest[1], duckdb.connect())
     elif cmd == "import" and rest[:1] == ["relic3-links"]:
         import duckdb
         from . import importer
@@ -311,6 +328,61 @@ def _main(argv: list[str] | None = None) -> None:
             for h in r["hits"]:
                 print(_line(h))
             print(f"{len(r['hits'])} hits" + (" (more: next_cursor)" if r.get("next_cursor") else ""))
+            if r.get("note"):
+                print(f"note: {r['note']}")
+    elif cmd == "show" and rest:   # #96: open a hit (uid, relic5:// or relic3:// link), the same as MCP relic_show
+        r = call("/api/show", {"id": rest[0], "before": _opt(rest, "--before", "2"), "after": _opt(rest, "--after", "2")})
+        if as_json:
+            print(json.dumps(r, ensure_ascii=False, indent=1))
+        else:
+            t = r["target"]
+            for x in r.get("before") or []:
+                print(f"   {x['ts_th'][:16].replace('T', ' ')} {x['role']}: {' '.join((x.get('text') or '').split())[:200]}")
+            print(f"── {t['ts_th'][:16].replace('T', ' ')} {t['role']}  {t.get('sid') or ''}  {t.get('src_path') or ''}:{t.get('src_line') or ''}")
+            print("".join(x.get("text") or "" for x in r.get("parts") or [t]).rstrip() + "\n")
+            for x in r.get("after") or []:
+                print(f"   {x['ts_th'][:16].replace('T', ' ')} {x['role']}: {' '.join((x.get('text') or '').split())[:200]}")
+    elif cmd == "conversation" and rest:
+        p: dict[str, str] = {"id": rest[0], "offset": _opt(rest, "--offset", "0"), "limit": _opt(rest, "--limit", "0") or "0"}
+        if "--tools" in rest:
+            p["tools"] = "1"
+        if who := _opt(rest, "--role"):
+            p["role"] = who
+        off, total = int(p["offset"]), None
+        while True:
+            r = call("/api/conversation", p | {"offset": str(off), "limit": p["limit"] if p["limit"] != "0" else "1000"})
+            if as_json:
+                print(json.dumps(r, ensure_ascii=False, indent=1))
+                break
+            if total is None:
+                total = r["total"]
+                print(f"{r['uuid']}  {r.get('name') or ''}\n{r.get('repo') or ''}  {r['startedAt']} .. {r['endedAt']}  {total} turns\n")
+            for t in r["turns"]:
+                if t["role"] == "tool":
+                    print(f"   {t['ts_th'][11:16]} {t['name']}: {t['text']}")
+                else:
+                    print(f"── {t['ts_th'][:16].replace('T', ' ')} {t['role']}\n{(t['text'] or '').rstrip()}\n")
+            if p["limit"] != "0" or r["next_offset"] is None:
+                break
+            off = r["next_offset"]
+    elif cmd == "readings":
+        p = {k: o for k in ("since", "until", "grain", "model", "q", "limit", "offset") if (o := _opt(rest, "--" + k))}
+        p.setdefault("limit", "20")
+        r = call("/api/readings", p)
+        if as_json:
+            print(json.dumps(r, ensure_ascii=False, indent=1))
+        else:
+            print(f"{r['total']:,} readings · " + ", ".join(f"{m} {n:,}" for m, n in r["models"].items()) + (f"\n{r['note']}" if r.get("note") else ""))
+            for x in r["rows"]:
+                print(f"\n── {x['start']} {x['grain']}  {x['model']}{' deep' if x['deep'] else ''}  {x.get('type') or ''}")
+                print(f"focus: {x.get('focus')}")
+                for w in x.get("work") or []:
+                    print(f"  - {w}")
+                for k in ("distraction", "friction", "lesson"):
+                    if x.get(k) and x[k] != "none":
+                        print(f"{k}: {x[k]}")
+                if x.get("th"):
+                    print(f"th: {x['th']}")
     elif cmd == "recap" and rest:
         r = call("/api/recap", {"id": rest[0], "limit": _opt(rest, "--limit", "20")})
         if as_json:
@@ -340,15 +412,23 @@ def _main(argv: list[str] | None = None) -> None:
     elif cmd == "tail":
         import time as _t
         params = {k: o for k in ("session", "machine", "n") if (o := _opt(rest, "--" + k))}
+        full = "--full" in rest
+        if full:
+            params["full"] = "1"
         follow, seen = "-f" in rest, set[str]()
         while True:
             r = call("/api/tail", params)
             for x in reversed(r["rows"]):
-                if x["msgkey"] in seen:
+                # one message is often written twice (a queued prompt, a re-sent assistant block): show it once
+                said = (x["sid"], x["role"], " ".join((x["text"] or "").split()))
+                if x["msgkey"] in seen or str(said) in seen:
                     continue
-                seen.add(x["msgkey"])
-                txt = " ".join((x["text"] or "").split())[:110]
-                print(f"{x['ts_th'][:16]} {','.join(x['machines']):<9} {x['role']:<9} {(x['session_name'] or x['sid'] or '')[:24]:<24} {txt}")
+                seen.update((x["msgkey"], str(said)))
+                head = f"{x['ts_th'][:16]} {','.join(x['machines']):<9} {x['role']:<9} {(x['session_name'] or x['sid'] or '')[:24]:<24}"
+                if full:
+                    print(f"── {head.rstrip()}  {(x['sid'] or '')[:8]}\n{(x['text'] or '').rstrip()}\n")
+                else:
+                    print(f"{head} {said[2][:110]}")
             if not follow:
                 break
             _t.sleep(30)

@@ -4,7 +4,7 @@ from conftest import COLS, row, write_parquet
 from relic5 import names
 from relic5.parts import Parts
 from relic5.query import Relic5
-from relic5.recap import handoff, recap
+from relic5.recap import conversation, handoff, recap
 
 META = ["sid", "tier", "parent_sid", "proj", "cat", "engine", "first_ts", "last_ts", "n_rows", "base", "months", "text_rows", "text_msgs",
         "user_text", "assistant_text", "thinking", "tool_calls", "tool_results", "tool_errors"]
@@ -34,6 +34,15 @@ def test_recap_and_handoff(root):
     body = h["text"].splitlines()
     assert body[2].startswith("[2026-07-01 10:00] me: build the thing") and "agent: I propose plan A" in h["text"] and body[-1].endswith("me: go")
     assert "agent:" not in handoff(r, "r1", user_only=True)["text"]
+    cv = conversation(r, "r1")
+    assert [(t["role"], t["text"]) for t in cv["turns"]][1] == ("assistant", "I propose plan A: a long explanation " * 5)
+    assert cv["total"] == 4 and cv["next_offset"] is None
+    ct = conversation(r, "r1", tools=True)
+    assert [t["role"] for t in ct["turns"]] == ["user", "assistant", "user", "tool", "tool", "assistant"]
+    assert ct["turns"][3]["text"] == "/x/a.py" and ct["turns"][4]["text"] == "pytest"
+    page = conversation(r, "r1", limit=2)
+    assert len(page["turns"]) == 2 and page["next_offset"] == 2 and conversation(r, "r1", offset=2)["turns"][0]["text"] == "go"
+    assert [t["text"] for t in conversation(r, "r1", role="user")["turns"]] == ["build the thing", "go"]
 
 
 def test_a_prompt_stored_twice_is_one_turn(root):

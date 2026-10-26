@@ -341,6 +341,24 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
         from . import trace
         return {"saved": trace.public(trace.saved(relic.parts.root))}
 
+    @app.post("/api/client-error", response_model=None)
+    async def client_error(request: Request) -> Response | Json:
+        """The page's own errors (pageerrors.py): a JSON list of reports, with X-Relic5-Request: 1 as every page POST."""
+        from . import pageerrors
+        if request.headers.get("x-relic5-request") != "1" or not request.headers.get("content-type", "").startswith("application/json"):
+            return JSONResponse({"error": "needs Content-Type: application/json and X-Relic5-Request: 1"}, status_code=400)
+        try:
+            body = await request.json()
+        except ValueError:
+            return JSONResponse({"error": "body is not JSON"}, status_code=400)
+        items = body if isinstance(body, list) else [body]
+        return {"kept": pageerrors.record(root, items, request.state.door)}
+
+    @app.get("/api/client-errors", response_model=None)
+    def client_errors(hours: float = 24) -> Json:
+        from . import pageerrors
+        return pageerrors.recent(root, max(0.1, min(hours, 24 * 30)))
+
     @app.post("/api/saved", response_model=None)
     async def saved_change(request: Request) -> Response | Json:
         """add {from | query, args, every, name} | remove {id} | run {id}. A JSON POST with X-Relic5-Request: 1, as the
@@ -691,13 +709,77 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
 
     @app.get("/api/tail", response_model=None)
     @cached(5)
-    def tail(n: int = 50, session: str = "", machine: str = "", since: str = "") -> Json:
-        return relic.tail(min(max(n, 1), 500), session or None, machine or None, since or None)
+    def tail(n: int = 50, session: str = "", machine: str = "", since: str = "", full: int = 0) -> Json:
+        return relic.tail(min(max(n, 1), 500), session or None, machine or None, since or None, bool(full))
 
     @app.get("/api/queries", response_model=None)
     @cached(15)
     def queries_route() -> Json:
         return selfknow.queries(relic.parts.root)
+
+    @app.get("/api/conversation", response_model=None)
+    def conversation_route(id: str, offset: int = 0, limit: int = 200, tools: int = 0, role: str = "",
+                           since: str = "", until: str = "") -> Json | JSONResponse:
+        from .recap import conversation
+        from .query import NotFound, UsageError
+        try:
+            return conversation(relic, id, max(offset, 0), min(max(limit, 0), 1000), bool(tools), role or None, since or None, until or None)
+        except (NotFound, UsageError) as ex:
+            return JSONResponse({"error": str(ex)}, status_code=404 if isinstance(ex, NotFound) else 400)
+
+    @app.get("/api/readings", response_model=None)
+    def readings_route(since: str = "", until: str = "", grain: str = "", model: str = "", q: str = "",
+                       limit: int = 50, offset: int = 0) -> Json | JSONResponse:
+        from . import readings
+        try:
+            return readings.readings(root, since or None, until or None, grain or None, model or None, q or None,
+                                     min(max(limit, 1), 500), max(offset, 0))
+        except ValueError as ex:
+            return JSONResponse({"error": str(ex)}, status_code=400)
+
+    @app.get("/api/hours", response_model=None)
+    @cached(60)
+    def hours_route(date: str = "") -> Json | JSONResponse:
+        from . import ravens
+        try:
+            return ravens.hours(relic, date or time.strftime("%Y-%m-%d", time.gmtime(time.time() + 7 * 3600)))
+        except ValueError as ex:
+            return JSONResponse({"error": str(ex)}, status_code=400)
+
+    @app.get("/api/activity", response_model=None)
+    @cached(300)
+    def activity_route(by: str = "day", group: str = "none", since: str = "", until: str = "", role: str = "",
+                       project: str = "", machine: str = "", top: int = 12, stream: str = "text") -> Json | JSONResponse:
+        from . import activity
+        try:
+            return activity.activity(relic, by, group, since or None, until or None, role or None, project or None,
+                                     machine or None, min(max(top, 1), 50), stream)
+        except ValueError as ex:
+            return JSONResponse({"error": str(ex)}, status_code=400)
+
+    @app.get("/api/usage", response_model=None)
+    @cached(300)
+    def usage_route(by: str = "month", group: str = "engine", since: str = "", until: str = "") -> Json | JSONResponse:
+        from . import activity
+        try:
+            return activity.usage(relic, by, group, since or None, until or None)
+        except ValueError as ex:
+            return JSONResponse({"error": str(ex)}, status_code=400)
+
+    @app.get("/api/hours/months", response_model=None)
+    @cached(300)
+    def hours_months(month: str = "") -> Json | JSONResponse:
+        from . import ravens
+        try:
+            return ravens.months(relic, month or None)
+        except ValueError as ex:
+            return JSONResponse({"error": str(ex)}, status_code=400)
+
+    @app.get("/api/hours/days", response_model=None)
+    @cached(300)
+    def hours_days(limit: int = 60) -> Json:
+        from . import ravens
+        return ravens.days(relic, min(max(limit, 1), 400))
 
     @app.get("/api/recap", response_model=None)
     def recap_route(id: str, limit: int = 20) -> Json | JSONResponse:

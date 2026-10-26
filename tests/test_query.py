@@ -143,3 +143,6 @@ def test_tail_newest_first(relic):
     assert [x["machines"] for x in relic.tail(n=50) if False] == []
     shared = [x for x in relic.tail(n=50)["rows"] if x["msgkey"] == SHARED["msgkey"]]
     assert len(shared) == 1 and shared[0]["machines"] == ["m5", "mba"]
+    whole = {x["msgkey"]: x["text"] for x in relic.tail(n=50, full=True)["rows"]}
+    first = {x["msgkey"]: x["text"] for x in relic.tail(n=50)["rows"]}
+    assert whole.keys() == first.keys() and all(whole[k].startswith(first[k][:50]) for k in whole)
