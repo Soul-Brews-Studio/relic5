@@ -26,6 +26,13 @@ else
     -L 127.0.0.1:11437:127.0.0.1:11437 -L 127.0.0.1:11510:127.0.0.1:11510 $GB && echo "tunnel: started"
 fi
 
+# m5's own LLM worker for the router's /v1/chat/completions split (Ollama qwen3.6 on the M5 Max GPU)
+if up 127.0.0.1:11434/api/tags; then
+  echo "ollama (m5 LLM worker): up"
+else
+  tmux new-session -d -s ollama "ollama serve" && echo "ollama: started (tmux attach -t ollama)"
+fi
+
 if up 127.0.0.1:11436/health; then
   echo "embed router: up"
 else

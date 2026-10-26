@@ -9,13 +9,14 @@ observations, mental models.
 
 ```
 relic5 memory …  ──►  hindsight-embed daemon (m5, 127.0.0.1:8888, profile "relic", its own pg0 database)
-                        │ LLM (fact extraction): qwen3.8-27b, vLLM on gb300, through the tunnel (127.0.0.1:11510)
-                        │ embeddings + rerank ▼
+                        │ LLM, embeddings, rerank ▼
                       embed/embed-router.py (m5, 127.0.0.1:11436)
                         ├─ ≥ 32 texts: split by speed, both at once ─► embed/gb300-serve.py (gb300 GPU, bf16, tunnel 11437)
                         │                                            └─► ANEEmbedBar (m5, 127.0.0.1:11435, w8a16)
                         ├─ < 32 texts: ANE first, gb300 if it fails
-                        └─ /rerank ─► gb300's BAAI/bge-reranker-v2-m3 (multilingual); gb300 down: given order, score 0
+                        ├─ /rerank ─► gb300's BAAI/bge-reranker-v2-m3 (multilingual); gb300 down: given order, score 0
+                        └─ /v1/chat/completions (fact extraction) ─► dispatched to workers with free slots:
+                              gb300 qwen3.8-27b vLLM (tunnel 11510, 24 slots) · m5 Ollama qwen3.6 on the GPU (4 slots)
 ```
 
 - **One vector space.** Both engines serve `unsloth/embeddinggemma-300m`, the model relic5 already mixes across
@@ -23,6 +24,10 @@ relic5 memory …  ──►  hindsight-embed daemon (m5, 127.0.0.1:8888, profil
   ANE w8a16, min 0.9976, p05 0.9983, median 0.9991. Each falls back to the other.
 - **Prompts in the text**, as relic5 does: Hindsight's `EMBEDDINGS_QUERY_PREFIX="task: search result | query: "` and
   `PASSAGE_PREFIX="title: none | text: "`; the engines take raw text.
+- **The LLM is split** (Nat: "workers and dispatch to do many concurrent / parallel"): Hindsight's 32 worker slots
+  call the router's `/v1/chat/completions` (model `relic-llm`); each call goes to the backend with the most free
+  slots and is retried on the other if it fails. gb300 is shared and busy (a 27B call took ~127 s under load), so
+  m5's own GPU adds a second, independent worker. `/health` shows `llm`: slots busy, calls, errors, average seconds.
 - **The LLM is ours.** gb300's `glm-5.3-flash` (another user's vLLM) answered 500 to everything on 2026-10-26, so the
   profile uses nazt's `qwen3.8-27b` (32k context, `REASONING_EFFORT=none`, `RETAIN_MAX_COMPLETION_TOKENS=8192`).
 - **Reranker:** `tei` through the router. The default FlashRank model (ms-marco-MiniLM) is English-only; much of the
@@ -45,7 +50,7 @@ relic5 memory import --since 30d [--min-events 6] [--max N] [--wait]   # a windo
 Measured 2026-10-26: 3,000 texts at 1,130 texts/s split, against 1,032 on gb300 alone. The ANE adds about 100 texts/s
 beside gb300's 1,100; for small batches the ANE on m5 is the quicker answer (no network round trip).
 
-**Throughput:** Hindsight's `WORKER_MAX_SLOTS` (default 10) caps parallel retains; the profile sets 32, with
+**Throughput:** Observations are on (`HINDSIGHT_API_ENABLE_OBSERVATIONS=true`). Hindsight's `WORKER_MAX_SLOTS` (default 10) caps parallel retains; the profile sets 32, with
 `RETAIN_LLM_MAX_CONCURRENT=32`, which the qwen3.8-27b vLLM on gb300 absorbs.
 
 `import` reads the session from the hub (`/api/conversation`), keeps user and assistant turns, and sends blocks of
