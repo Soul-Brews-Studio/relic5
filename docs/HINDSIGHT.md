@@ -134,6 +134,26 @@ its items, newest first, while the bank has fewer than 40 open operations, and r
 Tool output stays out: 3.97M rows of command output, little to learn as facts. At 88 blocks a minute (qwen3.8-27b on
 gb300 is the limit) memory takes ~2 h, the vault ~42 h, git and thinking ~3 h each, sessions ~3 days.
 
+## Discord: one bank per server
+
+Nat, 2026-10-26: "separate 1 per [server] to dig about the insight each server". The maw atlas backups on m5
+(`~/.maw/atlas-blobs/<Guild>-<id>[-stamp]/server.sqlite`, neo-oracle#205; 18 servers, 232,267 messages, 79.5 MB of
+text) go into one Hindsight bank each, `discord-<server>` (names in `~/.config/relic5/discord-banks.json`, editable),
+with full LLM extraction and observations on: a server's bank is for digging out its people, topics and decisions.
+
+```sh
+embed/discord-all.sh                                   # every finished server, smallest first (resumable)
+python3 embed/hindsight-import.py discord:<guild_id>   # one server
+relic5 hindsight banks                                 # every bank with documents / memories / observations
+relic5 hindsight recall "what did the team decide about X" --bank discord-<server>
+```
+
+`embed/discord-source.py` reads the newest finished run per server (`server.md` present) and makes one item per
+conversation (a thread, or a channel's top level) in ~3,000-character blocks, "[time] author: text [files: …]", bot
+messages marked (bot); tags `discord`, `guild:<id>`, `channel:<name>`. First server, Laris Co Ltd: 195 items → 90
+documents and 471 memories in about 90 s. The relic5 hub does not take Discord yet (a `discord` stream there, kept out
+of the public MCP, is the plan agreed with neo).
+
 ## Backup
 
 ```sh
