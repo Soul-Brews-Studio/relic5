@@ -4,19 +4,23 @@
 // The same steps as ~/.local/bin/relic-chain (relic-scan run, relic-extract run, relic5-push, relic5 embed, SYNC
 // check), written with Bun.$ and drawn like relic-scan: its own live scan, then each stage with a spinner and its time,
 // then one box with what the hub now holds for this machine. Exit 0 = every stage ran and the hub agrees.
-//   RELIC5_MACHINE=m5 bin/relic5-import
-// RELIC5_MACHINE is required (the name the hub knows this machine by; a wrong name files the rows under another
-// machine, see docs/RETIRED.md m5-nat). RELIC5_HUB_URL defaults to white. See docs/IMPORT.md.
+//   relic5-import                     # the machine's name from ~/.config/relic5/machine (one line, written once)
+//   RELIC5_MACHINE=m5 relic5-import   # or named here
+// There is no hostname fallback: a wrong name files the rows under another machine (docs/RETIRED.md m5-nat).
+// RELIC5_HUB_URL defaults to white. One push, then one index on the hub: relic-extract's `after` hook is not used
+// (removed from ~/.arra/relic.toml where this runs). See docs/IMPORT.md.
 import { $ } from "bun";
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
-const M = process.env.RELIC5_MACHINE;
-if (!M) { console.error("set RELIC5_MACHINE (m5, mba, white ...)"); process.exit(2); }
+const MACHINE_FILE = join(homedir(), ".config/relic5/machine");
+const M = process.env.RELIC5_MACHINE || (existsSync(MACHINE_FILE) ? readFileSync(MACHINE_FILE, "utf8").trim() : "");
+if (!M) { console.error(`name this machine once: echo m5 > ${MACHINE_FILE}   (or set RELIC5_MACHINE)`); process.exit(2); }
 const HUB = process.env.RELIC5_HUB_URL ?? "http://white.follow-rankine.ts.net:8795";
 const HOME = homedir();
 const PUSH = join(dirname(Bun.main), "relic5-push");
+const HUB_SSH = process.env.RELIC5_HUB_SSH ?? `nat@${new URL(HUB).hostname}`;
 const LOG = process.env.RELIC_CHAIN_LOG ?? join(HOME, "Library/Logs/relic-chain.log");
 
 const env: Record<string, string> = {
@@ -38,6 +42,7 @@ const stamp = () => new Date().toLocaleString("sv-SE").slice(0, 19);
 const log = (line: string) => appendFileSync(LOG, line.endsWith("\n") ? line : line + "\n");
 const since = (t: number) => `${((performance.now() - t) / 1000).toFixed(1)}s`;
 
+const STREAMS = ["text", "thinking", "tools"] as const;
 const t0 = performance.now(), startEpoch = Math.floor(Date.now() / 1000);
 let fails = 0;
 
@@ -86,11 +91,13 @@ const scanLine = scan
 if (scan) log(`run: ${scanLine}\nrun: done in ${scan.secs.toFixed(1)}s`);
 console.log();
 
-// 2. extract (its after hook pushes and asks the hub to index), 3. push again so the hub's versions refresh,
-// 4. embed what has no vector yet (AC power only)
+// 2. extract, 3. push once and have the hub index it, 4. embed what has no vector yet (AC power only)
 const ex = await stage("extract", () => sh($`relic-extract run`));
 const cut = ex.text.match(/\d+ part\(s\) cut[^·]*· [\d,]+ chunks/g)?.at(-1) ?? "0 parts cut";
+// what this push carries: the sync below waits for the hub to hold at least this much
+const pushed = await mine();
 await stage("push", () => sh($`${PUSH}`));
+await stage("index", () => sh($`ssh -o BatchMode=yes ${HUB_SSH} '~/relic5/app/.venv/bin/relic5 index --wait'`));
 let emb = "embed skipped (battery)";
 if ((await $`pmset -g batt`.nothrow().quiet().text()).includes("AC Power") && Bun.which("relic5", { PATH: env.PATH })) {
   const e = await stage("embed", () => sh($`relic5 embed --limit 20000`));
@@ -98,9 +105,9 @@ if ((await $`pmset -g batt`.nothrow().quiet().text()).includes("AC Power") && Bu
 }
 log(`${stamp()} chain end`);
 
-// 5. sync: this machine's counts against the hub's, until they agree (the hub may still be indexing). Both sides are
-// read again on every try: another scan or extract may run beside this one.
-const STREAMS = ["text", "thinking", "tools"] as const;
+// 5. sync: the hub against this machine, until they agree (the hub may still be indexing). Another pass may run beside
+// this one (2026-10-26 07:51: two passes on m5 at once) and cut more after this push, so "agree" is a range per stream:
+// at least what this run pushed, at most what this machine holds now.
 async function mine() {
   // relic-extract status --json (relic-extract#45): {"streams":{"text":{"chunks":N,...},...}}
   // A stream with no parts reads chunks 0; an unreadable one carries "error" instead of counts, and is left out (shows
@@ -130,7 +137,8 @@ const sync = await stage("sync", async () => {
     [want, status] = await Promise.all([mine(), hub()]);
     const m = status?.machines?.[M];
     got = m ? Object.fromEntries(STREAMS.map((s) => [s, m[s]?.rows])) : {};
-    if (fmt(want) === fmt(got)) return { exitCode: 0, text: "" };
+    if (STREAMS.every((s) => got[s] != null && want[s] != null && pushed[s] != null && pushed[s] <= got[s] && got[s] <= want[s]))
+      return { exitCode: 0, text: "" };
     await Bun.sleep(10_000);
   }
   return { exitCode: 1, text: `${M}: ${fmt(want)}  hub: ${status ? fmt(got) : "unreachable"}` };
