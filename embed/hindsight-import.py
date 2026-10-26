@@ -11,7 +11,7 @@ database. One progress line a minute: queued / total, documents in the bank, blo
 the next run picks up after the last queued batch. Pacing is on this run's own count (items sent minus documents
 created), since the bank's pending count lags an async post. Stdlib only.
 """
-import argparse, json, os, subprocess, sys, threading, time, urllib.error, urllib.request
+import argparse, concurrent.futures, json, os, subprocess, sys, threading, time, urllib.error, urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 HUB = os.environ.get("RELIC5_HUB_SSH", "nat@white.follow-rankine.ts.net")
@@ -130,6 +130,21 @@ def main() -> None:
         rate = (speed_hist[-1][1] - speed_hist[0][1]) / dt * 60 if dt > 5 else 0.0
         return rate, ((len(todo) - i) / rate * 60 if rate > 0 else None)
 
+    def send(batch: list) -> bool:
+        items_ = [{k: v for k, v in x.items() if v is not None} | ({"strategy": a.strategy} if a.strategy else {}) for x in batch]
+        try:
+            call("POST", f"/v1/default/banks/{a.bank}/memories", {"items": items_, "async": not a.strategy},
+                 timeout=900 if a.strategy else 120)
+            return True
+        except (urllib.error.URLError, OSError) as ex:
+            print(f"{a.source}: post failed ({ex}); will retry", flush=True)
+            return False
+
+    pool = None
+    running: dict = {}
+    retry: list = []
+    nxt = 0
+
     while i < len(todo):
         rate_, eta_ = own()
         status(source=a.source, strategy=a.strategy or "full", total=len(items), todo=len(todo), queued=i,
@@ -145,46 +160,49 @@ def main() -> None:
                 tty.write(f"\r  waiting … {time.time() - t0:.0f}s · open ops {st.get('pending_operations', 0):,} ")
                 tty.flush()
             time.sleep(5)
-        else:
-            n_par = a.parallel if a.strategy else 1
-            batches = [todo[j:j + a.batch] for j in range(i, min(len(todo), i + a.batch * n_par), a.batch)]
-
-            def send(batch: list) -> bool:
-                items_ = [{k: v for k, v in x.items() if v is not None} | ({"strategy": a.strategy} if a.strategy else {}) for x in batch]
-                try:
-                    call("POST", f"/v1/default/banks/{a.bank}/memories", {"items": items_, "async": not a.strategy},
-                         timeout=900 if a.strategy else 120)
-                    return True
-                except (urllib.error.URLError, OSError) as ex:
-                    print(f"{a.source}: post failed ({ex}); will retry", flush=True)
-                    return False
-
-            res: list[bool] = [False] * len(batches)
-            round_t = time.time()
-            th = [threading.Thread(target=lambda k=k: res.__setitem__(k, send(batches[k]))) for k in range(len(batches))]
-            for t_ in th:
-                t_.start()
-            while any(t_.is_alive() for t_ in th):   # heartbeat: the status file stays fresh while a round runs
-                next(t_ for t_ in th if t_.is_alive()).join(5)
-                rate_, eta_ = own()
-                status(source=a.source, strategy=a.strategy or "full", total=len(items), todo=len(todo), queued=i,
-                       skipped=len(items) - len(todo), percent=round(100 * i / max(len(todo), 1), 1), items_per_min=round(rate_, 1),
-                       eta_s=round(eta_) if eta_ else None, started=t0,
-                       state=f"sending {sum(t_.is_alive() for t_ in th)}/{len(th)} batches · round {time.time() - round_t:.0f}s")
-                if tty:
-                    tty.write(f"\r  round {time.time() - round_t:.0f}s · {sum(t_.is_alive() for t_ in th)}/{len(th)} batches in flight ")
-                    tty.flush()
-            ok_upto = 0
-            for k, b in enumerate(batches):   # advance only over the prefix that went in; the rest is retried
-                if not res[k]:
-                    break
-                for x in b:
-                    ledger.write(x["document_id"] + "\n")
-                ok_upto += len(b)
+        elif a.strategy:
+            # a continuous pipeline: --parallel batches always in flight, a new one starts the moment one ends, so a
+            # batch holding a huge note (vault max 3.3 MB) no longer stalls the rest (rounds waited for their slowest)
+            if pool is None:
+                pool = concurrent.futures.ThreadPoolExecutor(a.parallel)
+            while len(running) < a.parallel and nxt < len(todo):
+                batch = todo[nxt:nxt + a.batch]
+                running[pool.submit(send, batch)] = batch
+                nxt += len(batch)
+            fin, _ = concurrent.futures.wait(running, timeout=5, return_when=concurrent.futures.FIRST_COMPLETED)
+            for fu in fin:
+                batch = running.pop(fu)
+                if fu.result():
+                    for x in batch:
+                        ledger.write(x["document_id"] + "\n")
+                    sent += len(batch)
+                    i += len(batch)
+                else:
+                    retry.append(batch)
             ledger.flush()
-            sent += ok_upto
-            i += ok_upto
-            if ok_upto == 0:
+            if retry and len(running) < a.parallel:   # failed batches go again, after a pause
+                time.sleep(10)
+                for batch in retry:
+                    running[pool.submit(send, batch)] = batch
+                retry = []
+            if i < len(todo) and not running and nxt >= len(todo) and not retry:
+                break
+            rate_, eta_ = own()
+            status(source=a.source, strategy=a.strategy, total=len(items), todo=len(todo), queued=i,
+                   skipped=len(items) - len(todo), percent=round(100 * i / max(len(todo), 1), 1), items_per_min=round(rate_, 1),
+                   eta_s=round(eta_) if eta_ else None, started=t0, state=f"sending · {len(running)} batches in flight")
+            if tty:
+                tty.write(f"\r  {100 * i / max(len(todo), 1):.1f}% · {len(running)} batches in flight · {rate_:,.0f} items/min ")
+                tty.flush()
+        else:
+            batch = todo[i:i + a.batch]
+            if send(batch):
+                for x in batch:
+                    ledger.write(x["document_id"] + "\n")
+                ledger.flush()
+                sent += len(batch)
+                i += len(batch)
+            else:
                 time.sleep(30)
         if time.time() - last_print >= 60 or i >= len(todo):
             last_print = time.time()
