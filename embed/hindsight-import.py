@@ -222,7 +222,7 @@ def main() -> None:
             head = (f"{time.strftime('%H:%M')} {a.source}{'/' + a.strategy if a.strategy else ''}: {pct:.1f}% · queued {i:,}/{len(todo):,} · "
                     f"{r_:,.0f} items/min · ETA {(f'{e_ / 3600:.1f} h' if e_ and e_ > 5400 else f'{e_ / 60:.0f} min') if e_ else 'measuring'} · bank {st.get('total_documents', 0):,} docs, "
                     f"{st.get('total_nodes', 0):,} memories · open ops {ops:,}")
-            if i == 0:   # nothing of this source sent yet: say what it waits for, not a rate it does not have
+            if i == 0 and not a.strategy:   # nothing of this source sent yet: say what it waits for, not a rate it does not have
                 wait = f"{ops_rate:.0f} ops closed/min, starts in ~{(ops - a.max_pending) / ops_rate:.0f} min" if ops_rate > 0 else "measuring"
                 print(f"{head} · waiting for the queue to drop below {a.max_pending} ({wait})", flush=True)
             else:
