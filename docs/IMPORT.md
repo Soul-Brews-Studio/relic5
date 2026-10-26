@@ -8,13 +8,13 @@ when someone runs it, so the hub does not warn about an old push: `push_age_s` j
 ## Run one
 
 ```sh
-relic5-import                      # ~/.local/bin/relic5-import -> <relic5 checkout>/bin/relic5-import
+relic5 import                      # the Rust CLI (docs/CLI.md); `relic5-import` still works and calls it
 ```
 
-Once per machine: `echo m5 > ~/.config/relic5/machine` (the same file `relic5-push` reads), and
-`ln -sf <relic5 checkout>/bin/relic5-import ~/.local/bin/relic5-import`. `RELIC5_MACHINE=…` still overrides the file.
+Once per machine: `echo m5 > ~/.config/relic5/machine` (the same file `relic5-push` reads), and `just cli` (docs/CLI.md). `RELIC5_MACHINE=…` still overrides the file.
 
-`bin/relic5-import` is a Bun script (`#!/usr/bin/env bun`, written with `Bun.$`); bun 1.3+ must be on the machine.
+`relic5 import` is part of the Rust CLI (`cli/src/import.rs`). Until 2026-10-26 it was `bin/relic5-import`, a Bun
+script; that name is now a two-line shim to `relic5 import`.
 The machine name is required (no hostname fallback): it is the name the hub files the rows under. A wrong name puts the rows under
 another machine (that happened once, see `m5-nat` in docs/RETIRED.md). `RELIC5_HUB_URL` defaults to white
 (`http://white.follow-rankine.ts.net:8795`).
@@ -56,7 +56,7 @@ The MCP tool `relic_status` shows the same per machine.
 1. Log in, open herdr.
 2. `~/relic5-reboot-test/m5-start.sh`: brings back the herdr sessions (neo, laris-co, arkkra, phd). It does not
    import.
-3. `relic5-import` when the hub should catch up.
+3. `relic5 import` when the hub should catch up.
 
 The autostarts that used to do this, and everything else that started by itself on m5, are recorded in
 docs/RETIRED.md (2026-10-26).
@@ -67,4 +67,4 @@ The import only calls the other two tools; changes to them go to their repos (re
 
 - `relic-scan run` and `_scans.jsonl`: relic4-scan.
 - `relic-extract run` and `status --json` (relic-extract#45): relic-extract.
-- `bin/relic5-import`, `bin/relic5-push` and the hub's `/api/status`: relic5.
+- `relic5 import` (`cli/`), `bin/relic5-push` and the hub's `/api/status`: relic5.
