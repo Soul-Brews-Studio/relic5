@@ -7,7 +7,7 @@
 //!   relic5 hindsight import  <session> [<session> ...] [--bank B] [--wait]   a relic5 session's turns, queued (async)
 //!   relic5 hindsight import  --source memory|vault|git|thinking   a whole relic5 source from the hub, paced and resumable
 //!                         (runs embed/hindsight-import.py; Nat, 2026-10-26: "memory first then vault, git, thinking")
-//!   relic5 hindsight speed [--watch]                    embed + summarize speed per machine (m5, gb300), relic-scan look
+//!   relic5 hindsight speed [--watch]                    embed + summarize speed per machine (m5, gb300), job progress %, relic-scan look
 //!   relic5 hindsight banks                              every bank (relic5, one per Discord server) with its counts
 //!   relic5 hindsight backup                             pg_dump of the bank into relic5's backup volume (newest 3 kept)
 //!   relic5 hindsight top                                   live TUI: bank, queue + sparkline + ETA, workers, feeder log
@@ -390,9 +390,11 @@ fn speed(watch: bool) -> Result<(), Fail> {
         }
         format!("{s:<w$}")
     };
+    let mut samples: Vec<(f64, f64)> = Vec::new();   // (time, items done) of the job, for its rate in --watch
     loop {
         let h = http("GET", &format!("{}/health", router()), None, 30)
             .map_err(|_| Fail::Other(format!("relic5 hindsight: the dispatcher is not up at {} (embed/start.sh)", router()), 1))?;
+        let job = job_progress(&mut samples);
         let mut lines: Vec<(String, String)> = Vec::new();   // (machine, line)
         let (mut emb_s, mut tok_s, mut calls_m) = (0.0f64, 0.0f64, 0i64);
         for kind in ["embed", "llm", "rerank"] {
@@ -441,11 +443,64 @@ fn speed(watch: bool) -> Result<(), Fail> {
             println!("{c}╰{}{z}", "─".repeat(66));
         }
         println!("  {b}total{z}  embed {gr}{emb_s:.1} texts/s{z} · summarize {gr}{tok_s:.0} tok/s{z} ({calls_m} calls/min)");
+        if let Some((name, done, total, rate, banks)) = &job {
+            let pct = if *total > 0.0 { done / total } else { 0.0 };
+            let eta = if *rate > 0.0 && done < total { fmt_secs((total - done) / rate * 60.0) } else if done >= total { "done".into() } else { "?".into() };
+            println!("{c}╭─ {b}job{z}{c} · {name} {}{z}", "─".repeat(60usize.saturating_sub(name.chars().count())));
+            println!("{c}│{z}  {gr}{}{z} {b}{:>5.1}%{z}  {} / {} items  {g}{:.0} items/min · ETA {eta}{z}",
+                     bar(pct, 30), pct * 100.0, commas(&Value::from(*done as i64)), commas(&Value::from(*total as i64)), rate);
+            for (bank, d, t) in banks {
+                if d < t {
+                    println!("{c}│{z}    {g}{:<34}{z} {} {:>5.1}%  {}/{}", head(bank, 34), bar(d / t, 12), d / t * 100.0,
+                             commas(&Value::from(*d as i64)), commas(&Value::from(*t as i64)));
+                }
+            }
+            println!("{c}╰{}{z}", "─".repeat(66));
+        }
         if !watch {
             return Ok(());
         }
         std::thread::sleep(std::time::Duration::from_secs(2));
     }
+}
+
+/// The running job (~/.cache/relic5/hindsight-job.json, written by embed/discord-all.sh: items per bank): items done =
+/// each bank's documents (Hindsight makes a document when an item's extraction finished), capped at its item count.
+/// Returns (name, done, total, items/min, unfinished banks with done/total). The rate is from the --watch samples of the
+/// last 10 minutes, else the average since the job started.
+#[allow(clippy::type_complexity)]
+fn job_progress(samples: &mut Vec<(f64, f64)>) -> Option<(String, f64, f64, f64, Vec<(String, f64, f64)>)> {
+    let path = format!("{}/.cache/relic5/hindsight-job.json", std::env::var("HOME").unwrap_or_default());
+    let j: Value = serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()?;
+    let (mut done, mut total, mut open) = (0.0, 0.0, Vec::new());
+    for (bank, n) in j["banks"].as_object()? {
+        let t = n.as_f64().unwrap_or(0.0);
+        if t <= 0.0 {
+            continue;
+        }
+        let d = http("GET", &bank_url(bank, "/stats"), None, 10).ok().and_then(|st| st["total_documents"].as_f64()).unwrap_or(0.0).min(t);
+        done += d;
+        total += t;
+        open.push((bank.clone(), d, t));
+    }
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
+    samples.push((now, done));
+    samples.retain(|(t, _)| now - t <= 600.0);
+    let (t0, d0) = samples[0];
+    let rate = if now - t0 >= 30.0 && done > d0 {
+        (done - d0) / (now - t0) * 60.0
+    } else {
+        let started = j["started"].as_f64().unwrap_or(now);
+        if now - started > 60.0 { done / (now - started) * 60.0 } else { 0.0 }
+    };
+    open.sort_by(|a, b| (b.2 - b.1).total_cmp(&(a.2 - a.1)));
+    open.truncate(5);
+    Some((s(&j["name"]), done, total, rate, open))
+}
+
+fn fmt_secs(x: f64) -> String {
+    let m = (x / 60.0).round() as i64;
+    if m >= 60 { format!("{}h {:02}m", m / 60, m % 60) } else { format!("{m}m") }
 }
 
 fn clock_now() -> String {
