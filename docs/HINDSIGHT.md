@@ -5,10 +5,14 @@ go gb300 first?", "can we add more to make our cli compat with hindsight?". reli
 (vectorize-io/hindsight, the `hindsight-embed` daemon on m5) keeps what was learned from them: facts, entities,
 observations, mental models.
 
+**Names (Nat, 2026-10-26):** `relic5 hindsight …` is this bank. `relic5 memory …` is relic5's own memory, the Claude Code
+memory notes on the hub (`status`, `list`, `search`); its old Hindsight subcommands (`recall`, `retain`, `import`,
+`workers`, `top`) still work and forward to `relic5 hindsight` with a note.
+
 ## The pieces
 
 ```
-relic5 memory …  ──►  hindsight-embed daemon (m5, 127.0.0.1:8888, profile "relic", its own pg0 database)
+relic5 hindsight …  ──►  hindsight-embed daemon (m5, 127.0.0.1:8888, profile "relic", its own pg0 database)
                         │ LLM, embeddings, rerank ▼
                       embed/embed-router.py (m5, 127.0.0.1:11436)
                         ├─ ≥ 32 texts: split by speed, both at once ─► embed/gb300-serve.py (gb300 GPU, bf16, tunnel 11437)
@@ -39,13 +43,13 @@ relic5 memory …  ──►  hindsight-embed daemon (m5, 127.0.0.1:8888, profil
 
 ```sh
 embed/start.sh                                   # gb300 server, tunnel, router, daemon (skips what is up)
-relic5 memory top                                # live TUI (relic-scan's look): bank, documents/min sparkline,
+relic5 hindsight top                                # live TUI (relic-scan's look): bank, documents/min sparkline,
                                                  # queue + ETA, every worker's utilization bar and work, feeder log
-relic5 memory status                             # documents, memories, queue with an ETA, which engine answered
-relic5 memory import <session> [...] [--wait]    # a relic5 session's user/assistant turns, queued (async)
-relic5 memory recall "what did we decide about X" [--limit 10] [--json]
-relic5 memory retain "a fact" [--context C]
-relic5 memory import --since 30d [--min-events 6] [--max N] [--wait]   # a window, newest first; skips imported ones
+relic5 hindsight status                             # documents, memories, queue with an ETA, which engine answered
+relic5 hindsight import <session> [...] [--wait]    # a relic5 session's user/assistant turns, queued (async)
+relic5 hindsight recall "what did we decide about X" [--limit 10] [--json]
+relic5 hindsight retain "a fact" [--context C]
+relic5 hindsight import --since 30d [--min-events 6] [--max N] [--wait]   # a window, newest first; skips imported ones
 ```
 
 **Small batches** (Hindsight embeds ~5 facts a call) go whole to the engine with fewer requests in flight, so its 32
@@ -74,11 +78,11 @@ The router is the dispatcher; its workers live in `~/.config/relic5/workers.json
 from defaults on first start and re-read when it changes. Add or remove one while it runs:
 
 ```sh
-relic5 memory workers                                    # every worker: up, busy x/slots, util (last minute),
+relic5 hindsight workers                                    # every worker: up, busy x/slots, util (last minute),
                                                          # calls / texts / tokens per minute and in total, errors, avg s
-relic5 memory workers add llm gb300-b http://127.0.0.1:11520/v1/chat/completions --model qwen3-30b --slots 16
-relic5 memory workers add embed mba http://100.85.98.2:11435 --model embeddinggemma:ane-w8a16 --batch 64
-relic5 memory workers rm embed mba
+relic5 hindsight workers add llm gb300-b http://127.0.0.1:11520/v1/chat/completions --model qwen3-30b --slots 16
+relic5 hindsight workers add embed mba http://100.85.98.2:11435 --model embeddinggemma:ane-w8a16 --batch 64
+relic5 hindsight workers rm embed mba
 ```
 
 A new embed worker must answer a 768-dimension vector before it is accepted (one vector space). Utilization is the busy
@@ -102,7 +106,7 @@ the GPU. So the fast first pass is **embed-first** (chunks, no LLM) and the fact
 moved to embedding: Ollama `embeddinggemma:latest` on it matches the ANE (256 vault texts: cos min 0.9980, p05 0.9982,
 median 0.9986), registered as embed worker `m5-gpu`. gb300's embed server hits CUDA OOM while other users fill its GPU
 (254/256 GB); the router rests it 30 s after each error, and while the GPU stays full it is out of the embed pool
-(`relic5 memory workers rm embed gb300`; back with `relic5 memory workers add embed gb300 http://127.0.0.1:11437
+(`relic5 hindsight workers rm embed gb300`; back with `relic5 hindsight workers add embed gb300 http://127.0.0.1:11437
 --model unsloth/embeddinggemma-300m --batch 4096`). It still reranks.
 
 Small batches go to the worker that would finish first, (requests in flight + 1) / measured texts per second, so the
@@ -112,7 +116,7 @@ and the faster m5 GPU 535 (34% busy).
 ## Everything relic5 holds (Nat, 2026-10-26: "memory first then vault, git, thinking, then sessions")
 
 ```sh
-relic5 memory import --source memory     # then vault, git, thinking; then: relic5 memory import --since 3650d
+relic5 hindsight import --source memory     # then vault, git, thinking; then: relic5 hindsight import --since 3650d
 ```
 
 `embed/hindsight-source.py` runs on the hub and reads `~/relic5/parts`; `embed/hindsight-import.py` on m5 queues
@@ -132,7 +136,7 @@ gb300 is the limit) memory takes ~2 h, the vault ~42 h, git and thinking ~3 h ea
 
 ## Who owns what
 
-- `embed/gb300-serve.py`, `embed/embed-router.py`, `embed/start.sh`, `relic5 memory` (`cli/src/memory.rs`): relic5.
+- `embed/gb300-serve.py`, `embed/embed-router.py`, `embed/start.sh`, `relic5 hindsight` (`cli/src/memory.rs`): relic5.
 - Hindsight itself: vectorize-io/hindsight (`uv tool install hindsight-embed`), unchanged.
 - ANEEmbedBar: ane-oracle `tools/ane-embed-app`, unchanged. Its own worker pool refuses gb300 on purpose (a remote must
   report the same CoreML `vector_space_identity`), so the mixing happens in the router, backed by the parity numbers above.

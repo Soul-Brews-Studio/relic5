@@ -1,4 +1,4 @@
-//! `relic5 memory top`: the Hindsight import and its workers, live, in relic-scan's look (ratatui, same palette).
+//! `relic5 hindsight top`: the Hindsight import and its workers, live, in relic-scan's look (ratatui, same palette).
 //! Nat, 2026-10-26: "cool like tui? of relic scanner?".
 //!
 //!   bank        documents, memories by type, observations, consolidation waiting, last write
@@ -146,7 +146,7 @@ fn draw(f: &mut Frame, s: &Snap, bank: &str) {
     .areas(f.area());
 
     let head = Line::from(vec![
-        Span::styled(" ▓▒░ RELIC5·MEMORY ░▒▓ ", Style::new().fg(PINK).add_modifier(Modifier::BOLD)),
+        Span::styled(" ▓▒░ RELIC5·HINDSIGHT ░▒▓ ", Style::new().fg(PINK).add_modifier(Modifier::BOLD)),
         Span::styled(format!(" bank {bank} · Hindsight + the dispatcher's workers · {} ", s.at), Style::new().fg(DIM)),
         Span::styled(" q quit · r refresh ", Style::new().fg(DIM)),
     ]);
@@ -222,7 +222,7 @@ fn draw(f: &mut Frame, s: &Snap, bank: &str) {
                 prog,
             );
         }
-        None => f.render_widget(Paragraph::new(Span::styled("no import running (relic5 memory import --source …)", Style::new().fg(DIM))).block(block("import progress")), prog),
+        None => f.render_widget(Paragraph::new(Span::styled("no import running (relic5 hindsight import --source …)", Style::new().fg(DIM))).block(block("import progress")), prog),
     }
 
     // ── documents a minute, 15 minutes ──
@@ -350,7 +350,7 @@ pub fn top(bank: &str) -> i32 {
     match ratatui::run(|term| run(term, snap, bank, kick)) {
         Ok(()) => 0,
         Err(e) => {
-            eprintln!("relic5 memory top: {e}");
+            eprintln!("relic5 hindsight top: {e}");
             1
         }
     }

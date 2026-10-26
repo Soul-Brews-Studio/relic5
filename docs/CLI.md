@@ -10,6 +10,8 @@ embedder and the MCP server stay in Python, unchanged.
 | command | where it runs | done by |
 |---|---|---|
 | `search`, `show`, `recap`, `conversation`, `readings`, `handoff`, `tail [-f] [--full]`, `pending`, `status`, `--version` | any machine, over the tailnet | **Rust** (`cli/src/cmds.rs`, line for line from `src/relic5/cli.py`) |
+| `memory status \| list \| search` | any machine | **Rust** (`cli/src/notes.rs`): relic5's memory notes on the hub |
+| `hindsight …` | m5 | **Rust** (`cli/src/memory.rs`, `top.rs`): the Hindsight bank, its dispatcher workers, the live TUI (docs/HINDSIGHT.md) |
 | `import` (no subcommand) | each machine, by hand | **Rust** (`cli/src/import.rs`, docs/IMPORT.md); `bin/relic5-import` now calls it |
 | `index`, `serve`, `seals`, `seal-day`, `gc`, `log`, `token`, `import repair-meta / relic3 / relic3-links / jsonl-truth` | the hub | Python core |
 | `embed`, `mcp`, `tui`, `eval`, `--help`, no arguments, an unknown command | Mac clients / anywhere | Python core |
