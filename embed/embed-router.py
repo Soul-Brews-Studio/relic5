@@ -222,18 +222,28 @@ def coalescer(big: int) -> None:
                 item = pending.pop(0)
                 batch.append(item)
                 n += len(item[0])
-        texts = [t for ts, _, _ in batch for t in ts]
-        try:
-            engine, vecs = embed(texts, big, None)
-            k = 0
-            for ts, ev, box in batch:
-                box["engine"], box["vecs"] = engine + (f" (merged {len(batch)})" if len(batch) > 1 else ""), vecs[k:k + len(ts)]
-                k += len(ts)
-                ev.set()
-        except Exception as ex:   # noqa: BLE001 - every waiter gets the error
-            for _, ev, box in batch:
-                box["err"] = ex
-                ev.set()
+        slots.acquire()   # several merged batches at once, so every worker gets work (one at a time left the ANE idle
+        threading.Thread(target=run_merged, args=(batch, big), daemon=True).start()   # while m5-gpu was busy)
+
+
+slots = threading.BoundedSemaphore(8)
+
+
+def run_merged(batch: list, big: int) -> None:
+    texts = [t for ts, _, _ in batch for t in ts]
+    try:
+        engine, vecs = embed(texts, big, None)
+        k = 0
+        for ts, ev, box in batch:
+            box["engine"], box["vecs"] = engine + (f" (merged {len(batch)})" if len(batch) > 1 else ""), vecs[k:k + len(ts)]
+            k += len(ts)
+            ev.set()
+    except Exception as ex:   # noqa: BLE001 - every waiter gets the error
+        for _, ev, box in batch:
+            box["err"] = ex
+            ev.set()
+    finally:
+        slots.release()
 
 
 def embed_merged(texts: list[str]) -> tuple[str, list[list[float]]]:
