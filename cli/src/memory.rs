@@ -5,6 +5,8 @@
 //!   relic5 memory retain  <text> [--bank B] [--context C]
 //!   relic5 memory recall  <query> [--bank B] [--limit 10] [--json]
 //!   relic5 memory import  <session> [<session> ...] [--bank B] [--wait]   a relic5 session's turns, queued (async)
+//!   relic5 memory import  --since 30d [--min-events 6] [--max N] [--bank B] [--wait]   every top-level session in the
+//!                         window, newest first; a session already in the bank (its block #1 exists) is skipped
 //!
 //! HINDSIGHT_URL (default http://127.0.0.1:8888, the hindsight-embed daemon), bank default "relic5". The daemon
 //! embeds through embed/embed-router.py (gb300 for big batches, the ANE for small ones). docs/HINDSIGHT.md.
@@ -197,6 +199,17 @@ fn status(bank: &str, json_out: bool) -> Result<(), Fail> {
 fn import(bank: &str, mut a: Args, json_out: bool) -> Result<(), Fail> {
     let wait = a.has("--wait");
     a.0.retain(|x| x != "--wait");
+    if let Some(since) = a.opt("--since")? {
+        let min: i64 = a.opt_or("--min-events", "6")?.parse().map_err(|_| Fail::Other("--min-events must be a number".into(), 2))?;
+        let max: usize = a.opt_or("--max", "100000")?.parse().map_err(|_| Fail::Other("--max must be a number".into(), 2))?;
+        a.0 = window(&since, min, max)?;
+        let total = a.0.len();
+        a.0.retain(|id| http("GET", &bank_url(bank, &format!("/documents/{id}%231")), None, 20).is_err());
+        eprintln!("{total} sessions in the last {since} with at least {min} events; {} not in {bank} yet", a.0.len());
+        if a.0.is_empty() {
+            return Ok(());
+        }
+    }
     if a.0.is_empty() {
         return Err(Fail::Other("relic5 memory import <session> [...] [--bank B] [--wait]".into(), 2));
     }
@@ -269,6 +282,40 @@ fn import(bank: &str, mut a: Args, json_out: bool) -> Result<(), Fail> {
         eprintln!("\r\x1b[2K  all retained");
     }
     Ok(())
+}
+
+/// Top-level sessions in a window, newest first. /api/sessions answers at most 500 at a time, so it pages back with
+/// `until` = the oldest end time seen.
+fn window(since: &str, min_events: i64, max: usize) -> Result<Vec<String>, Fail> {
+    let mut ids: Vec<String> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut until: Option<String> = None;
+    loop {
+        let mut q = vec![("since".to_string(), since.to_string()), ("limit".to_string(), "500".to_string())];
+        if let Some(u) = &until {
+            q.push(("until".into(), u.clone()));
+        }
+        let r = hub::call("/api/sessions", &q)?;
+        let page = r["sessions"].as_array().cloned().unwrap_or_default();
+        let mut new = 0;
+        for x in &page {
+            let id = s(&x["uuid"]);
+            if x["uuid"].is_null() || !seen.insert(id.clone()) {
+                continue;
+            }
+            new += 1;
+            if x["events"].as_i64().unwrap_or(0) >= min_events {
+                ids.push(id);
+            }
+        }
+        let oldest = page.iter().filter_map(|x| x["endedAt"].as_str()).min().map(String::from);
+        if new == 0 || page.len() < 500 || ids.len() >= max || oldest.is_none() || oldest == until {
+            break;
+        }
+        until = oldest;
+    }
+    ids.truncate(max);
+    Ok(ids)
 }
 
 #[cfg(test)]

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """embed-router.py: one embedding endpoint on m5 for anything that speaks OpenAI or Ollama (Hindsight, relic5), routed
-the relic5 way (Nat, 2026-10-26: "if huge can we go gb300 first?"): a big batch goes to gb300's GPU first, a small one
-to m5's Neural Engine first, and each falls back to the other. Both serve embeddinggemma-300m in one vector space:
+the relic5 way (Nat, 2026-10-26: "if huge can we go gb300 first?", "gb300 + ANE split"): a big batch is split between
+gb300's GPU and m5's Neural Engine by their measured speed and runs on both at once; a small one goes to the ANE first;
+each falls back to the other. Both serve embeddinggemma-300m in one vector space:
 parity measured 2026-10-26 on 259 m5 texts, cosine min 0.9976, p05 0.9983, median 0.9991 (docs/HINDSIGHT.md).
 
   python3 embed/embed-router.py [--port 11436] [--big 32]
@@ -26,6 +27,7 @@ MODEL = "embeddinggemma-300m"
 stats: dict[str, dict[str, float]] = {"ane": {"requests": 0, "texts": 0, "errors": 0, "seconds": 0.0},
                                       "gb300": {"requests": 0, "texts": 0, "errors": 0, "seconds": 0.0}}
 last = {"engine": None, "at": None}
+rate = {"gb300": 400.0, "ane": 70.0}   # texts/s to start the split with; replaced by what each engine measures
 lock = threading.Lock()
 
 
@@ -52,27 +54,64 @@ def on_gb300(texts: list[str]) -> list[list[float]]:
 ENGINES = {"ane": on_ane, "gb300": on_gb300}
 
 
-def embed(texts: list[str], big: int, prefer: str | None) -> tuple[str, list[list[float]]]:
-    order = [prefer] if prefer in ENGINES else []
-    order += [e for e in (["gb300", "ane"] if len(texts) >= big else ["ane", "gb300"]) if e not in order]
-    err: Exception | None = None
-    for e in order:
-        t = time.time()
-        try:
-            v = ENGINES[e](texts)
-        except (urllib.error.URLError, OSError, KeyError, ValueError) as ex:
-            with lock:
-                stats[e]["errors"] += 1
-            err = ex
-            continue
+def one(e: str, texts: list[str]) -> list[list[float]]:
+    """texts on one engine, with its stats; raises on failure"""
+    t = time.time()
+    try:
+        v = ENGINES[e](texts)
+    except (urllib.error.URLError, OSError, KeyError, ValueError):
         with lock:
-            s = stats[e]
-            s["requests"] += 1
-            s["texts"] += len(texts)
-            s["seconds"] += time.time() - t
-            last.update(engine=e, at=time.strftime("%FT%T%z"))
-        return e, v
-    raise RuntimeError(f"no engine answered: {err}")
+            stats[e]["errors"] += 1
+        raise
+    dt = time.time() - t
+    with lock:
+        s = stats[e]
+        s["requests"] += 1
+        s["texts"] += len(texts)
+        s["seconds"] += dt
+        if len(texts) >= 8 and dt > 0:   # texts per second, smoothed: what the split below divides by
+            rate[e] = 0.7 * rate[e] + 0.3 * (len(texts) / dt)
+        last.update(engine=e, at=time.strftime("%FT%T%z"))
+    return v
+
+
+def embed(texts: list[str], big: int, prefer: str | None) -> tuple[str, list[list[float]]]:
+    """A small batch (or a preferred engine): one engine, the other as fallback. A big one: split between gb300 and the
+    ANE in proportion to their measured speed, both at once (Nat, 2026-10-26: "gb300 + ANE split"); a part that fails
+    is redone on the other engine."""
+    if prefer in ENGINES or len(texts) < big:
+        order = ([prefer] if prefer in ENGINES else []) + [e for e in ("ane", "gb300") if e != prefer]
+        err: Exception | None = None
+        for e in order:
+            try:
+                return e, one(e, texts)
+            except (urllib.error.URLError, OSError, KeyError, ValueError) as ex:
+                err = ex
+        raise RuntimeError(f"no engine answered: {err}")
+    with lock:
+        g, a = rate["gb300"], rate["ane"]
+    n_g = max(1, min(len(texts) - 1, round(len(texts) * g / (g + a))))
+    parts = {"gb300": texts[:n_g], "ane": texts[n_g:]}
+    out: dict[str, list[list[float]]] = {}
+    errs: dict[str, Exception] = {}
+
+    def run(e: str) -> None:
+        try:
+            out[e] = one(e, parts[e])
+        except (urllib.error.URLError, OSError, KeyError, ValueError) as ex:
+            errs[e] = ex
+
+    th = [threading.Thread(target=run, args=(e,)) for e in parts]
+    for t in th:
+        t.start()
+    for t in th:
+        t.join()
+    for e, ex in list(errs.items()):   # redo a failed part on the engine that answered
+        other = "ane" if e == "gb300" else "gb300"
+        if other in errs:
+            raise RuntimeError(f"no engine answered: {ex}")
+        out[e] = one(other, parts[e])
+    return ("gb300+ane" if not errs else "fallback"), out["gb300"] + out["ane"]
 
 
 def health(url: str) -> object:
@@ -108,7 +147,7 @@ def main() -> None:
         def do_GET(self) -> None:
             p = self.path.split("?")[0]
             if p == "/health":
-                self.send(200, {"status": "ok", "model": MODEL, "big": a.big, "last": last, "stats": stats,
+                self.send(200, {"status": "ok", "model": MODEL, "big": a.big, "last": last, "stats": stats, "rate": rate,
                                 "engines": {"ane": health(ANE), "gb300": health(GB300)}})
             elif p == "/info":
                 try:
