@@ -11,7 +11,7 @@ use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::layout::{Constraint, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Cell, Paragraph, Row, Sparkline, Table};
+use ratatui::widgets::{Block, BorderType, Cell, Gauge, Paragraph, Row, Sparkline, Table};
 use ratatui::{DefaultTerminal, Frame};
 use serde_json::Value;
 use std::collections::VecDeque;
@@ -32,6 +32,7 @@ struct Snap {
     stats: Option<Value>,
     health: Option<Value>,
     feeder: Vec<String>,
+    progress: Option<Value>,   // ~/.cache/relic5/hindsight-feeder.json: the running import's percent, speed, ETA
     // (seconds since start, documents, memories, open operations)
     hist: VecDeque<(f64, f64, f64, f64)>,
     err: Option<String>,
@@ -59,8 +60,12 @@ fn fetch(snap: &Arc<Mutex<Snap>>, bank: &str, t0: Instant) {
         .into_iter()
         .rev()
         .collect();
+    let progress = std::fs::read_to_string(format!("{}/.cache/relic5/hindsight-feeder.json", std::env::var("HOME").unwrap_or_default()))
+        .ok()
+        .and_then(|t| serde_json::from_str::<Value>(&t).ok());
     let mut s = snap.lock().unwrap();
     s.at = clock();
+    s.progress = progress;
     s.err = match (&stats, &health) {
         (None, _) => Some(format!("Hindsight not answering at {hs} (hindsight-embed daemon start)")),
         (_, None) => Some(format!("dispatcher not answering at {router} (embed/start.sh)")),
@@ -128,10 +133,12 @@ fn draw(f: &mut Frame, s: &Snap, bank: &str) {
     let n_workers = ["llm", "embed", "rerank"].iter().map(|k| s.health.as_ref().and_then(|h| h["workers"][k].as_array().map(|a| a.len())).unwrap_or(0)).sum::<usize>();
     let w_h = (n_workers as u16 + 3).max(5);
     let h = f.area().height;
+    let h = h.saturating_sub(3);   // the progress bar always shows
     let (spark_h, feed_h) = if h >= 1 + 5 + 6 + w_h + 8 { (6, 8) } else if h >= 1 + 5 + w_h + 8 { (0, 8) } else if h >= 1 + 5 + w_h + 3 { (0, 3) } else { (0, 0) };
-    let [title, top, spark, workers, feeder] = Layout::vertical([
+    let [title, top, prog, spark, workers, feeder] = Layout::vertical([
         Constraint::Length(1),
         Constraint::Length(5),
+        Constraint::Length(3),
         Constraint::Length(spark_h),
         Constraint::Fill(1),
         Constraint::Length(feed_h),
@@ -186,6 +193,37 @@ fn draw(f: &mut Frame, s: &Snap, bank: &str) {
         .block(block("queue")),
         c3,
     );
+
+    // ── the running import: percent, speed, ETA (from the feeder's status file) ──
+    match &s.progress {
+        Some(pg) => {
+            let pct = pg["percent"].as_f64().unwrap_or(0.0);
+            let age = (std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0)
+                - pg["at"].as_f64().unwrap_or(0.0)) as i64;
+            let eta = match pg["eta_s"].as_f64() {
+                Some(e) if e >= 5400.0 => format!("ETA {:.1} h", e / 3600.0),
+                Some(e) if e > 0.0 => format!("ETA {:.0} min", e / 60.0),
+                Some(_) => "done".into(),
+                None => "ETA measuring".into(),
+            };
+            let state = if age > 120 { format!("stopped {age}s ago") } else { crate::py::s(&pg["state"]) };
+            let label = format!(
+                "{} · {} · {:.1}% · {}/{} items · {:.0}/min · {} · {}",
+                crate::py::s(&pg["source"]), crate::py::s(&pg["strategy"]), pct,
+                num(pg["queued"].as_f64().unwrap_or(0.0)), num(pg["todo"].as_f64().unwrap_or(0.0)),
+                pg["items_per_min"].as_f64().unwrap_or(0.0), eta, state
+            );
+            f.render_widget(
+                Gauge::default()
+                    .block(block("import progress"))
+                    .gauge_style(Style::new().fg(if age > 120 { DIM } else { GREEN }).bg(Color::Rgb(30, 34, 44)))
+                    .ratio((pct / 100.0).clamp(0.0, 1.0))
+                    .label(Span::styled(label, Style::new().fg(Color::White).add_modifier(Modifier::BOLD))),
+                prog,
+            );
+        }
+        None => f.render_widget(Paragraph::new(Span::styled("no import running (relic5 memory import --source …)", Style::new().fg(DIM))).block(block("import progress")), prog),
+    }
 
     // ── documents a minute, 15 minutes ──
     let w = spark.width.saturating_sub(2) as usize;

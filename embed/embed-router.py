@@ -51,7 +51,7 @@ last = {"engine": None, "at": None}
 def counters(kind: str, name: str) -> dict:
     return run.setdefault(f"{kind}:{name}", {"inflight": 0, "requests": 0, "texts": 0, "tokens": 0, "errors": 0, "seconds": 0.0,
                                              "rate": 400.0 if name == "gb300" else 70.0, "since": time.time(),
-                                             "window": collections.deque(), "open": []})
+                                             "window": collections.deque(), "open": [], "rest_until": 0.0})
 
 
 def done(c: dict, start: float, texts: int = 0, tokens: int = 0) -> None:
@@ -133,6 +133,7 @@ def embed_on(w: dict, texts: list[str]) -> list[list[float]]:
     except ERRS:
         with lock:
             c["errors"] += 1
+            c["rest_until"] = time.time() + 30   # sit out 30 s (gb300 2026-10-26: CUDA OOM, a shared full GPU)
         raise
     finally:
         with lock:
@@ -149,7 +150,8 @@ def embed_on(w: dict, texts: list[str]) -> list[list[float]]:
 
 def embed(texts: list[str], big: int, prefer: str | None) -> tuple[str, list[list[float]]]:
     with lock:
-        ws = list(reg.get("embed") or [])
+        allw = list(reg.get("embed") or [])
+        ws = [w for w in allw if counters("embed", w["name"])["rest_until"] <= time.time()] or allw   # resting ones only if none is left
     if not ws:
         raise RuntimeError("no embed worker in the registry")
     if len(texts) < big or len(ws) == 1 or prefer:
@@ -279,7 +281,8 @@ def health(big: int) -> dict:
         c = counters(k, w["name"])
         with lock:
             u = usage(c, int(w.get("slots") or 1) if k == "llm" else 1)
-            tot = {x: (round(v, 1) if isinstance(v, float) else v) for x, v in c.items() if x not in ("window", "since", "open")}
+            tot = {x: (round(v, 1) if isinstance(v, float) else v) for x, v in c.items() if x not in ("window", "since", "open", "rest_until")}
+            tot["resting_s"] = max(0, round(c["rest_until"] - time.time()))
         return w | {"up": up(w["url"])["status"]} | tot | u | {"avg_s": round(c["seconds"] / max(c["requests"], 1), 1),
                                                               "uptime_s": round(time.time() - c["since"])}
 
