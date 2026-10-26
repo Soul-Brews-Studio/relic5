@@ -18,11 +18,46 @@ HUB = os.environ.get("RELIC5_HUB_SSH", "nat@white.follow-rankine.ts.net")
 HS = os.environ.get("HINDSIGHT_URL", "http://127.0.0.1:8888").rstrip("/")
 
 
+_conn = threading.local()
+
+
 def call(method: str, path: str, body: object | None = None, timeout: float = 60) -> dict:
-    req = urllib.request.Request(HS + path, json.dumps(body).encode() if body is not None else None,
-                                 {"Content-Type": "application/json"}, method=method)
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.load(r)
+    """one request on this thread's kept-alive connection: a new connection per request ran the Mac out of local
+    ports (13,000 lookups in seconds, then "Errno 49 Can't assign requested address", 2026-10-26 23:56)"""
+    import http.client
+    u = urllib.parse.urlsplit(HS)
+    data = json.dumps(body).encode() if body is not None else None
+    for attempt in (0, 1):
+        c = getattr(_conn, "c", None)
+        if c is None:
+            c = _conn.c = http.client.HTTPConnection(u.hostname, u.port or 80, timeout=timeout)
+        c.timeout = timeout
+        try:
+            c.request(method, path, data, {"Content-Type": "application/json"})
+            r = c.getresponse()
+            raw = r.read()
+        except (http.client.HTTPException, OSError) as ex:
+            c.close()
+            _conn.c = None
+            if attempt:
+                raise urllib.error.URLError(ex)
+            continue
+        if r.status >= 400:
+            raise urllib.error.HTTPError(HS + path, r.status, raw[:300].decode("utf-8", "replace"), r.headers, None)
+        return json.loads(raw) if raw else {}
+    return {}
+
+
+def queued(bank: str) -> int:
+    """operations waiting or running, counted by /operations: /stats' pending count is cached and read 0 while 2,805
+    were pending (2026-10-26 23:56), so pacing on it let a run flood the queue"""
+    n = 0
+    for s in ("pending", "processing"):
+        try:
+            n += int(call("GET", f"/v1/default/banks/{bank}/operations?status={s}&limit=1", timeout=30).get("total") or 0)
+        except (urllib.error.URLError, OSError, ValueError):
+            return 10 ** 6   # unknown: hold back
+    return n
 
 
 def stats(bank: str) -> dict:
@@ -100,7 +135,7 @@ def upgrade(a: argparse.Namespace, items: list, done: set, meta: dict, ledger, t
     the stored embed-first). New or changed: one async full retain (replace). Already full: skipped. Paced on the
     bank's open operations like a full import; --until stops sending at a time."""
     import hashlib
-    plan = {"new": 0, "changed": 0, "chunks": 0, "full": 0, "queued": 0}
+    plan = {"new": 0, "changed": 0, "chunks": 0, "reset": 0, "full": 0, "queued": 0}
     todo = []
     for x in items:
         if x["document_id"] in done:
@@ -113,6 +148,10 @@ def upgrade(a: argparse.Namespace, items: list, done: set, meta: dict, ledger, t
             kind = "changed"
         elif strat:
             kind = "chunks"
+        elif x.get("_was_chunks", True) and a.source in ("thinking", "git", "sessions", "vault"):
+            # these sources went in embed-first; a reset strategy without a ledger line is a run stopped between the
+            # two calls (2026-10-26 23:56): reprocess it
+            kind = "reset"
         else:
             kind = "full"
         plan[kind] += 1
@@ -120,7 +159,7 @@ def upgrade(a: argparse.Namespace, items: list, done: set, meta: dict, ledger, t
             todo.append((kind, x))
     if a.limit:
         todo = todo[:a.limit]
-    print(f"{a.source}: upgrade plan · {plan['chunks']:,} embed-first to extract · {plan['new']:,} new · "
+    print(f"{a.source}: upgrade plan · {plan['chunks']:,} embed-first to extract · {plan['reset']:,} reset, to reprocess · {plan['new']:,} new · "
           f"{plan['changed']:,} changed · {plan['full']:,} already full · {plan['queued']:,} done before"
           + (f" · nothing new after {a.until}" if a.until else ""), flush=True)
     t0, sent, i, last = time.time(), 0, 0, 0.0
@@ -129,8 +168,9 @@ def upgrade(a: argparse.Namespace, items: list, done: set, meta: dict, ledger, t
     def one(kind: str, x: dict) -> bool:
         item = {k: v for k, v in x.items() if v is not None}
         try:
-            if kind == "chunks":
-                call("POST", f"/v1/default/banks/{a.bank}/memories", {"items": [item], "async": False}, timeout=600)
+            if kind in ("chunks", "reset"):
+                if kind == "chunks":
+                    call("POST", f"/v1/default/banks/{a.bank}/memories", {"items": [item], "async": False}, timeout=600)
                 call("POST", f"/v1/default/banks/{a.bank}/documents/{urllib.parse.quote(x['document_id'], safe='')}/reprocess", {}, timeout=120)
             else:
                 call("POST", f"/v1/default/banks/{a.bank}/memories", {"items": [item], "async": True}, timeout=120)
@@ -146,7 +186,7 @@ def upgrade(a: argparse.Namespace, items: list, done: set, meta: dict, ledger, t
                   "the queued ones finish on their own", flush=True)
             break
         st = stats(a.bank)
-        ops = st.get("pending_operations", 0)
+        ops = queued(a.bank)
         if ops >= a.max_pending:
             if tty:
                 tty.write(f"\r  {a.source} upgrade · {i:,}/{len(todo):,} · waiting, open ops {ops:,} ")
@@ -175,7 +215,7 @@ def upgrade(a: argparse.Namespace, items: list, done: set, meta: dict, ledger, t
             rate = i / mins if mins > 0.5 else 0
             eta = f"{(len(todo) - i) / rate / 60:.1f} h" if rate else "measuring"
             print(f"{time.strftime('%H:%M')} {a.source}/upgrade: {100 * i / max(len(todo), 1):.1f}% · {i:,}/{len(todo):,} sent · "
-                  f"{rate:,.0f}/min · ETA {eta} · open ops {st.get('pending_operations', 0):,}", flush=True)
+                  f"{rate:,.0f}/min · ETA {eta} · open ops {ops:,}", flush=True)
     pool.shutdown()
     status(source=a.source, strategy="upgrade", total=len(items), todo=len(todo), queued=i, skipped=len(items) - len(todo),
            percent=round(100 * i / max(len(todo), 1), 1), items_per_min=0, eta_s=0, started=t0,
