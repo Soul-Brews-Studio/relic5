@@ -11,7 +11,7 @@ database. One progress line a minute: queued / total, documents in the bank, blo
 the next run picks up after the last queued batch. Pacing is on this run's own count (items sent minus documents
 created), since the bank's pending count lags an async post. Stdlib only.
 """
-import argparse, json, os, subprocess, sys, time, urllib.error, urllib.request
+import argparse, json, os, subprocess, sys, threading, time, urllib.error, urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 HUB = os.environ.get("RELIC5_HUB_SSH", "nat@white.follow-rankine.ts.net")
@@ -52,10 +52,32 @@ def main() -> None:
     ledger = open(ledger_path, "a")
 
     print(f"{a.source}: reading the hub ({HUB}) …", flush=True)
+    # a running clock while it reads (Nat: "can show running time (1s 2s 3s 4s)"), on the terminal itself, so the
+    # log that tee keeps gets one line, not a carriage return a second
+    try:
+        tty = open("/dev/tty", "w")
+    except OSError:
+        tty = None
+    t_read = time.time()
     with open(os.path.join(HERE, "hindsight-source.py"), "rb") as src:
-        p = subprocess.run(["ssh", "-o", "BatchMode=yes", HUB, f"~/relic5/app/.venv/bin/python - {a.source}"],
-                           stdin=src, capture_output=True, check=True)
-    items = [json.loads(l) for l in p.stdout.decode("utf-8").splitlines() if l.strip()]
+        proc = subprocess.Popen(["ssh", "-o", "BatchMode=yes", HUB, f"~/relic5/app/.venv/bin/python - {a.source}"],
+                                stdin=src, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        chunks: list[bytes] = []
+        reader = threading.Thread(target=lambda: chunks.append(proc.stdout.read()))
+        reader.start()
+        while reader.is_alive():
+            if tty:
+                tty.write(f"\r  reading … {time.time() - t_read:.0f}s ")
+                tty.flush()
+            reader.join(1)
+        proc.wait()
+    if tty:
+        tty.write("\r\x1b[2K")
+        tty.flush()
+    if proc.returncode != 0:
+        sys.exit(f"{a.source}: the hub read failed (rc {proc.returncode}): {proc.stderr.read().decode()[-300:]}")
+    items = [json.loads(l) for l in b"".join(chunks).decode("utf-8").splitlines() if l.strip()]
+    print(f"{a.source}: read in {time.time() - t_read:.0f}s", flush=True)
     todo = [x for x in items if x["document_id"] not in done]
     blocks = sum(max(1, len(x["content"]) // 3000) for x in todo)
     print(f"{a.source}: {len(items):,} items on the hub, {len(items) - len(todo):,} already queued, {len(todo):,} to go "
@@ -71,6 +93,9 @@ def main() -> None:
         # while 9,495 items went in), so pace on what this run knows: items sent minus documents created since.
         inflight = sent - (st.get("total_documents", 0) - docs0)
         if st.get("pending_operations", 0) >= a.max_pending or inflight >= a.max_inflight:
+            if tty:
+                tty.write(f"\r  waiting … {time.time() - t0:.0f}s · open ops {st.get('pending_operations', 0):,} ")
+                tty.flush()
             time.sleep(5)
         else:
             batch = todo[i:i + a.batch]
@@ -88,6 +113,9 @@ def main() -> None:
             i += len(batch)
         if time.time() - last_print >= 60 or i >= len(todo):
             last_print = time.time()
+            if tty:   # clear the ticker before the minute line
+                tty.write("\r\x1b[2K")
+                tty.flush()
             st = stats(a.bank)
             ops = st.get("pending_operations", 0)
             hist.append((time.time(), ops, st.get("total_documents", 0)))
