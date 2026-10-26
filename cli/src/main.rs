@@ -8,6 +8,7 @@ mod core;
 mod hub;
 mod import;
 mod memory;
+mod top;
 mod py;
 
 use cmds::Args;

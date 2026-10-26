@@ -39,6 +39,8 @@ relic5 memory …  ──►  hindsight-embed daemon (m5, 127.0.0.1:8888, profil
 
 ```sh
 embed/start.sh                                   # gb300 server, tunnel, router, daemon (skips what is up)
+relic5 memory top                                # live TUI (relic-scan's look): bank, documents/min sparkline,
+                                                 # queue + ETA, every worker's utilization bar and work, feeder log
 relic5 memory status                             # documents, memories, queue with an ETA, which engine answered
 relic5 memory import <session> [...] [--wait]    # a relic5 session's user/assistant turns, queued (async)
 relic5 memory recall "what did we decide about X" [--limit 10] [--json]
