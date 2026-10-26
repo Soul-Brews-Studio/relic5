@@ -211,6 +211,19 @@ if [ "${RELIC5_GIT:-1}" != 0 ] && command -v ghq >/dev/null 2>&1; then
     report git "$out"
   fi
 fi
+# Discord backups, text only (relic5 discord.py makes them the "discord" layer, kept off the public MCP): the servers
+# neo's ~/.maw/atlas-blobs/manifest.json marks verified, one ~/.cache/relic5/discord/<guild>.jsonl.gz each
+# (bin/relic5-discord-export, re-read only when a backup changed) -> parts/<machine>/discord/. Only on a machine that
+# holds maw atlas backups; RELIC5_DISCORD=0 turns it off.
+DISC="${RELIC5_DISCORD_CACHE:-$HOME/.cache/relic5/discord}"
+if [ "${RELIC5_DISCORD:-1}" != 0 ] && [ -f "${ATLAS_BLOBS:-$HOME/.maw/atlas-blobs}/manifest.json" ]; then
+  [ -n "$DRY" ] || RELIC5_DISCORD_CACHE="$DISC" "$(dirname "$0")/relic5-discord-export" | tail -1 || rc=1
+  if [ -d "$DISC" ] && { [ -n "$DRY" ] || on_hub "mkdir -p '$target/discord'"; }; then
+    out=$(rsync -a $DRY --timeout=120 --stats --exclude='.*' --exclude='*.stamp' --exclude='*.tmp' "$DISC/" "$R$target/discord/" 2>&1) \
+      || { echo "$out" >&2; rc=1; }
+    report discord "$out"
+  fi
+fi
 # What this machine runs, so the hub can tell when machines differ (relic_status warns on a mismatch).
 ver() { command -v "$1" >/dev/null 2>&1 && "$1" --version 2>/dev/null | head -1 | sed 's/^[^ ]* //' || echo none; }
 here=${STAMP:-$(cd "$(dirname "$0")" && git log -1 --format=%h -- relic5-push 2>/dev/null)}; here=${here:-unknown}   # the commit that last changed this file

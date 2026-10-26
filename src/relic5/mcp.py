@@ -44,7 +44,7 @@ SEARCH_PROPS = {
     "home": {**STR, "description": "whose .claude (or .codex) the message was written in, a substring of its folder, case-blind: "
              "/Users/nat/.claude, beta/.claude, .claude1, a project's own .../.claude-hello/.claude. relic_homes lists them"},
     "title": {**STR, "description": "sessions whose host title contains this (case-blind)"},
-    "with": {**STR, "enum": ["tools", "thinking", "vault", "memory", "git", "all"], "description": "also search tool calls, thinking, ψ notes, or all; memory = only the agents' memory notes (rules, decisions, references; role memory-feedback / memory-project / memory-reference / memory-user); git = only git commits of every ghq repo, back to 2025 when no transcript survives (role commit-claude = Claude co-wrote it, commit-codex, commit)"},
+    "with": {**STR, "enum": ["tools", "thinking", "vault", "memory", "git", "discord", "all"], "description": "also search tool calls, thinking, ψ notes, or all; memory = only the agents' memory notes (rules, decisions, references; role memory-feedback / memory-project / memory-reference / memory-user); git = only git commits of every ghq repo, back to 2025 when no transcript survives (role commit-claude = Claude co-wrote it, commit-codex, commit); discord = only messages of our Discord servers (maw atlas backups; role discord / discord-bot; cat = the server, title = #channel › thread; not part of all)"},
     "limit": {"type": "integer", "minimum": 1, "description": f"default {DEFAULT_LIMIT}"},
     "cursor": {**STR, "description": "next_cursor from a previous result"},
     "semantic": {"type": "boolean", "description": "route to semantic search (errors if unavailable)"},
@@ -418,6 +418,17 @@ def _err(i: object, code: int, message: str) -> Json:
     return {"jsonrpc": "2.0", "id": i, "error": {"code": code, "message": message}}
 
 
+def _public_tools() -> list[Json]:
+    """TOOLS as the public door sees them: no "discord" in any `with` (discord.py; Nat, 2026-10-26)."""
+    out: list[Json] = json.loads(json.dumps(TOOLS))
+    for t in out:
+        w = t.get("inputSchema", {}).get("properties", {}).get("with")
+        if w:
+            w["enum"] = [x for x in w.get("enum", []) if x != "discord"]
+            w["description"] = w["description"].split("; discord = ")[0]
+    return out
+
+
 def handle(relic: Relic5, msg: object, door: str | None = None, call: ToolCall | None = None) -> Json | None:
     """One JSON-RPC message -> its reply, or None for a notification."""
     if not isinstance(msg, dict) or msg.get("jsonrpc") != "2.0" or not isinstance(msg.get("method"), str):
@@ -430,7 +441,8 @@ def handle(relic: Relic5, msg: object, door: str | None = None, call: ToolCall |
     if method == "ping":
         return None if note else _ok(i, {})
     if method == "tools/list":
-        return _ok(i, {"tools": TOOLS})
+        from .discord import PUBLIC
+        return _ok(i, {"tools": _public_tools() if PUBLIC.get() else TOOLS})
     if method == "tools/call":
         name = params.get("name")
         if not isinstance(name, str):

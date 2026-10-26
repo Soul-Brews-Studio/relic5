@@ -152,8 +152,8 @@ relic5 hindsight recall "what did the team decide about X" --bank discord-<serve
 `embed/discord-source.py` reads the verified rows of neo's `~/.maw/atlas-blobs/manifest.json` (messages in server.md = in server.sqlite; rewritten in full after every check), or without it the newest finished run per server (`server.md` present), and makes one item per
 conversation (a thread, or a channel's top level) in ~3,000-character blocks, "[time] author: text [files: …]", bot
 messages marked (bot); tags `discord`, `guild:<id>`, `channel:<name>`. First server, Laris Co Ltd: 195 items → 90
-documents and 471 memories in about 90 s. The relic5 hub does not take Discord yet. Planned with neo: a `discord` stream, local CLI and m5's local MCP only;
-Nat decided (2026-10-26) that no guild goes to the public MCP.
+documents and 471 memories in about 90 s. The relic5 hub has them too, as the `discord` search layer (`relic5 search … --with discord`, `src/relic5/discord.py`):
+local CLI, the tailnet UI and m5's MCP only; Nat decided (2026-10-26) that no guild goes to the public MCP.
 
 Overall progress (Nat, 2026-10-26: "can we see total in percent of progress?"): `discord-all.sh` first counts every
 server's items into `~/.cache/relic5/hindsight-job.json` (38,084 items in 18 banks); `relic5 hindsight speed` shows
