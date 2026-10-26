@@ -1,5 +1,9 @@
 # RelicFeeder: the menu-bar feeder for a Mac (plan, 2026-10-23)
 
+> 2026-10-26: on m5 nothing feeds the hub by itself now (Nat: "we just do manual"). The relic-chain LaunchAgent is
+> retired (docs/RETIRED.md) and imports run by hand with `bin/relic5-import` (docs/IMPORT.md). RelicFeeder stays a
+> plan; a LaunchAgent for it needs Nat's OK.
+
 Nat: "make swift daemon app to feed the relic5 white server, but search and learn first, we done a lot".
 relic4-scan: "keep it to a menu-bar LaunchAgent that runs the same relic-chain steps and shows the hub's freshness card."
 
