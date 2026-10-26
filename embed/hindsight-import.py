@@ -104,25 +104,49 @@ def main() -> None:
     except OSError:
         tty = None
     t_read = time.time()
-    with open(os.path.join(HERE, "hindsight-source.py"), "rb") as src:
-        proc = subprocess.Popen(["ssh", "-o", "BatchMode=yes", HUB, f"~/relic5/app/.venv/bin/python - {a.source}"],
-                                stdin=src, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        chunks: list[bytes] = []
-        reader = threading.Thread(target=lambda: chunks.append(proc.stdout.read()))
-        reader.start()
-        while reader.is_alive():
+    # the source runs on the hub into a file there, and the file comes over with rsync (compressed, resumable): one
+    # long ssh pipe was cut short at 938 MB (sessions, 2026-10-26) and left half a JSON line
+    remote, local = f"/tmp/hindsight-{a.source}.jsonl", os.path.expanduser(f"~/.cache/relic5/hindsight-{a.source}.jsonl")
+    done_read = threading.Event()
+
+    def clock() -> None:
+        while not done_read.wait(1):
             if tty:
                 tty.write(f"\r  reading … {time.time() - t_read:.0f}s ")
                 tty.flush()
-            reader.join(1)
-        proc.wait()
+
+    threading.Thread(target=clock, daemon=True).start()
+    with open(os.path.join(HERE, "hindsight-source.py"), "rb") as src:
+        r = subprocess.run(["ssh", "-o", "BatchMode=yes", HUB, f"~/relic5/app/.venv/bin/python - {a.source} > {remote}"],
+                           stdin=src, capture_output=True)
+    if r.returncode != 0:
+        done_read.set()
+        sys.exit(f"{a.source}: the hub read failed (rc {r.returncode}): {r.stderr.decode()[-300:]}")
+    for attempt in range(5):
+        r = subprocess.run(["rsync", "-z", "--partial", "--timeout=120", f"{HUB}:{remote}", local], capture_output=True)
+        if r.returncode == 0:
+            break
+        time.sleep(5)
+    done_read.set()
     if tty:
         tty.write("\r\x1b[2K")
         tty.flush()
-    if proc.returncode != 0:
-        sys.exit(f"{a.source}: the hub read failed (rc {proc.returncode}): {proc.stderr.read().decode()[-300:]}")
-    items = [json.loads(l) for l in b"".join(chunks).decode("utf-8").splitlines() if l.strip()]
-    print(f"{a.source}: read in {time.time() - t_read:.0f}s", flush=True)
+    if r.returncode != 0:
+        sys.exit(f"{a.source}: copying {remote} from the hub failed (rc {r.returncode}): {r.stderr.decode()[-300:]}")
+    chunks = [open(local, "rb").read()]
+    print(f"{a.source}: read in {time.time() - t_read:.0f}s ({os.path.getsize(local) / 1e6:,.0f} MB)", flush=True)
+    items, bad = [], 0
+    # split on "\n" only: str.splitlines() also breaks at U+2028, U+0085 and \x1c-\x1e, which json.dumps(ensure_ascii=False)
+    # leaves raw inside strings (2026-10-26: 18 session blocks cut in two, the file itself had 0 bad lines)
+    for l in b"".join(chunks).decode("utf-8", "replace").split("\n"):
+        if not l.strip():
+            continue
+        try:
+            items.append(json.loads(l))
+        except ValueError:   # a line cut short (the hub's read was interrupted): skip it, say so, keep the rest
+            bad += 1
+    if bad:
+        print(f"{a.source}: {bad:,} line(s) from the hub were not JSON (cut short?) and are skipped", flush=True)
     # never overwrite a document the bank already has (an earlier full LLM import of the same session would be
     # replaced by bare chunks): skip every id already in the bank, whatever ledger queued it
     have: set[str] = set()
