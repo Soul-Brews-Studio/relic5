@@ -26,7 +26,13 @@ def call(method: str, path: str, body: object | None = None, timeout: float = 60
 
 
 def stats(bank: str) -> dict:
-    return call("GET", f"/v1/default/banks/{bank}/stats", timeout=30)
+    """the bank's stats; waits out a daemon restart instead of ending the run"""
+    while True:
+        try:
+            return call("GET", f"/v1/default/banks/{bank}/stats", timeout=30)
+        except (urllib.error.URLError, OSError, ValueError) as ex:
+            print(f"hindsight not answering ({ex}); retrying in 15 s", flush=True)
+            time.sleep(15)
 
 
 def main() -> None:

@@ -11,6 +11,9 @@ parity measured 2026-10-26 on 259 m5 texts, cosine min 0.9976, p05 0.9983, media
   POST /api/embed       {"model"?, "input": str | [str]}  Ollama shape back
   POST /rerank          {"query", "texts"} -> [{"index", "score"}]   TEI shape, gb300's cross-encoder (bge-reranker-v2-m3);
                         with gb300 down it answers the texts in their given order with score 0, so a recall still works
+  POST /v1/chat/completions   the LLM, split between gb300's qwen3.8-27b vLLM (tunnel 11510) and m5's own GPU
+                        (Ollama qwen3.6, 11434): each call goes to the backend with the most free slots, and a failed
+                        call is retried on the other (Nat, 2026-10-26: "both gpu / ane + gb300 ... parallel? split works?")
   GET  /info            the reranker's model_id (TEI)
   GET  /health          both engines, which one answered last, counts
 
@@ -52,6 +55,52 @@ def on_gb300(texts: list[str]) -> list[list[float]]:
 
 
 ENGINES = {"ane": on_ane, "gb300": on_gb300}
+
+# LLM backends for /v1/chat/completions: url, model name there, slots (calls at once), what to drop from a request
+LLMS = {
+    "gb300": {"url": "http://127.0.0.1:11510/v1/chat/completions", "model": "qwen3.8-27b", "slots": 24, "inflight": 0,
+              "calls": 0, "errors": 0, "seconds": 0.0, "extra": {"chat_template_kwargs": {"enable_thinking": False}}},
+    "m5": {"url": "http://127.0.0.1:11434/v1/chat/completions", "model": "qwen3.6", "slots": 4, "inflight": 0,
+           "calls": 0, "errors": 0, "seconds": 0.0, "extra": {}},
+}
+llm_cv = threading.Condition()
+
+
+def llm(body: dict) -> tuple[str, bytes]:
+    """One chat completion on the least-loaded backend with a free slot; waits for a slot; retries on the other."""
+    tried: list[str] = []
+    last_err: Exception | None = None
+    while len(tried) < len(LLMS):
+        with llm_cv:
+            while True:
+                free = [(b["inflight"] / b["slots"], k) for k, b in LLMS.items() if k not in tried and b["inflight"] < b["slots"]]
+                if free:
+                    k = min(free)[1]
+                    LLMS[k]["inflight"] += 1
+                    break
+                llm_cv.wait(1)
+        b = LLMS[k]
+        req = {kk: vv for kk, vv in body.items() if kk != "chat_template_kwargs"} | {"model": b["model"]} | b["extra"]
+        req.pop("stream", None)
+        t = time.time()
+        try:
+            r = urllib.request.urlopen(urllib.request.Request(b["url"], json.dumps(req).encode(), {"Content-Type": "application/json"}),
+                                       timeout=900)
+            raw = r.read()
+            with llm_cv:
+                b["calls"] += 1
+                b["seconds"] += time.time() - t
+            return k, raw
+        except (urllib.error.URLError, OSError, ValueError) as ex:
+            with llm_cv:
+                b["errors"] += 1
+            tried.append(k)
+            last_err = ex
+        finally:
+            with llm_cv:
+                b["inflight"] -= 1
+                llm_cv.notify_all()
+    raise RuntimeError(f"no LLM answered: {last_err}")
 
 
 def one(e: str, texts: list[str]) -> list[list[float]]:
@@ -148,6 +197,7 @@ def main() -> None:
             p = self.path.split("?")[0]
             if p == "/health":
                 self.send(200, {"status": "ok", "model": MODEL, "big": a.big, "last": last, "stats": stats, "rate": rate,
+                                "llm": {k: {x: v[x] for x in ("model", "slots", "inflight", "calls", "errors", "seconds")} for k, v in LLMS.items()},
                                 "engines": {"ane": health(ANE), "gb300": health(GB300)}})
             elif p == "/info":
                 try:
@@ -162,6 +212,21 @@ def main() -> None:
 
         def do_POST(self) -> None:
             p = self.path.split("?")[0]
+            if p == "/v1/chat/completions":
+                try:
+                    body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
+                    k, raw = llm(body)
+                except ValueError:
+                    return self.send(400, {"error": "body is not JSON"})
+                except RuntimeError as ex:
+                    return self.send(503, {"error": str(ex)[:300]})
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(raw)))
+                self.send_header("X-LLM-Backend", k)
+                self.end_headers()
+                self.wfile.write(raw)
+                return
             if p == "/rerank":
                 raw = self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}"
                 try:
