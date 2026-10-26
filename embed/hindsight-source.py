@@ -6,7 +6,7 @@ runs it over ssh and queues the items (Nat, 2026-10-26: "memory first then vault
 
   memory    every memory note (.md) under parts/<machine>/memory/, one item per file (MEMORY.md indexes skipped)
   vault     ψ vault notes (parts/*/vault/notes.parquet), one item per note, chunks joined in order
-  git       our own commits (author nat/beta/oracles and Claude/Codex co-authored), per repo per day
+  git       our commits (the hub's index/_git/commits.parquet: our orgs, our identities), per repo per day
   thinking  thinking blocks per session, in about 3,000-character blocks
   sessions  every session's user and assistant turns, de-duplicated across machines (msgkey, chunk), in ~3,000-character
             blocks, id "<session>#<n>" as `relic5 memory import <session>` writes them; newest sessions first
@@ -64,32 +64,31 @@ def vault() -> None:
                 ["relic5", "source:vault"])
 
 
-OURS = re.compile(r"(nat|beta|oracle|weerawan|laris|soul-brews|nazt|claude|codex|noreply@anthropic)", re.I)
-
-
 def git() -> None:
-    days: dict[tuple[str, str], list[str]] = {}
-    for m in sorted(os.listdir(PARTS)):
-        root = os.path.join(PARTS, m, "git")
-        for d, _, fs in os.walk(root):
-            for f in fs:
-                if not f.endswith(".log") or "/_" in d or f.startswith("_"):
-                    continue
-                repo = os.path.relpath(os.path.join(d, f[:-4]), root)
-                for line in open(os.path.join(d, f), encoding="utf-8", errors="replace"):
-                    p = line.rstrip("\n").split("\x1f")
-                    if len(p) < 6:
-                        continue
-                    sha, adate, _, name, email, subject = p[:6]
-                    body = " ".join(p[6:]).strip()
-                    if not OURS.search(name + " " + email + " " + body):
-                        continue
-                    days.setdefault((repo, adate[:10]), []).append(f"{adate[11:16]} {sha[:8]} {name}: {subject}" + (f" — {body[:300]}" if body else ""))
-    for (repo, day), lines in sorted(days.items(), key=lambda kv: kv[0][1], reverse=True):
-        lines = sorted(set(lines))
+    """our commits only: the hub's index/_git/commits.parquet (relic5 gitlog.py keeps every commit of the orgs our
+    identities wrote most of, and our own commits elsewhere; a name match let qemu, openai and others in, 2026-10-26)"""
+    con = duck()
+    src = os.path.join(os.path.dirname(PARTS), "index", "_git", "commits.parquet")
+    cur = con.execute(f"""SELECT repo, substr(ts_th, 1, 10) AS day, substr(ts_th, 12, 5) AS hm, hash, author, role, text
+                          FROM read_parquet('{src}') WHERE repo IS NOT NULL ORDER BY day DESC, repo, ts_th""")
+    key, lines = None, []
+
+    def flush() -> None:
+        if not lines:
+            return
+        repo, day = key
         for i in range(0, len(lines), 40):
             out(f"git:{repo}:{day}#{i // 40 + 1}", f"Commits in {repo} on {day}:\n" + "\n".join(lines[i:i + 40]),
                 f"{day}T12:00:00+07:00", f"git history of {repo}", ["relic5", "source:git"])
+
+    while rows := cur.fetchmany(5000):
+        for repo, day, hm, h, author, role, text in rows:
+            if (repo, day) != key:
+                flush()
+                key, lines = (repo, day), []
+            who = author + (" (with Claude)" if role == "commit-claude" else " (with Codex)" if role == "commit-codex" else "")
+            lines.append(f"{hm} {(h or '')[:8]} {who}: {' '.join((text or '').split())[:400]}")
+    flush()
 
 
 def thinking() -> None:
