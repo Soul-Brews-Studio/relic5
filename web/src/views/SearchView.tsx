@@ -127,7 +127,7 @@ function Related({ hits, st, narrow }: { hits: Hit[]; st: SearchState; narrow: (
     const m = new Map<string, { sid: string; name: string; repo: string; n: number; ts: string }>();
     for (const h of hits) {
       if (h.layer === "memory" || h.layer === "git") continue;
-      const e = m.get(h.session_uuid) ?? { sid: h.session_uuid, name: h.session_name || h.title || h.session_uuid.slice(0, 8), repo: shortRepo(h.repo_key), n: 0, ts: h.ts };
+      const e = m.get(h.session_uuid) ?? { sid: h.session_uuid, name: h.session_name || h.title || (h.session_uuid ?? "?").slice(0, 8), repo: shortRepo(h.repo_key), n: 0, ts: h.ts };
       e.n++; if (h.ts > e.ts) e.ts = h.ts; m.set(h.session_uuid, e);
     }
     return [...m.values()].sort((a, b) => b.n - a.n || b.ts.localeCompare(a.ts)).slice(0, 8);
@@ -336,7 +336,7 @@ export function SearchView({ st, setSt, machine, setMachine, machines, recent, t
 
   const go = (next: SearchState) => { setDraft(next); if (next.q.trim()) setSt({ ...next, q: next.q.trim() }); };
   const narrow = (p: Partial<SearchState>) => go({ ...draft, ...p });
-  const title = (h?: Hit) => h ? <>{shortRepo(h.repo_key)} · {h.session_name || h.title || h.session_uuid.slice(0, 8)}</> : "";
+  const title = (h?: Hit) => h ? <>{shortRepo(h.repo_key)} · {h.session_name || h.title || (h.session_uuid ?? "?").slice(0, 8)}</> : "";
   const searched = !!st.q || !!res;
   const counts = res ? Object.fromEntries(["", ...machines].map(m => [m, (res.hits ?? []).filter(h => !m || h.machines.includes(m)).length])) : undefined;
 
