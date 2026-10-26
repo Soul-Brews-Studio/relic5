@@ -8,6 +8,8 @@ runs it over ssh and queues the items (Nat, 2026-10-26: "memory first then vault
   vault     ψ vault notes (parts/*/vault/notes.parquet), one item per note, chunks joined in order
   git       our own commits (author nat/beta/oracles and Claude/Codex co-authored), per repo per day
   thinking  thinking blocks per session, in about 3,000-character blocks
+  sessions  every session's user and assistant turns, de-duplicated across machines (msgkey, chunk), in ~3,000-character
+            blocks, id "<session>#<n>" as `relic5 memory import <session>` writes them; newest sessions first
 """
 import json, os, re, sys, time
 from datetime import datetime, timezone
@@ -109,11 +111,41 @@ def thinking() -> None:
                 out(f"thinking:{sid}#{n}", block, first, f"the assistant's thinking in session {sid}", ["relic5", "source:thinking"])
 
 
+def sessions() -> None:
+    con = duck()
+    con.execute(f"""CREATE TEMP TABLE t AS
+                    SELECT DISTINCT ON (msgkey, chunk) sid, ts, role, text FROM read_parquet('{PARTS}/*/text/*.parquet', union_by_name = true)
+                    WHERE sid IS NOT NULL AND text IS NOT NULL AND role IN ('user', 'assistant')""")
+    cur = con.execute("""SELECT t.sid, t.ts, t.role, t.text FROM t
+                         JOIN (SELECT sid, max(ts) AS last FROM t GROUP BY sid) s USING (sid)
+                         ORDER BY s.last DESC, t.sid, t.ts""")
+    sid, block, first, n = None, "", None, 0
+
+    def flush() -> None:
+        nonlocal block, first, n
+        if block:
+            n += 1
+            out(f"{sid}#{n}", block, first, f"relic5 session {sid}", ["relic5", "source:session"])
+        block, first = "", None
+
+    while rows := cur.fetchmany(5000):
+        for s_, ts, role, text in rows:
+            if s_ != sid:
+                flush()
+                sid, n = s_, 0
+            line = f"[{(ts or '')[:16]}] {role}: {text.strip()}\n\n"
+            if block and len(block) + len(line) > BLOCK:
+                flush()
+            first = first or ts
+            block += line
+    flush()
+
+
 if __name__ == "__main__":
     src = sys.argv[1] if len(sys.argv) > 1 else ""
-    fn = {"memory": memory, "vault": vault, "git": git, "thinking": thinking}.get(src)
+    fn = {"memory": memory, "vault": vault, "git": git, "thinking": thinking, "sessions": sessions}.get(src)
     if not fn:
-        sys.exit("hindsight-source.py memory|vault|git|thinking [--parts DIR]")
+        sys.exit("hindsight-source.py memory|vault|git|thinking|sessions [--parts DIR]")
     t0 = time.time()
     fn()
     print(f"# {src} done in {time.time() - t0:.0f}s", file=sys.stderr)
