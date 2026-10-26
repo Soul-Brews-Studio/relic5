@@ -37,6 +37,22 @@ def stats(bank: str) -> dict:
 
 STATUS = os.path.expanduser("~/.cache/relic5/hindsight-feeder.json")
 
+
+def ensure_bank(bank: str, about: str) -> None:
+    """create the bank on first use, with the embed-first strategy and observations on (a Discord server's bank is for
+    digging insight out of it: facts, people, observations)"""
+    try:
+        call("GET", f"/v1/default/banks/{bank}/config", timeout=30)
+        return
+    except urllib.error.HTTPError as ex:
+        if ex.code != 404:
+            raise
+    call("PUT", f"/v1/default/banks/{bank}", {"name": bank, "background": about}, timeout=60)
+    call("PATCH", f"/v1/default/banks/{bank}/config", {"updates": {
+        "retain_strategies": {"embed-first": {"retain_extraction_mode": "chunks"}},
+        "enable_observations": True, "enable_auto_consolidation": True}}, timeout=60)
+    print(f"bank {bank}: created ({about}); observations on", flush=True)
+
 # relic-scan's palette, for the terminal only (the log tee keeps plain text)
 PINK, CYAN, GREY, GREEN, AMBER, Z, B = ("\x1b[38;2;255;60;172m", "\x1b[38;2;0;214;255m", "\x1b[38;2;128;136;156m",
                                         "\x1b[38;2;80;220;140m", "\x1b[38;2;245;183;59m", "\x1b[0m", "\x1b[1m")
@@ -70,7 +86,8 @@ def status(**kw: object) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("source", choices=["memory", "vault", "git", "thinking", "sessions"])
+    ap.add_argument("source", help="memory | vault | git | thinking | sessions (read on the hub), or discord:<guild_id> "
+                    "(a maw atlas Discord backup on this machine, embed/discord-source.py; bank discord-<server> by default)")
     ap.add_argument("--strategy", default="", help="a bank retain strategy, e.g. embed-first (chunks only, no LLM): "
                     "posted synchronously, so it does not queue behind LLM retains; its own ledger")
     ap.add_argument("--bank", default="relic5")
@@ -81,8 +98,19 @@ def main() -> None:
     ap.add_argument("--parallel", type=int, default=32, help="with --strategy: synchronous batches in flight at once "
                     "(Hindsight handles one synchronous batch an item at a time)")
     a = ap.parse_args()
+    if a.source not in ("memory", "vault", "git", "thinking", "sessions") and not a.source.startswith("discord:"):
+        ap.error(f"unknown source {a.source}")
+    if a.source.startswith("discord:"):   # one bank per server unless --bank names one
+        gid = a.source.split(":", 1)[1]
+        r = subprocess.run([sys.executable, os.path.join(HERE, "discord-source.py"), "--list"], capture_output=True, text=True, check=True)
+        row = next((json.loads(l) for l in r.stdout.splitlines() if json.loads(l)["guild"] == gid), None)
+        if not row:
+            sys.exit(f"{a.source}: no finished backup for that server (embed/discord-source.py --list)")
+        if a.bank == "relic5":
+            a.bank = row["bank"]
+        ensure_bank(a.bank, f"Discord server {row['name'].replace('_', ' ')} (maw atlas backup, guild {gid})")
 
-    ledger_path = os.path.expanduser(f"~/.cache/relic5/hindsight-{a.bank}-{a.source}{'.' + a.strategy if a.strategy else ''}.done")
+    ledger_path = os.path.expanduser(f"~/.cache/relic5/hindsight-{a.bank}-{a.source.replace(':', '-')}{'.' + a.strategy if a.strategy else ''}.done")
     if a.strategy and a.batch == 40:
         a.batch = 20   # small batches, many at once: a huge note (vault max 3.3 MB) holds up only its own batch
     os.makedirs(os.path.dirname(ledger_path), exist_ok=True)
@@ -106,7 +134,8 @@ def main() -> None:
     t_read = time.time()
     # the source runs on the hub into a file there, and the file comes over with rsync (compressed, resumable): one
     # long ssh pipe was cut short at 938 MB (sessions, 2026-10-26) and left half a JSON line
-    remote, local = f"/tmp/hindsight-{a.source}.jsonl", os.path.expanduser(f"~/.cache/relic5/hindsight-{a.source}.jsonl")
+    safe = a.source.replace(":", "-")
+    remote, local = f"/tmp/hindsight-{safe}.jsonl", os.path.expanduser(f"~/.cache/relic5/hindsight-{safe}.jsonl")
     done_read = threading.Event()
 
     def clock() -> None:
@@ -116,13 +145,17 @@ def main() -> None:
                 tty.flush()
 
     threading.Thread(target=clock, daemon=True).start()
-    with open(os.path.join(HERE, "hindsight-source.py"), "rb") as src:
-        r = subprocess.run(["ssh", "-o", "BatchMode=yes", HUB, f"~/relic5/app/.venv/bin/python - {a.source} > {remote}"],
-                           stdin=src, capture_output=True)
+    if a.source.startswith("discord:"):   # the Discord backups live on this machine: no hub, no copy
+        with open(local, "wb") as out:
+            r = subprocess.run([sys.executable, os.path.join(HERE, "discord-source.py"), a.source.split(":", 1)[1]], stdout=out, stderr=subprocess.PIPE)
+    else:
+        with open(os.path.join(HERE, "hindsight-source.py"), "rb") as src:
+            r = subprocess.run(["ssh", "-o", "BatchMode=yes", HUB, f"~/relic5/app/.venv/bin/python - {a.source} > {remote}"],
+                               stdin=src, capture_output=True)
     if r.returncode != 0:
         done_read.set()
         sys.exit(f"{a.source}: the hub read failed (rc {r.returncode}): {r.stderr.decode()[-300:]}")
-    for attempt in range(5):
+    for attempt in range(5 if not a.source.startswith("discord:") else 0):
         r = subprocess.run(["rsync", "-z", "--partial", "--timeout=120", f"{HUB}:{remote}", local], capture_output=True)
         if r.returncode == 0:
             break

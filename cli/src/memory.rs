@@ -7,6 +7,7 @@
 //!   relic5 hindsight import  <session> [<session> ...] [--bank B] [--wait]   a relic5 session's turns, queued (async)
 //!   relic5 hindsight import  --source memory|vault|git|thinking   a whole relic5 source from the hub, paced and resumable
 //!                         (runs embed/hindsight-import.py; Nat, 2026-10-26: "memory first then vault, git, thinking")
+//!   relic5 hindsight banks                              every bank (relic5, one per Discord server) with its counts
 //!   relic5 hindsight backup                             pg_dump of the bank into relic5's backup volume (newest 3 kept)
 //!   relic5 hindsight top                                   live TUI: bank, queue + sparkline + ETA, workers, feeder log
 //!   relic5 hindsight workers [list]                       every worker: up, busy, utilization and work done (last minute, total)
@@ -155,6 +156,30 @@ pub fn main(rest: Vec<String>, json_out: bool) -> Result<(), Fail> {
     let sub = if a.0.is_empty() { "status".to_string() } else { a.0.remove(0) };
     match sub.as_str() {
         "status" => status(&bank, json_out),
+        "banks" => {
+            // every bank on the daemon with its counts: relic5 (all of relic5) and one bank per Discord server
+            let list = http("GET", &format!("{}/v1/default/banks", base()), None, 30)?;
+            let banks = list["banks"].as_array().cloned().unwrap_or_default();
+            let mut rows = Vec::new();
+            for b in &banks {
+                let id = s(&b["bank_id"]);
+                let st = http("GET", &bank_url(&id, "/stats"), None, 30).unwrap_or(Value::Null);
+                rows.push(json!({"bank": id, "documents": st["total_documents"], "memories": st["total_nodes"],
+                                 "observations": st["total_observations"], "open_operations": st["pending_operations"],
+                                 "about": b["mission"]}));
+            }
+            if json_out {
+                println!("{}", dumps(&Value::Array(rows)));
+            } else {
+                println!("{:<44} {:>9} {:>10} {:>6} {:>5}  {}", "bank", "documents", "memories", "obs", "open", "about");
+                for r in &rows {
+                    println!("{:<44} {:>9} {:>10} {:>6} {:>5}  {}", s(&r["bank"]), commas(&r["documents"]), commas(&r["memories"]),
+                             commas(&r["observations"]), s(&r["open_operations"]), head(&s(&r["about"]), 60));
+                }
+                println!("{} banks · dig into one: relic5 hindsight recall \"…\" --bank <bank>", rows.len());
+            }
+            Ok(())
+        }
         "retain" => {
             let ctx = a.opt("--context")?;
             let text = a.0.join(" ");
@@ -203,7 +228,7 @@ pub fn main(rest: Vec<String>, json_out: bool) -> Result<(), Fail> {
             let err = std::process::Command::new(script).exec();
             Err(Fail::Other(format!("relic5 hindsight backup: {err}"), 1))
         }
-        other => Err(Fail::Other(format!("relic5 hindsight: unknown '{other}' (status, retain, recall, import, workers, top, backup)"), 2)),
+        other => Err(Fail::Other(format!("relic5 hindsight: unknown '{other}' (status, banks, retain, recall, import, workers, top, backup)"), 2)),
     }
 }
 
