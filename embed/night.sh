@@ -34,6 +34,6 @@ done
 for src in thinking git; do
   past && { say "past $UNTIL; $src not started"; break; }
   say "relic5 upgrade: $src"
-  python3 "$HERE/hindsight-import.py" "$src" --upgrade --until "$UNTIL" 2>&1 | tee -a "$LOG" | grep -Ev "^\s*$"
+  python3 "$HERE/hindsight-import.py" "$src" --upgrade --until "$UNTIL" --max-pending 120 2>&1 | tee -a "$LOG" | grep -Ev "^\s*$"
 done
 say "done"
