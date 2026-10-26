@@ -84,6 +84,25 @@ relic5 memory workers rm embed mba
 A new embed worker must answer a 768-dimension vector before it is accepted (one vector space). Utilization is the busy
 share of the last 60 s: time spent in requests (running ones counted so far) / (60 s x slots).
 
+### Which model, which worker (measured 2026-10-26)
+
+Fact extraction, one real Hindsight retain prompt (7.4k-character system prompt, a 2.75k-character Thai vault note,
+JSON schema output):
+
+| model | time | result |
+|---|---|---|
+| m5 Ollama gemma3:1b | 4.4 s | valid JSON, 1 fact: too thin |
+| m5 Ollama llama3.2:1b | 28.8 s | broken JSON |
+| m5 Ollama gemma3:4b | timed out | m5's GPU was busy |
+| m5 Ollama qwen3.6 (36B MoE) | 79.7 s | 8 facts |
+| gb300 qwen3.8-27b (vLLM) | 23.7 s | 9 facts |
+
+Tiny models do not make a usable first pass, and m5's GPU as an LLM worker gave ~4% of the LLM work while saturating
+the GPU. So the fast first pass is **embed-first** (chunks, no LLM) and the facts come from gb300's 27B later; m5's GPU
+moved to embedding: Ollama `embeddinggemma:latest` on it matches the ANE (256 vault texts: cos min 0.9980, p05 0.9982,
+median 0.9986), registered as embed worker `m5-gpu`. gb300's embed server hits CUDA OOM while other users fill its GPU
+(254/256 GB); the router rests it 30 s after each error.
+
 ## Everything relic5 holds (Nat, 2026-10-26: "memory first then vault, git, thinking, then sessions")
 
 ```sh
