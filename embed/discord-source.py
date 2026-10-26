@@ -3,8 +3,9 @@
   python3 embed/discord-source.py <guild_id>        # items of that server
   python3 embed/discord-source.py --list            # every server: id, name, bank, run folder, messages
 
-Source: ~/.maw/atlas-blobs/<Guild_Name>-<guildId>[-<UTC stamp>]/server.sqlite (neo-oracle#205); the newest folder per
-server that has server.md (a finished run). One item = one conversation (a thread, or a channel's top level) in
+Source: ~/.maw/atlas-blobs/<Guild_Name>-<guildId>[-<UTC stamp>]/server.sqlite (neo-oracle#205): the verified rows of
+neo's ~/.maw/atlas-blobs/manifest.json when it exists, else the newest folder per server that has server.md.
+Text and file names only, never the files. One item = one conversation (a thread, or a channel's top level) in
 ~3,000-character blocks, oldest first: "[YYYY-MM-DD HH:MM] author: text (+ file names)". Bot messages are kept and
 marked (bot). Document id discord:<guild>:<thread or channel>#<n>; tags discord, guild:<id>, channel:<name>.
 Banks: one per server (Nat, 2026-10-26: "separate 1 per [server] to dig about the insight each server"), named from
@@ -19,7 +20,19 @@ BLOCK = 3000
 
 
 def runs() -> dict[str, tuple[str, str]]:
-    """guild id -> (name, newest finished run folder)"""
+    """guild id -> (name, newest finished run folder). With neo's manifest (<ROOT>/manifest.json, rewritten in full
+    after every check) only its verified rows count: messages in server.md = in server.sqlite, server.md present.
+    Without it, the newest folder per server that has server.md."""
+    man = os.path.join(ROOT, "manifest.json")
+    if os.path.exists(man):
+        rows = json.load(open(man))
+        rows = rows.get("guilds", rows) if isinstance(rows, dict) else rows
+        out = {}
+        for r in rows:
+            d = os.path.join(r.get("folder") or "", "")
+            if r.get("verified") is True and os.path.exists(d + "server.sqlite"):
+                out[str(r["guild_id"])] = (r.get("name") or str(r["guild_id"]), d)
+        return out
     best: dict[str, tuple[str, str, float]] = {}
     for d in glob.glob(os.path.join(ROOT, "*/")):
         m = re.match(r"(.+)-(\d{15,})(?:-\d{8}T\d{6}Z)?$", os.path.basename(d.rstrip("/")))
