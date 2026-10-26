@@ -28,6 +28,7 @@ from .types_ import JobEvent, Json
 from . import store as rfs
 from . import swr
 from . import oauth
+from . import discord
 from . import seen
 
 if TYPE_CHECKING:
@@ -459,6 +460,8 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
             hdr = {"WWW-Authenticate": f'Bearer resource_metadata="{base_of(request)}/.well-known/oauth-protected-resource"'} if path == "/mcp" else {}
             return JSONResponse({"error": "missing or bad Authorization: Bearer token"}, status_code=401, headers=hdr)
         request.state.door = d
+        # from outside (the public host, an OAuth connector): no Discord layer (discord.py; Nat, 2026-10-26)
+        discord.PUBLIC.set((request.url.hostname or "").lower() in PUBLICS or d.startswith("oauth:"))
         seen.touch(d, *where(request), path)
         t0 = time.perf_counter()
         perf.ROUTE.set(request.url.path)   # the queries this request runs are filed under it (perf.query)

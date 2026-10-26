@@ -20,6 +20,7 @@ One hub on white for every machine's extracted history: push, month store, MCP. 
 | `src/relic5/mcp.py` | the five tools with v3 names and input schemas, JSON-RPC | agent-relic-v3 `src/mcp/tools.ts`, `server.ts` @9f0bdb5 |
 | `src/relic5/api.py` | `POST /mcp`, `GET /api/*`, `/health`; a bearer token on every request | agent-relic-v4 `api.py`, PR #5 @febfdb7 and PR #6 @b399119 |
 | `src/relic5/gitlog.py` | git commits of every ghq repo as the `git` search layer (`relic_search with: "git"`): the record from 2025-03-25, the first Claude commit, back to before the oldest surviving transcript (2025-09-19). Our identities in the hub's `git-own` file; open-source clones keep only our commits | new |
+| `src/relic5/discord.py` | our Discord servers (neo's maw atlas backups on m5, the servers its manifest marks verified; text and file names only, via `bin/relic5-discord-export` in `relic5-push`) as the `discord` layer: `relic_search with: "discord"` alone, never mixed with talk nor part of `all`. **Never through the public MCP** (Nat, 2026-10-26): the public host and OAuth connectors get no `discord` in the tool list and a usage error if they ask | new |
 | `deploy/systemd/relic5-serve.service` | the serve unit on white | agent-relic-v3 `hub/systemd/relic3-serve.service` |
 
 Changed on purpose from the ports:

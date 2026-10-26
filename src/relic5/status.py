@@ -206,6 +206,8 @@ def status(root: str, now: _datetime | None = None) -> Json:
         "copy": copy,
         "memory": __import__("relic5.memory", fromlist=["counts"]).counts(p.root),
         "git": __import__("relic5.gitlog", fromlist=["counts"]).counts(p.root),
+        # server names are not for the public door (discord.py)
+        "discord": None if __import__("relic5.discord", fromlist=["PUBLIC"]).PUBLIC.get() else __import__("relic5.discord", fromlist=["counts"]).counts(p.root),
         "seals": seal_info,
         "seal_days": seal_days,
         "warnings": warnings,

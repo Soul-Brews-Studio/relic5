@@ -39,9 +39,9 @@ class FtsSettings(TypedDict):
 
 FTS_SETTINGS = FtsSettings(base_tokenizer="icu", stem=False, remove_stop_words=False, max_token_length=128,
                     with_position=True)   # positions: exact-phrase hits rank first (eval 2026-10-23: common-word misses)
-LAYERS = {"prose": ("text", "vault"), "tools": ("tools",), "thinking": ("thinking",), "memory": ("memory",), "git": ("git",)}
-SIDE = {"memory": ("_memory", "notes.parquet"), "git": ("_git", "commits.parquet")}
-"""Layers built from a table the hub folds itself (memory.py, gitlog.py), not from month parts: history only."""
+LAYERS = {"prose": ("text", "vault"), "tools": ("tools",), "thinking": ("thinking",), "memory": ("memory",), "git": ("git",), "discord": ("discord",)}
+SIDE = {"memory": ("_memory", "notes.parquet"), "git": ("_git", "commits.parquet"), "discord": ("_discord", "messages.parquet")}
+"""Layers built from a table the hub folds itself (memory.py, gitlog.py, discord.py), not from month parts: history only."""
 COLS = ["uid", "msgkey", "chunk", "key", "month", "sid", "ts", "ts_th", "role", "engine", "cat", "layer", "machines", "text", "title"]
 HOME_COLS = ["home", "homes", "agent"]
 """Which .claude (or .codex) a row came from (Nat, 2026-10-25: "can we separate like .claude from user nat / .claude
@@ -218,11 +218,12 @@ def build(root: str, con: "duckdb.DuckDBPyConnection", log: Callable[[str], obje
     state_p = os.path.join(sd, "state.json")
     state = rfs.read_json(state_p) if rfs.exists(state_p) else {}
     vault = [p for _, _, p in parts.files("vault")]
-    from . import gitlog, memory
+    from . import discord, gitlog, memory
     if lane == "fts":
         memory.build(root)
         gitlog.build(root)
-    side_sig = {"memory": {"notes": memory.sig(root)}, "git": {"logs": gitlog.sig(root)}}
+        discord.build(root)
+    side_sig = {"memory": {"notes": memory.sig(root)}, "git": {"logs": gitlog.sig(root)}, "discord": {"servers": discord.sig(root)}}
     plan: dict[str, tuple[str, list[str], Json]] = {}
     for layer in (LAYERS if lane == "fts" else ()):
         for part, ms in groups.items():
