@@ -1,5 +1,5 @@
 //! relic5: the command line. The hub client is here, in Rust: search, show, recap, conversation, readings, handoff,
-//! tail, pending, status, --version, `import` (one manual import) and `memory` (Hindsight). Every other command (index, serve, seals,
+//! tail, pending, status, --version, `import` (one manual import), `memory` (relic5's memory notes) and `hindsight` (the Hindsight bank). Every other command (index, serve, seals,
 //! seal-day, token, embed, mcp, tui, eval, gc, log, import repair-meta|relic3|relic3-links|jsonl-truth, --help) is
 //! handed, with the same arguments, to the Python core `relic5-core`, which stays the one implementation of the hub.
 //! Output, flags and exit codes match the Python CLI (src/relic5/cli.py); tests/test_rust_cli.py compares the two.
@@ -8,6 +8,7 @@ mod core;
 mod hub;
 mod import;
 mod memory;
+mod notes;
 mod top;
 mod py;
 
@@ -38,7 +39,9 @@ fn main() {
         "pending" => cmds::pending(),
         "tail" => cmds::tail(Args(rest)),
         "status" => cmds::status(),
-        "memory" => memory::main(rest, json),
+        // relic5's own memory notes (the hub); Hindsight is its own command (Nat, 2026-10-26)
+        "memory" => notes::main(rest, json),
+        "hindsight" => memory::main(rest, json),
         // `relic5 import` alone (or with flags) is the manual import; `import repair-meta|relic3|…` is the core's
         "import" if rest.first().is_none_or(|a| a.starts_with('-')) => std::process::exit(import::main(&rest)),
         _ => core::exec(&argv),

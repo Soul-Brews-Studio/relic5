@@ -1,17 +1,17 @@
-//! `relic5 memory`: relic5's history in Hindsight (vectorize-io/hindsight, `hindsight-embed`), the memory layer that
+//! `relic5 hindsight`: relic5's history in Hindsight (vectorize-io/hindsight, `hindsight-embed`), the memory layer that
 //! extracts facts, entities and observations. relic5 holds every turn; Hindsight holds what was learned from them.
 //!
-//!   relic5 memory status  [--bank B] [--json]            the bank, its queue and an ETA, the embed engines
-//!   relic5 memory retain  <text> [--bank B] [--context C]
-//!   relic5 memory recall  <query> [--bank B] [--limit 10] [--json]
-//!   relic5 memory import  <session> [<session> ...] [--bank B] [--wait]   a relic5 session's turns, queued (async)
-//!   relic5 memory import  --source memory|vault|git|thinking   a whole relic5 source from the hub, paced and resumable
+//!   relic5 hindsight status  [--bank B] [--json]            the bank, its queue and an ETA, the embed engines
+//!   relic5 hindsight retain  <text> [--bank B] [--context C]
+//!   relic5 hindsight recall  <query> [--bank B] [--limit 10] [--json]
+//!   relic5 hindsight import  <session> [<session> ...] [--bank B] [--wait]   a relic5 session's turns, queued (async)
+//!   relic5 hindsight import  --source memory|vault|git|thinking   a whole relic5 source from the hub, paced and resumable
 //!                         (runs embed/hindsight-import.py; Nat, 2026-10-26: "memory first then vault, git, thinking")
-//!   relic5 memory top                                   live TUI: bank, queue + sparkline + ETA, workers, feeder log
-//!   relic5 memory workers [list]                       every worker: up, busy, utilization and work done (last minute, total)
-//!   relic5 memory workers add embed|llm|rerank <name> <url> [--model M] [--slots N] [--api ollama|openai] [--batch N]
-//!   relic5 memory workers rm embed|llm|rerank <name>   the dispatcher's registry (embed/embed-router.py, workers.json)
-//!   relic5 memory import  --since 30d [--min-events 6] [--max N] [--bank B] [--wait]   every top-level session in the
+//!   relic5 hindsight top                                   live TUI: bank, queue + sparkline + ETA, workers, feeder log
+//!   relic5 hindsight workers [list]                       every worker: up, busy, utilization and work done (last minute, total)
+//!   relic5 hindsight workers add embed|llm|rerank <name> <url> [--model M] [--slots N] [--api ollama|openai] [--batch N]
+//!   relic5 hindsight workers rm embed|llm|rerank <name>   the dispatcher's registry (embed/embed-router.py, workers.json)
+//!   relic5 hindsight import  --since 30d [--min-events 6] [--max N] [--bank B] [--wait]   every top-level session in the
 //!                         window, newest first; a session already in the bank (its block #1 exists) is skipped
 //!
 //! HINDSIGHT_URL (default http://127.0.0.1:8888, the hindsight-embed daemon), bank default "relic5". The daemon
@@ -33,7 +33,7 @@ fn http(method: &str, url: &str, body: Option<&Value>, timeout_s: u64) -> Result
         .build()
         .into();
     let down = |e: ureq::Error| {
-        Fail::Other(format!("relic5 memory: Hindsight unreachable ({}): {e}\n  start it: hindsight-embed daemon start", base()), 1)
+        Fail::Other(format!("relic5 hindsight: Hindsight unreachable ({}): {e}\n  start it: hindsight-embed daemon start", base()), 1)
     };
     let mut resp = match (method, body) {
         ("POST", Some(b)) => agent.post(url).header("Content-Type", "application/json").send(b.to_string()).map_err(down)?,
@@ -42,9 +42,9 @@ fn http(method: &str, url: &str, body: Option<&Value>, timeout_s: u64) -> Result
     let code = resp.status().as_u16();
     let text = resp.body_mut().with_config().limit(u64::MAX).read_to_string().unwrap_or_default();
     if code >= 400 {
-        return Err(Fail::Other(format!("relic5 memory: {code} {}", head(&text, 300)), if code == 400 || code == 404 || code == 422 { 2 } else { 1 }));
+        return Err(Fail::Other(format!("relic5 hindsight: {code} {}", head(&text, 300)), if code == 400 || code == 404 || code == 422 { 2 } else { 1 }));
     }
-    serde_json::from_str(&text).map_err(|e| Fail::Other(format!("relic5 memory: Hindsight sent no JSON ({e})"), 1))
+    serde_json::from_str(&text).map_err(|e| Fail::Other(format!("relic5 hindsight: Hindsight sent no JSON ({e})"), 1))
 }
 
 fn bank_url(bank: &str, path: &str) -> String {
@@ -158,7 +158,7 @@ pub fn main(rest: Vec<String>, json_out: bool) -> Result<(), Fail> {
             let ctx = a.opt("--context")?;
             let text = a.0.join(" ");
             if text.is_empty() {
-                return Err(Fail::Other("relic5 memory retain <text> [--bank B] [--context C]".into(), 2));
+                return Err(Fail::Other("relic5 hindsight retain <text> [--bank B] [--context C]".into(), 2));
             }
             let mut item = json!({"content": text});
             if let Some(c) = ctx {
@@ -172,7 +172,7 @@ pub fn main(rest: Vec<String>, json_out: bool) -> Result<(), Fail> {
             let limit: usize = a.opt_or("--limit", "10")?.parse().map_err(|_| Fail::Other("--limit must be a number".into(), 2))?;
             let q = a.0.join(" ");
             if q.is_empty() {
-                return Err(Fail::Other("relic5 memory recall <query> [--bank B] [--json]".into(), 2));
+                return Err(Fail::Other("relic5 hindsight recall <query> [--bank B] [--json]".into(), 2));
             }
             let r = http("POST", &bank_url(&bank, "/memories/recall"), Some(&json!({"query": q})), 120)?;
             if json_out {
@@ -190,7 +190,7 @@ pub fn main(rest: Vec<String>, json_out: bool) -> Result<(), Fail> {
         "import" => import(&bank, a, json_out),
         "workers" => workers(a, json_out),
         "top" => std::process::exit(crate::top::top(&bank)),
-        other => Err(Fail::Other(format!("relic5 memory: unknown '{other}' (status, retain, recall, import, workers, top)"), 2)),
+        other => Err(Fail::Other(format!("relic5 hindsight: unknown '{other}' (status, retain, recall, import, workers, top)"), 2)),
     }
 }
 
@@ -241,9 +241,9 @@ fn import(bank: &str, mut a: Args, json_out: bool) -> Result<(), Fail> {
             .into_iter()
             .map(|d| format!("{d}/hindsight-import.py"))
             .find(|p| std::path::Path::new(p).is_file())
-            .ok_or_else(|| Fail::Other("relic5 memory: embed/hindsight-import.py not found (set RELIC5_EMBED_DIR)".into(), 1))?;
+            .ok_or_else(|| Fail::Other("relic5 hindsight: embed/hindsight-import.py not found (set RELIC5_EMBED_DIR)".into(), 1))?;
         let err = std::process::Command::new("python3").arg(script).arg(&src).args(["--bank", bank]).args(&a.0).exec();
-        return Err(Fail::Other(format!("relic5 memory: cannot run python3: {err}"), 1));
+        return Err(Fail::Other(format!("relic5 hindsight: cannot run python3: {err}"), 1));
     }
     let wait = a.has("--wait");
     a.0.retain(|x| x != "--wait");
@@ -259,7 +259,7 @@ fn import(bank: &str, mut a: Args, json_out: bool) -> Result<(), Fail> {
         }
     }
     if a.0.is_empty() {
-        return Err(Fail::Other("relic5 memory import <session> [...] [--bank B] [--wait]".into(), 2));
+        return Err(Fail::Other("relic5 hindsight import <session> [...] [--bank B] [--wait]".into(), 2));
     }
     let mut out = Vec::new();
     for id in a.0.clone() {
@@ -342,7 +342,7 @@ fn workers(mut a: Args, json_out: bool) -> Result<(), Fail> {
     match sub.as_str() {
         "list" => {
             let h = http("GET", &format!("{}/health", router()), None, 30)
-                .map_err(|_| Fail::Other(format!("relic5 memory: the dispatcher is not up at {} (embed/start.sh)", router()), 1))?;
+                .map_err(|_| Fail::Other(format!("relic5 hindsight: the dispatcher is not up at {} (embed/start.sh)", router()), 1))?;
             if json_out {
                 println!("{}", dumps(&h["workers"]));
                 return Ok(());
@@ -371,7 +371,7 @@ fn workers(mut a: Args, json_out: bool) -> Result<(), Fail> {
             let batch = a.opt("--batch")?;
             let note = a.opt("--note")?;
             if a.0.len() != 3 {
-                return Err(Fail::Other("relic5 memory workers add embed|llm|rerank <name> <url> [--model M] [--slots N] [--api ollama|openai] [--batch N] [--note T]".into(), 2));
+                return Err(Fail::Other("relic5 hindsight workers add embed|llm|rerank <name> <url> [--model M] [--slots N] [--api ollama|openai] [--batch N] [--note T]".into(), 2));
             }
             let mut w = json!({"kind": a.0[0], "name": a.0[1], "url": a.0[2]});
             if let Some(m) = model { w["model"] = json!(m) }
@@ -385,22 +385,22 @@ fn workers(mut a: Args, json_out: bool) -> Result<(), Fail> {
         }
         "rm" => {
             if a.0.len() != 2 {
-                return Err(Fail::Other("relic5 memory workers rm embed|llm|rerank <name>".into(), 2));
+                return Err(Fail::Other("relic5 hindsight workers rm embed|llm|rerank <name>".into(), 2));
             }
             let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
             let mut r = agent
                 .delete(&format!("{}/workers?kind={}&name={}", router(), a.0[0], a.0[1]))
                 .call()
-                .map_err(|e| Fail::Other(format!("relic5 memory: dispatcher unreachable: {e}"), 1))?;
+                .map_err(|e| Fail::Other(format!("relic5 hindsight: dispatcher unreachable: {e}"), 1))?;
             let code = r.status().as_u16();
             let body = r.body_mut().read_to_string().unwrap_or_default();
             if code >= 400 {
-                return Err(Fail::Other(format!("relic5 memory: {code} {body}"), 2));
+                return Err(Fail::Other(format!("relic5 hindsight: {code} {body}"), 2));
             }
             println!("removed {} worker {}", a.0[0], a.0[1]);
             Ok(())
         }
-        other => Err(Fail::Other(format!("relic5 memory workers: unknown '{other}' (list, add, rm)"), 2)),
+        other => Err(Fail::Other(format!("relic5 hindsight workers: unknown '{other}' (list, add, rm)"), 2)),
     }
 }
 
