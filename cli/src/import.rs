@@ -222,11 +222,30 @@ pub fn main(args: &[String]) -> i32 {
         }
         (1, format!("{m2}: {}  hub: {}", fmt(&want), if status.is_some() { fmt(&got) } else { "unreachable".into() }))
     });
-    c.log(&if sync_rc == 0 {
+    let verdict = if sync_rc == 0 {
         format!("{} SYNC OK  {}", stamp(), fmt(&got))
     } else {
         format!("{} SYNC MISMATCH  {machine}: {}  hub: {}", stamp(), fmt(&want), fmt(&got))
-    });
+    };
+    c.log(&verdict);
+    // the hub's Sync card reads parts/<machine>/_sync.json, which relic5-push fills from the log's newest SYNC line.
+    // This verdict comes after the push, and with no loop there is no next pass to carry it (2026-10-26: the hub
+    // showed an 08:09 MISMATCH after the 08:17 OK), so send it now, in relic5-push's shape.
+    let line: String = verdict.chars().filter(|ch| *ch != '"' && *ch != '\\').collect();
+    let body = format!("{{\"line\": \"{line}\", \"log\": \"{}\"}}\n", c.log.replace(['"', '\\'], ""));
+    let sent = Command::new("ssh")
+        .args(["-o", "BatchMode=yes", &hub_ssh, &format!("cat > relic5/parts/{machine}/_sync.json")])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .and_then(|mut ch| {
+            ch.stdin.take().map(|mut i| i.write_all(body.as_bytes()));
+            ch.wait()
+        });
+    if !matches!(sent, Ok(st) if st.success()) {
+        c.log("sync verdict not sent to the hub (ssh failed); the next push carries it");
+    }
 
     // the box
     let f = hub::peek("/api/status", 10).map(|s| s["freshness"]["machines"][&machine].clone()).unwrap_or(Value::Null);

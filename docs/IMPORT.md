@@ -37,7 +37,13 @@ RELIC5·IMPORT box: the hub's counts for this machine, the scan and cut figures,
 how far behind it is, and SYNC OK or MISMATCH. The border is amber when a stage failed or the counts disagree.
 Every stage's output is appended to `~/Library/Logs/relic-chain.log` (or `RELIC_CHAIN_LOG`) in relic-chain's line format
 (`chain start (m5)`, `run: scan …`, `run: done in Ns`, `… part(s) cut …`, `chain end`, `SYNC OK …`), so
-`relic-scan ops` shows a manual import as a pass.
+`relic-scan ops` shows a manual import as a pass. The SYNC verdict is also written straight to the hub
+(`parts/<machine>/_sync.json`, the file `relic5-push` fills from the log): it comes after the push, and with no loop
+there is no next pass to carry it.
+
+On m5, run a pass as `relic5 import`, not `~/.local/bin/relic-chain`. m5's relic-extract `after` hook is off, so
+relic-chain there pushes without indexing, and the hub warns "parts newer than its manifest" until `relic5 index`
+runs on white (seen 2026-10-26 08:19).
 
 Exit code: 0 when every stage ran and the sync agreed; 1 when a stage failed; otherwise the sync result.
 
