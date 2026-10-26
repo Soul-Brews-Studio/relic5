@@ -66,6 +66,22 @@ about 3,000 characters (Hindsight's retain chunk), each its own document `<sessi
 in the last hour. It says "unknown" until two have finished. First run, 2026-10-26: session 0f7f08a8 (370 turns) →
 90 blocks → 607 memories in about 1.5 minutes, 27.6 blocks a minute, LLM-bound on gb300.
 
+## Workers: the dispatcher's registry
+
+The router is the dispatcher; its workers live in `~/.config/relic5/workers.json` (`embed`, `llm`, `rerank`), written
+from defaults on first start and re-read when it changes. Add or remove one while it runs:
+
+```sh
+relic5 memory workers                                    # every worker: up, busy x/slots, util (last minute),
+                                                         # calls / texts / tokens per minute and in total, errors, avg s
+relic5 memory workers add llm gb300-b http://127.0.0.1:11520/v1/chat/completions --model qwen3-30b --slots 16
+relic5 memory workers add embed mba http://100.85.98.2:11435 --model embeddinggemma:ane-w8a16 --batch 64
+relic5 memory workers rm embed mba
+```
+
+A new embed worker must answer a 768-dimension vector before it is accepted (one vector space). Utilization is the busy
+share of the last 60 s: time spent in requests (running ones counted so far) / (60 s x slots).
+
 ## Everything relic5 holds (Nat, 2026-10-26: "memory first then vault, git, thinking, then sessions")
 
 ```sh
