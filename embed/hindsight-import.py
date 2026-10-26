@@ -37,6 +37,28 @@ def stats(bank: str) -> dict:
 
 STATUS = os.path.expanduser("~/.cache/relic5/hindsight-feeder.json")
 
+# relic-scan's palette, for the terminal only (the log tee keeps plain text)
+PINK, CYAN, GREY, GREEN, AMBER, Z, B = ("\x1b[38;2;255;60;172m", "\x1b[38;2;0;214;255m", "\x1b[38;2;128;136;156m",
+                                        "\x1b[38;2;80;220;140m", "\x1b[38;2;245;183;59m", "\x1b[0m", "\x1b[1m")
+
+
+def bar(share: float, w: int = 24) -> str:
+    cells = round(max(0.0, min(1.0, share)) * w * 8)
+    s = "█" * (cells // 8) + (["", "▏", "▎", "▍", "▌", "▋", "▊", "▉"][cells % 8])
+    return s.ljust(w)
+
+
+def eta_text(e: float | None) -> str:
+    if not e:
+        return "measuring"
+    return f"{e / 3600:.1f} h" if e >= 5400 else f"{e / 60:.0f} min" if e >= 90 else f"{e:.0f} s"
+
+
+def box(title: str, lines: list[str]) -> str:
+    w = max(len(l) for l in lines + [title + "  "])
+    top = f"╭─ {title} " + "─" * (w - len(title) - 1) + "╮"
+    return "\n".join([top] + [f"│ {l.ljust(w)} │" for l in lines] + ["╰" + "─" * (w + 2) + "╯"])
+
 
 def status(**kw: object) -> None:
     """the feeder's progress for `relic5 memory top`: source, strategy, total, queued, percent, items/min, eta"""
@@ -68,6 +90,12 @@ def main() -> None:
     done.discard("")
     ledger = open(ledger_path, "a")
 
+    if os.path.exists("/dev/tty"):
+        try:
+            with open("/dev/tty", "w") as t_:
+                t_.write(f"{GREY}{time.strftime('%F %T')} relic5 memory import · {a.source} · {a.strategy or 'full'} -> bank {a.bank}{Z}\n")
+        except OSError:
+            pass
     print(f"{a.source}: reading the hub ({HUB}) …", flush=True)
     # a running clock while it reads (Nat: "can show running time (1s 2s 3s 4s)"), on the terminal itself, so the
     # log that tee keeps gets one line, not a carriage return a second
@@ -192,7 +220,10 @@ def main() -> None:
                    skipped=len(items) - len(todo), percent=round(100 * i / max(len(todo), 1), 1), items_per_min=round(rate_, 1),
                    eta_s=round(eta_) if eta_ else None, started=t0, state=f"sending · {len(running)} batches in flight")
             if tty:
-                tty.write(f"\r  {100 * i / max(len(todo), 1):.1f}% · {len(running)} batches in flight · {rate_:,.0f} items/min ")
+                pct = i / max(len(todo), 1)
+                tty.write(f"\r\x1b[2K  {PINK}{B}{a.source}{Z}{GREY}/{a.strategy}{Z} {CYAN}{bar(pct)}{Z} {B}{pct * 100:5.1f}%{Z} "
+                          f"{GREY}{i:,}/{len(todo):,} ·{Z} {GREEN}{rate_:,.0f}/min{Z} {GREY}· ETA{Z} {AMBER}{eta_text(eta_)}{Z} "
+                          f"{GREY}· {len(running)} in flight{Z} ")
                 tty.flush()
         else:
             batch = todo[i:i + a.batch]
@@ -231,6 +262,20 @@ def main() -> None:
                 print(f"{head} · sent {sent:,} · bank {doc_rate:.0f} docs/min · ETA {eta}", flush=True)
     status(source=a.source, strategy=a.strategy or "full", total=len(items), todo=len(todo), queued=len(todo),
            skipped=len(items) - len(todo), percent=100.0, items_per_min=0, eta_s=0, started=t0, state="done")
+    st_end = stats(a.bank)
+    mins = (time.time() - t0) / 60
+    summary = box("▓▒░ RELIC5·MEMORY IMPORT ░▒▓", [
+        f"{a.source} · {a.strategy or 'full LLM extraction'} · bank {a.bank}",
+        f"{len(todo):,} items sent · {len(items) - len(todo):,} skipped (already there) · {len(items):,} on the hub",
+        f"{mins:.1f} min · {len(todo) / max(mins, 0.01):,.0f} items/min",
+        f"bank now {st_end.get('total_documents', 0):,} documents · {st_end.get('total_nodes', 0):,} memories · open ops {st_end.get('pending_operations', 0):,}",
+        "▸ relic5 memory recall …   ▸ relic5 memory top",
+    ])
+    if tty:
+        tty.write("\r\x1b[2K")
+        tty.write(CYAN + summary.replace("│ ", "│ " + Z, ).replace(" │", CYAN + " │") + Z + "\n")
+        tty.flush()
+    print(summary, flush=True)
     print(f"{a.source}: all {len(todo):,} queued; the bank finishes the queue on its own (relic5 memory status)", flush=True)
 
 
