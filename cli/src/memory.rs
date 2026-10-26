@@ -445,10 +445,11 @@ fn speed(watch: bool) -> Result<(), Fail> {
         println!("  {b}total{z}  embed {gr}{emb_s:.1} texts/s{z} · summarize {gr}{tok_s:.0} tok/s{z} ({calls_m} calls/min)");
         if let Some((name, done, total, rate, banks)) = &job {
             let pct = if *total > 0.0 { done / total } else { 0.0 };
-            let eta = if *rate > 0.0 && done < total { fmt_secs((total - done) / rate * 60.0) } else if done >= total { "done".into() } else { "?".into() };
+            let eta = if done >= total { "done".into() } else if *rate < 0.0 { "measuring".into() } else if *rate > 0.0 { fmt_secs((total - done) / rate * 60.0) } else { "?".into() };
             println!("{c}╭─ {b}job{z}{c} · {name} {}{z}", "─".repeat(60usize.saturating_sub(name.chars().count())));
-            println!("{c}│{z}  {gr}{}{z} {b}{:>5.1}%{z}  {} / {} items  {g}{:.0} items/min · ETA {eta}{z}",
-                     bar(pct, 30), pct * 100.0, commas(&Value::from(*done as i64)), commas(&Value::from(*total as i64)), rate);
+            println!("{c}│{z}  {gr}{}{z} {b}{:>5.1}%{z}  {} / {} items  {g}{} · ETA {eta}{z}",
+                     bar(pct, 30), pct * 100.0, commas(&Value::from(*done as i64)), commas(&Value::from(*total as i64)),
+                     if *rate < 0.0 { "rate: measuring (1 min)".to_string() } else { format!("{rate:.0} items/min") });
             for (bank, d, t) in banks {
                 if d < t {
                     println!("{c}│{z}    {g}{:<34}{z} {} {:>5.1}%  {}/{}", head(bank, 34), bar(d / t, 12), d / t * 100.0,
@@ -467,7 +468,7 @@ fn speed(watch: bool) -> Result<(), Fail> {
 /// The running job (~/.cache/relic5/hindsight-job.json, written by embed/discord-all.sh: items per bank): items done =
 /// each bank's documents (Hindsight makes a document when an item's extraction finished), capped at its item count.
 /// Returns (name, done, total, items/min, unfinished banks with done/total). The rate is from the --watch samples of the
-/// last 10 minutes, else the average since the job started.
+/// last 10 minutes (saved samples, shared by every call), "measuring" for its first minute.
 #[allow(clippy::type_complexity)]
 fn job_progress(samples: &mut Vec<(f64, f64)>) -> Option<(String, f64, f64, f64, Vec<(String, f64, f64)>)> {
     let path = format!("{}/.cache/relic5/hindsight-job.json", std::env::var("HOME").unwrap_or_default());
@@ -483,16 +484,29 @@ fn job_progress(samples: &mut Vec<(f64, f64)>) -> Option<(String, f64, f64, f64,
         total += t;
         open.push((bank.clone(), d, t));
     }
+    // The rate from samples saved beside the job file (~/.cache/relic5/hindsight-job.tsv: time, items done), shared by
+    // every `speed` call: only samples of this job (after its "started") over the last 10 minutes, and after the newest
+    // drop (a recount of the job lowers "done"), so neither a recount nor documents made before the job skew it.
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
-    samples.push((now, done));
-    samples.retain(|(t, _)| now - t <= 600.0);
-    let (t0, d0) = samples[0];
-    let rate = if now - t0 >= 30.0 && done > d0 {
-        (done - d0) / (now - t0) * 60.0
-    } else {
-        let started = j["started"].as_f64().unwrap_or(now);
-        if now - started > 60.0 { done / (now - started) * 60.0 } else { 0.0 }
-    };
+    let started = j["started"].as_f64().unwrap_or(0.0);
+    let tsv = format!("{}/.cache/relic5/hindsight-job.tsv", std::env::var("HOME").unwrap_or_default());
+    samples.clear();
+    for l in std::fs::read_to_string(&tsv).unwrap_or_default().lines() {
+        let mut f = l.split('\t').filter_map(|x| x.parse::<f64>().ok());
+        if let (Some(t), Some(d)) = (f.next(), f.next()) {
+            if t >= started && now - t <= 600.0 {
+                samples.push((t, d));
+            }
+        }
+    }
+    if samples.last().is_none_or(|(t, _)| now - t >= 10.0) {
+        samples.push((now, done));
+        let keep: String = samples.iter().map(|(t, d)| format!("{t:.0}\t{d:.0}\n")).collect();
+        let _ = std::fs::write(&tsv, keep);
+    }
+    let cut = samples.windows(2).rposition(|w| w[1].1 < w[0].1).map(|i| i + 1).unwrap_or(0);
+    let (t0, d0) = samples[cut];
+    let rate = if now - t0 >= 60.0 && done >= d0 { (done - d0) / (now - t0) * 60.0 } else { -1.0 };   // -1: measuring
     open.sort_by(|a, b| (b.2 - b.1).total_cmp(&(a.2 - a.1)));
     open.truncate(5);
     Some((s(&j["name"]), done, total, rate, open))
