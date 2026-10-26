@@ -1469,7 +1469,7 @@ wheels = [
 
 [[package]]
 name = "relic5"
-version = "26.10.26a316"
+version = "26.10.26a936"
 source = { editable = "." }
 dependencies = [
     { name = "duckdb" },
