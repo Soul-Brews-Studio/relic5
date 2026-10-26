@@ -30,7 +30,8 @@ MODEL = "embeddinggemma-300m"
 stats: dict[str, dict[str, float]] = {"ane": {"requests": 0, "texts": 0, "errors": 0, "seconds": 0.0},
                                       "gb300": {"requests": 0, "texts": 0, "errors": 0, "seconds": 0.0}}
 last = {"engine": None, "at": None}
-rate = {"gb300": 400.0, "ane": 70.0}   # texts/s to start the split with; replaced by what each engine measures
+rate = {"gb300": 400.0, "ane": 70.0}
+inflight = {"gb300": 0, "ane": 0}   # requests running now on each engine: a small batch goes to the less busy one   # texts/s to start the split with; replaced by what each engine measures
 lock = threading.Lock()
 
 
@@ -106,12 +107,17 @@ def llm(body: dict) -> tuple[str, bytes]:
 def one(e: str, texts: list[str]) -> list[list[float]]:
     """texts on one engine, with its stats; raises on failure"""
     t = time.time()
+    with lock:
+        inflight[e] += 1
     try:
         v = ENGINES[e](texts)
     except (urllib.error.URLError, OSError, KeyError, ValueError):
         with lock:
             stats[e]["errors"] += 1
         raise
+    finally:
+        with lock:
+            inflight[e] -= 1
     dt = time.time() - t
     with lock:
         s = stats[e]
@@ -129,7 +135,13 @@ def embed(texts: list[str], big: int, prefer: str | None) -> tuple[str, list[lis
     ANE in proportion to their measured speed, both at once (Nat, 2026-10-26: "gb300 + ANE split"); a part that fails
     is redone on the other engine."""
     if prefer in ENGINES or len(texts) < big:
-        order = ([prefer] if prefer in ENGINES else []) + [e for e in ("ane", "gb300") if e != prefer]
+        # a small batch is not split (5 texts gain nothing from two engines); it goes whole to the engine with fewer
+        # requests in flight, so concurrent callers (Hindsight's 32 workers) spread over both (Nat, 2026-10-26:
+        # "use gb300 for embedding too, split with ane"); ties go to the ANE, which answers without a network hop
+        if prefer not in ENGINES:
+            with lock:
+                prefer = "gb300" if inflight["gb300"] < inflight["ane"] else "ane"
+        order = [prefer] + [e for e in ("ane", "gb300") if e != prefer]
         err: Exception | None = None
         for e in order:
             try:
@@ -196,7 +208,7 @@ def main() -> None:
         def do_GET(self) -> None:
             p = self.path.split("?")[0]
             if p == "/health":
-                self.send(200, {"status": "ok", "model": MODEL, "big": a.big, "last": last, "stats": stats, "rate": rate,
+                self.send(200, {"status": "ok", "model": MODEL, "big": a.big, "last": last, "stats": stats, "rate": rate, "inflight": inflight,
                                 "llm": {k: {x: v[x] for x in ("model", "slots", "inflight", "calls", "errors", "seconds")} for k, v in LLMS.items()},
                                 "engines": {"ane": health(ANE), "gb300": health(GB300)}})
             elif p == "/info":
@@ -268,8 +280,12 @@ def main() -> None:
             self.send(200, {"object": "list", "model": MODEL, "usage": {"prompt_tokens": n, "total_tokens": n},
                             "data": [{"object": "embedding", "index": i, "embedding": v} for i, v in enumerate(vecs)]}, engine)
 
+    class Server(ThreadingHTTPServer):
+        request_queue_size = 256   # the default 5 refused connections under Hindsight's 32 workers plus a test burst
+        daemon_threads = True
+
     print(f"embed-router: http://{a.host}:{a.port}  (>= {a.big} texts: gb300 first, else ane first)", flush=True)
-    ThreadingHTTPServer((a.host, a.port), H).serve_forever()
+    Server((a.host, a.port), H).serve_forever()
 
 
 if __name__ == "__main__":

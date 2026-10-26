@@ -13,7 +13,7 @@ relic5 memory …  ──►  hindsight-embed daemon (m5, 127.0.0.1:8888, profil
                       embed/embed-router.py (m5, 127.0.0.1:11436)
                         ├─ ≥ 32 texts: split by speed, both at once ─► embed/gb300-serve.py (gb300 GPU, bf16, tunnel 11437)
                         │                                            └─► ANEEmbedBar (m5, 127.0.0.1:11435, w8a16)
-                        ├─ < 32 texts: ANE first, gb300 if it fails
+                        ├─ < 32 texts: whole, to whichever of gb300 / ANE has fewer requests in flight
                         ├─ /rerank ─► gb300's BAAI/bge-reranker-v2-m3 (multilingual); gb300 down: given order, score 0
                         └─ /v1/chat/completions (fact extraction) ─► dispatched to workers with free slots:
                               gb300 qwen3.8-27b vLLM (tunnel 11510, 24 slots) · m5 Ollama qwen3.6 on the GPU (4 slots)
@@ -45,6 +45,11 @@ relic5 memory recall "what did we decide about X" [--limit 10] [--json]
 relic5 memory retain "a fact" [--context C]
 relic5 memory import --since 30d [--min-events 6] [--max N] [--wait]   # a window, newest first; skips imported ones
 ```
+
+**Small batches** (Hindsight embeds ~5 facts a call) go whole to the engine with fewer requests in flight, so its 32
+workers spread over gb300 and the ANE (48 concurrent calls: ANE 125 texts, gb300 121, 0 errors). Before this, all of
+Hindsight's embedding ran on the ANE while gb300's embed server sat idle. The router's listen queue is 256 (the
+default 5 refused connections under that load). Restarting the router drops the LLM calls in flight; Hindsight retries.
 
 **Split:** a big batch goes to both engines at once, sized by their measured speed (EWMA, in `/health` as `rate`).
 Measured 2026-10-26: 3,000 texts at 1,130 texts/s split, against 1,032 on gb300 alone. The ANE adds about 100 texts/s
