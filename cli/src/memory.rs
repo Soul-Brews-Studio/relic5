@@ -7,6 +7,9 @@
 //!   relic5 memory import  <session> [<session> ...] [--bank B] [--wait]   a relic5 session's turns, queued (async)
 //!   relic5 memory import  --source memory|vault|git|thinking   a whole relic5 source from the hub, paced and resumable
 //!                         (runs embed/hindsight-import.py; Nat, 2026-10-26: "memory first then vault, git, thinking")
+//!   relic5 memory workers [list]                       every worker: up, busy, utilization and work done (last minute, total)
+//!   relic5 memory workers add embed|llm|rerank <name> <url> [--model M] [--slots N] [--api ollama|openai] [--batch N]
+//!   relic5 memory workers rm embed|llm|rerank <name>   the dispatcher's registry (embed/embed-router.py, workers.json)
 //!   relic5 memory import  --since 30d [--min-events 6] [--max N] [--bank B] [--wait]   every top-level session in the
 //!                         window, newest first; a session already in the bank (its block #1 exists) is skipped
 //!
@@ -184,7 +187,8 @@ pub fn main(rest: Vec<String>, json_out: bool) -> Result<(), Fail> {
             Ok(())
         }
         "import" => import(&bank, a, json_out),
-        other => Err(Fail::Other(format!("relic5 memory: unknown '{other}' (status, retain, recall, import)"), 2)),
+        "workers" => workers(a, json_out),
+        other => Err(Fail::Other(format!("relic5 memory: unknown '{other}' (status, retain, recall, import, workers)"), 2)),
     }
 }
 
@@ -324,6 +328,78 @@ fn import(bank: &str, mut a: Args, json_out: bool) -> Result<(), Fail> {
         eprintln!("\r\x1b[2K  all retained");
     }
     Ok(())
+}
+
+fn router() -> String {
+    std::env::var("RELIC5_EMBED_ROUTER").unwrap_or_else(|_| "http://127.0.0.1:11436".into()).trim_end_matches('/').to_string()
+}
+
+/// The dispatcher's workers: list (with utilization and work done), add, rm
+fn workers(mut a: Args, json_out: bool) -> Result<(), Fail> {
+    let sub = if a.0.is_empty() { "list".to_string() } else { a.0.remove(0) };
+    match sub.as_str() {
+        "list" => {
+            let h = http("GET", &format!("{}/health", router()), None, 30)
+                .map_err(|_| Fail::Other(format!("relic5 memory: the dispatcher is not up at {} (embed/start.sh)", router()), 1))?;
+            if json_out {
+                println!("{}", dumps(&h["workers"]));
+                return Ok(());
+            }
+            println!("dispatcher {} · registry {}", router(), s(&h["registry"]));
+            println!("{:<7} {:<7} {:<4} {:>9} {:>6}  {:>8} {:>8} {:>9}  {:>9} {:>9} {:>6} {:>6}  {}",
+                     "kind", "name", "up", "busy", "util", "calls/1m", "texts/1m", "tokens/1m", "calls", "texts", "err", "avg_s", "model / url");
+            for kind in ["llm", "embed", "rerank"] {
+                for w in h["workers"][kind].as_array().cloned().unwrap_or_default() {
+                    let slots = w["slots"].as_i64().unwrap_or(1);
+                    let busy = format!("{}/{}", w["inflight"].as_i64().unwrap_or(0), slots);
+                    let util = format!("{:.0}%", w["util"].as_f64().unwrap_or(0.0) * 100.0);
+                    let model = if w["model"].is_null() { s(&w["url"]) } else { format!("{} · {}", s(&w["model"]), s(&w["url"])) };
+                    println!("{:<7} {:<7} {:<4} {:>9} {:>6}  {:>8} {:>8} {:>9}  {:>9} {:>9} {:>6} {:>6}  {}",
+                             kind, s(&w["name"]), if w["up"] == "ok" { "ok" } else { "DOWN" }, busy, util,
+                             s(&w["requests_1m"]), commas(&w["texts_1m"]), commas(&w["tokens_1m"]),
+                             commas(&w["requests"]), commas(&w["texts"]), s(&w["errors"]), s(&w["avg_s"]), model);
+                }
+            }
+            Ok(())
+        }
+        "add" => {
+            let model = a.opt("--model")?;
+            let slots = a.opt("--slots")?;
+            let api = a.opt("--api")?;
+            let batch = a.opt("--batch")?;
+            let note = a.opt("--note")?;
+            if a.0.len() != 3 {
+                return Err(Fail::Other("relic5 memory workers add embed|llm|rerank <name> <url> [--model M] [--slots N] [--api ollama|openai] [--batch N] [--note T]".into(), 2));
+            }
+            let mut w = json!({"kind": a.0[0], "name": a.0[1], "url": a.0[2]});
+            if let Some(m) = model { w["model"] = json!(m) }
+            if let Some(n) = slots { w["slots"] = json!(n.parse::<i64>().map_err(|_| Fail::Other("--slots must be a number".into(), 2))?) }
+            if let Some(x) = api { w["api"] = json!(x) }
+            if let Some(n) = batch { w["batch"] = json!(n.parse::<i64>().map_err(|_| Fail::Other("--batch must be a number".into(), 2))?) }
+            if let Some(t) = note { w["note"] = json!(t) }
+            let r = http("POST", &format!("{}/workers", router()), Some(&w), 120)?;
+            println!("{}", if json_out { dumps(&r) } else { format!("added {} worker {}", s(&r["added"]), s(&r["worker"]["name"])) });
+            Ok(())
+        }
+        "rm" => {
+            if a.0.len() != 2 {
+                return Err(Fail::Other("relic5 memory workers rm embed|llm|rerank <name>".into(), 2));
+            }
+            let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
+            let mut r = agent
+                .delete(&format!("{}/workers?kind={}&name={}", router(), a.0[0], a.0[1]))
+                .call()
+                .map_err(|e| Fail::Other(format!("relic5 memory: dispatcher unreachable: {e}"), 1))?;
+            let code = r.status().as_u16();
+            let body = r.body_mut().read_to_string().unwrap_or_default();
+            if code >= 400 {
+                return Err(Fail::Other(format!("relic5 memory: {code} {body}"), 2));
+            }
+            println!("removed {} worker {}", a.0[0], a.0[1]);
+            Ok(())
+        }
+        other => Err(Fail::Other(format!("relic5 memory workers: unknown '{other}' (list, add, rm)"), 2)),
+    }
 }
 
 /// Top-level sessions in a window, newest first. /api/sessions answers at most 500 at a time, so it pages back with
