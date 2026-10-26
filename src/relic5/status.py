@@ -148,7 +148,7 @@ def status(root: str, now: _datetime | None = None) -> Json:
     vs = rfs.read_json(vp) if rfs.exists(vp) else {"at": None, "models": {}}
     vectors = {"at": vs["at"], "pending": sum(v["pending"] for w in vs["models"].values() for v in w.values()) if vs["models"] else rows["text"],
                "models": vs["models"], "tables": {k: v["rows"] for k, v in fst.items() if k in live and k.startswith("vec_")}}
-    # freshness: how far behind each machine and each index is (relic-chain runs every 10 min on m5, 2026-10-23)
+    # freshness: how far behind each machine and each index is (imports are manual since 2026-10-26)
     t_now = time.time()
     def lag(iso: str | None) -> int | None:
         if not iso:
@@ -164,9 +164,8 @@ def status(root: str, now: _datetime | None = None) -> Json:
         pushed = v.get("at")
         fresh["machines"][m] = {"newest_ts": x.get("newest_ts"), "pushed_at": pushed, "lag_s": lag(x.get("newest_ts")),
                                 "push_age_s": lag(pushed.replace("+0700", "+07:00").replace("+0000", "+00:00")) if pushed else None}
-        age = fresh["machines"][m]["push_age_s"]
-        if age is not None and age > 1800 and not m.endswith("-import") and not copy:
-            warnings.append(f"machine {m}: last push {age // 60} min ago (relic-chain should push every 10 min)")
+        # No push-age warning: since 2026-10-26 every machine imports by hand (Nat: "go fully manual, no auto import";
+        # docs/IMPORT.md), so a push hours or days old is expected. push_age_s still says how old it is.
     for m in p.machines():   # the chain's own verdict (relic-chain SYNC OK / MISMATCH), as last pushed
         sp_ = os.path.join(p.dir, m, "_sync.json")
         if rfs.isfile(sp_):

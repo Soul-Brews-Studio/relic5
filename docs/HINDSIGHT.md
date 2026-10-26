@@ -1,0 +1,55 @@
+# HINDSIGHT: relic5's history as memory, embedded on gb300 and the ANE
+
+Nat, 2026-10-26: "install hindsight and use gb300 to embed? make it compat work with ane on m5 too?", "if huge can we
+go gb300 first?", "can we add more to make our cli compat with hindsight?". relic5 keeps every turn; Hindsight
+(vectorize-io/hindsight, the `hindsight-embed` daemon on m5) keeps what was learned from them: facts, entities,
+observations, mental models.
+
+## The pieces
+
+```
+relic5 memory …  ──►  hindsight-embed daemon (m5, 127.0.0.1:8888, profile "relic", its own pg0 database)
+                        │ LLM (fact extraction): qwen3.8-27b, vLLM on gb300, through the tunnel (127.0.0.1:11510)
+                        │ embeddings + rerank ▼
+                      embed/embed-router.py (m5, 127.0.0.1:11436)
+                        ├─ ≥ 32 texts: gb300 first ─► embed/gb300-serve.py (gb300 GPU, bf16, through the tunnel 11437)
+                        ├─ < 32 texts: ANE first   ─► ANEEmbedBar (m5, 127.0.0.1:11435, w8a16)
+                        └─ /rerank ─► gb300's BAAI/bge-reranker-v2-m3 (multilingual); gb300 down: given order, score 0
+```
+
+- **One vector space.** Both engines serve `unsloth/embeddinggemma-300m`, the model relic5 already mixes across
+  engines (`unsloth--embeddinggemma-300m@806f5f90`). Measured 2026-10-26 on 259 m5 texts: cosine between gb300 bf16 and
+  ANE w8a16, min 0.9976, p05 0.9983, median 0.9991. Each falls back to the other.
+- **Prompts in the text**, as relic5 does: Hindsight's `EMBEDDINGS_QUERY_PREFIX="task: search result | query: "` and
+  `PASSAGE_PREFIX="title: none | text: "`; the engines take raw text.
+- **The LLM is ours.** gb300's `glm-5.3-flash` (another user's vLLM) answered 500 to everything on 2026-10-26, so the
+  profile uses nazt's `qwen3.8-27b` (32k context, `REASONING_EFFORT=none`, `RETAIN_MAX_COMPLETION_TOKENS=8192`).
+- **Reranker:** `tei` through the router. The default FlashRank model (ms-marco-MiniLM) is English-only; much of the
+  history is Thai. Example: for a Thai question, a Thai answer scored 0.92, the English one 0.68, an unrelated line 0.00002.
+- **Nothing starts by itself** (m5 is manual): `embed/start.sh` brings everything up; the hindsight daemon stops
+  itself when idle. The profile is `~/.hindsight/profiles/relic.env` (0600).
+
+## Use it
+
+```sh
+embed/start.sh                                   # gb300 server, tunnel, router, daemon (skips what is up)
+relic5 memory status                             # documents, memories, queue with an ETA, which engine answered
+relic5 memory import <session> [...] [--wait]    # a relic5 session's user/assistant turns, queued (async)
+relic5 memory recall "what did we decide about X" [--limit 10] [--json]
+relic5 memory retain "a fact" [--context C]
+```
+
+`import` reads the session from the hub (`/api/conversation`), keeps user and assistant turns, and sends blocks of
+about 3,000 characters (Hindsight's retain chunk), each its own document `<session>#<n>` with the session in
+`metadata.relic5_session` and the first turn's time as its timestamp. A re-import replaces the blocks.
+
+**ETA:** `status` divides what is still queued (the child `retain` operations' items) by the rate of the ones finished
+in the last hour. It says "unknown" until two have finished. First run, 2026-10-26: session 0f7f08a8 (370 turns) →
+90 blocks → 607 memories in about 1.5 minutes, 27.6 blocks a minute, LLM-bound on gb300.
+
+## Who owns what
+
+- `embed/gb300-serve.py`, `embed/embed-router.py`, `embed/start.sh`, `relic5 memory` (`cli/src/memory.rs`): relic5.
+- Hindsight itself: vectorize-io/hindsight (`uv tool install hindsight-embed`), unchanged.
+- ANEEmbedBar: ane-oracle `tools/ane-embed-app`, unchanged. Its own worker pool refuses gb300 on purpose (a remote must
+  report the same CoreML `vector_space_identity`), so the mixing happens in the router, backed by the parity numbers above.

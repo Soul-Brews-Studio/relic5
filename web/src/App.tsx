@@ -67,7 +67,7 @@ export function App() {
   const status = usePoll<Status>("/api/status", 15000);
   const queries = usePoll<Queries>("/api/queries", 60000);
   const s = status.data;
-  const sess = usePoll<{ sessions: { uuid: string; name?: string | null; repo?: string | null; endedAt?: string }[] }>("/api/sessions?limit=500", 120000);
+  const sess = usePoll<{ sessions: { uuid: string | null; name?: string | null; repo?: string | null; endedAt?: string }[] }>("/api/sessions?limit=500", 120000);
   const [reading, setReading] = useState<{ x: PaletteSession; r: ShowResult | null; err?: string } | null>(null);
   const openSession = (x: PaletteSession) => {
     setReading({ x, r: null });
@@ -102,7 +102,7 @@ export function App() {
   const hub: HubState = status.error ? "failed" : !s ? "unknown" : s.warnings.length ? "warning" : "ok";
   const machines = s ? Object.keys({ ...s.machines, ...s.versions }).sort().filter(m => !m.endsWith("-import")) : [];
   const foot = status.error ? <>The hub did not answer.</> : s ? <span title={`relic5 ${s.code.version} · door ${s.you}`}>{s.warnings.length ? `${s.warnings.length} warning${s.warnings.length === 1 ? "" : "s"}, see Home.` : "Every machine is in."} Read {clock(status.at)}.</span> : <>Reading the hub…</>;
-  const palSessions: PaletteSession[] = (sess.data?.sessions ?? []).map(x => ({ sid: x.uuid, name: x.name || x.uuid.slice(0, 8), repo: shortRepo(x.repo), ts: x.endedAt ?? "" }));
+  const palSessions: PaletteSession[] = (sess.data?.sessions ?? []).flatMap(x => x.uuid ? [{ sid: x.uuid, name: x.name || x.uuid.slice(0, 8), repo: shortRepo(x.repo), ts: x.endedAt ?? "" }] : []);
 
   return (
     <div className="h-dvh">

@@ -85,7 +85,8 @@ def recap(relic: "Relic5", ident: str, limit: int = 20) -> Json:
     return {"uuid": sid, "name": s.get("name"), "repo": s.get("repo"), "startedAt": s.get("startedAt"), "endedAt": s.get("endedAt"),
             "turns": {"user": len(user), "shown": len(shown), "all": len(turns)},
             "asked": [{"ts": t["ts"], "text": t["text"]} for t in shown],
-            "tools": dict(sorted(tools.items(), key=lambda x: -x[1])), "files_edited": dict(sorted(files.items(), key=lambda x: -x[1])),
+            # ties by name: the counts come from an unordered scan, so a plain sort by count gave a new order each call
+            "tools": dict(sorted(tools.items(), key=lambda x: (-x[1], x[0]))), "files_edited": dict(sorted(files.items(), key=lambda x: (-x[1], x[0]))),
             "ended": {"ts": last["ts"], "text": (last["text"] or "")[:1200]} if last else None,
             "more": None if not limit or len(user) <= limit else f"relic5 recap {sid[:8]} --limit 0   ({len(user) - limit} earlier turns)"}
 

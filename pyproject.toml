@@ -1,7 +1,7 @@
 [project]
 license = "AGPL-3.0-or-later"
 name = "relic5"
-version = "26.10.26a316"
+version = "26.10.26a936"
 description = "One hub on white for every machine's extracted history and vectors: push, import, embed, serve"
 requires-python = ">=3.12"
 dependencies = [
@@ -25,6 +25,8 @@ dev = [
 
 [project.scripts]
 relic5 = "relic5.cli:main"
+# the same CLI under the name the Rust client (cli/) hands hub-side commands to; `relic5` stays for the hub's venv
+relic5-core = "relic5.cli:main"
 
 [build-system]
 requires = ["hatchling"]
