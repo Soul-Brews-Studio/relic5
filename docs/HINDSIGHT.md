@@ -101,7 +101,13 @@ Tiny models do not make a usable first pass, and m5's GPU as an LLM worker gave 
 the GPU. So the fast first pass is **embed-first** (chunks, no LLM) and the facts come from gb300's 27B later; m5's GPU
 moved to embedding: Ollama `embeddinggemma:latest` on it matches the ANE (256 vault texts: cos min 0.9980, p05 0.9982,
 median 0.9986), registered as embed worker `m5-gpu`. gb300's embed server hits CUDA OOM while other users fill its GPU
-(254/256 GB); the router rests it 30 s after each error.
+(254/256 GB); the router rests it 30 s after each error, and while the GPU stays full it is out of the embed pool
+(`relic5 memory workers rm embed gb300`; back with `relic5 memory workers add embed gb300 http://127.0.0.1:11437
+--model unsloth/embeddinggemma-300m --batch 4096`). It still reranks.
+
+Small batches go to the worker that would finish first, (requests in flight + 1) / measured texts per second, so the
+faster one takes proportionally more: by raw in-flight count with ties to the first listed, the ANE took 2,464 calls
+and the faster m5 GPU 535 (34% busy).
 
 ## Everything relic5 holds (Nat, 2026-10-26: "memory first then vault, git, thinking, then sessions")
 

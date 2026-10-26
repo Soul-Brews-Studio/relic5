@@ -155,8 +155,11 @@ def embed(texts: list[str], big: int, prefer: str | None) -> tuple[str, list[lis
     if not ws:
         raise RuntimeError("no embed worker in the registry")
     if len(texts) < big or len(ws) == 1 or prefer:
-        with lock:   # whole, to the least busy (ties: the order in the registry); then the others
-            order = sorted(ws, key=lambda w: (w["name"] != prefer, counters("embed", w["name"])["inflight"]))
+        with lock:   # whole, to the one that would finish it first: (requests in flight + 1) / measured speed, so a
+            # faster worker takes proportionally more (2026-10-26: by raw in-flight count, ties to the first listed, the
+            # ANE took 2,464 calls and the faster m5 GPU 535); then the others in the same order
+            order = sorted(ws, key=lambda w: (w["name"] != prefer,
+                                              (counters("embed", w["name"])["inflight"] + 1) / max(counters("embed", w["name"])["rate"], 1.0)))
         err: Exception | None = None
         for w in order:
             try:
