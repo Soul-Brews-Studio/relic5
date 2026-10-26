@@ -5,6 +5,8 @@
 //!   relic5 memory retain  <text> [--bank B] [--context C]
 //!   relic5 memory recall  <query> [--bank B] [--limit 10] [--json]
 //!   relic5 memory import  <session> [<session> ...] [--bank B] [--wait]   a relic5 session's turns, queued (async)
+//!   relic5 memory import  --source memory|vault|git|thinking   a whole relic5 source from the hub, paced and resumable
+//!                         (runs embed/hindsight-import.py; Nat, 2026-10-26: "memory first then vault, git, thinking")
 //!   relic5 memory import  --since 30d [--min-events 6] [--max N] [--bank B] [--wait]   every top-level session in the
 //!                         window, newest first; a session already in the bank (its block #1 exists) is skipped
 //!
@@ -106,12 +108,40 @@ fn eta(bank: &str) -> Result<Value, Fail> {
         None
     };
     let left = items(&open);
+    // The rate from the bank's own document count, sampled at each status call (~/.cache/relic5/memory-<bank>.tsv):
+    // a block becomes one document, so documents per minute over the last 15 minutes is the real speed. The
+    // finished-operation rate above is the fallback (a child operation holds ~13 blocks and finishes late).
+    let docs = http("GET", &bank_url(bank, "/stats"), None, 30).ok().and_then(|st| st["total_documents"].as_f64());
+    let doc_rate = docs.and_then(|d| sample_rate(bank, t, d));
+    let rate = doc_rate.or(rate);
     Ok(json!({
         "open_operations": open.len(), "open_items": left, "done_last_hour": done.len(),
         "items_per_minute": rate.map(|r| (r * 60.0 * 10.0).round() / 10.0),
+        "rate_from": if doc_rate.is_some() { "documents, last 15 min" } else { "finished operations, last hour" },
         "eta_s": if left == 0.0 { Some(0.0) } else { rate.map(|r| (left / r).round()) },
         "failed": ops.iter().filter(retain).filter(|o| o["status"] == "failed").count(),
     }))
+}
+
+/// Append (time, documents) and return documents per second over the samples of the last 15 minutes (>= 2 min apart)
+fn sample_rate(bank: &str, t: f64, docs: f64) -> Option<f64> {
+    let dir = format!("{}/.cache/relic5", std::env::var("HOME").unwrap_or_default());
+    let _ = std::fs::create_dir_all(&dir);
+    let f = format!("{dir}/memory-{bank}.tsv");
+    let old: Vec<(f64, f64)> = std::fs::read_to_string(&f)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| l.split_once('\t').and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?))))
+        .filter(|(at, _): &(f64, f64)| t - at < 3600.0)
+        .collect();
+    let mut keep: Vec<String> = old.iter().map(|(a, b)| format!("{a}\t{b}")).collect();
+    keep.push(format!("{t}\t{docs}"));
+    let _ = std::fs::write(&f, keep.join("\n") + "\n");
+    let first = old.iter().filter(|(at, _)| t - at <= 900.0).min_by(|x, y| x.0.total_cmp(&y.0))?;
+    if t - first.0 < 120.0 || docs <= first.1 {
+        return None;
+    }
+    Some((docs - first.1) / (t - first.0))
 }
 
 pub fn main(rest: Vec<String>, json_out: bool) -> Result<(), Fail> {
@@ -177,8 +207,8 @@ fn status(bank: &str, json_out: bool) -> Result<(), Fail> {
     );
     let eta_txt = match e["eta_s"].as_f64() {
         Some(0.0) => "nothing queued".to_string(),
-        Some(x) => format!("ETA {} ({} items/min over the last hour)", dur(x), s(&e["items_per_minute"])),
-        None => "ETA unknown until two retains finish (no rate yet)".into(),
+        Some(x) => format!("ETA ≤ {} ({} blocks/min, from {})", dur(x), s(&e["items_per_minute"]), s(&e["rate_from"])),
+        None => "ETA: measuring (needs two status calls 2 min apart, or two finished retains)".into(),
     };
     println!("  queue: {} operations, {} items open · {} done in the last hour · {} failed · {eta_txt}",
         e["open_operations"], e["open_items"].as_f64().unwrap_or(0.0).max(0.0) as u64, e["done_last_hour"], e["failed"]);
@@ -197,6 +227,18 @@ fn status(bank: &str, json_out: bool) -> Result<(), Fail> {
 /// (Hindsight's retain chunk). Each block is its own document, `<session>#<n>` (an async batch needs one id per item,
 /// and the blocks are then retained in parallel); a re-import replaces them. metadata.relic5_session ties them together.
 fn import(bank: &str, mut a: Args, json_out: bool) -> Result<(), Fail> {
+    if let Some(src) = a.opt("--source")? {
+        use std::os::unix::process::CommandExt;
+        let home = std::env::var("HOME").unwrap_or_default();
+        let script = [std::env::var("RELIC5_EMBED_DIR").unwrap_or_default(), "/opt/Code/github.com/Soul-Brews-Studio/relic5/embed".into(),
+                      format!("{home}/relic5/app/embed")]
+            .into_iter()
+            .map(|d| format!("{d}/hindsight-import.py"))
+            .find(|p| std::path::Path::new(p).is_file())
+            .ok_or_else(|| Fail::Other("relic5 memory: embed/hindsight-import.py not found (set RELIC5_EMBED_DIR)".into(), 1))?;
+        let err = std::process::Command::new("python3").arg(script).arg(&src).args(["--bank", bank]).args(&a.0).exec();
+        return Err(Fail::Other(format!("relic5 memory: cannot run python3: {err}"), 1));
+    }
     let wait = a.has("--wait");
     a.0.retain(|x| x != "--wait");
     if let Some(since) = a.opt("--since")? {
