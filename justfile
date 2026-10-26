@@ -64,6 +64,7 @@ cli:
 # cli/target: a machine may build elsewhere (white sets build.target-dir in ~/.cargo/config.toml). The replaced file
 # is kept as relic5.bak-<its version>.
 cli-bin:
+    @command -v cargo >/dev/null || { echo "cargo is not on PATH (add ~/.cargo/bin); relic5 left as it is" >&2; exit 1; }
     @f="$HOME/.local/bin/relic5"; [ -e "$f" ] && cp -p "$f" "$f.bak-$("$f" --version 2>/dev/null | sed 's/^[^ ]* //')"; rm -f "$f"
     cargo install --quiet --locked --force --path cli --root "$HOME/.local"
     @"$HOME/.local/bin/relic5" --version

@@ -7,6 +7,20 @@
 set -u
 HERE=${0:A:h}
 LOG=~/Library/Logs/hindsight-import.log
+# the job's size up front, for the overall progress bar of `relic5 hindsight speed` and `top`: items per bank
+python3 - "$HERE" <<'PY'
+import json, os, subprocess, sys, time
+here = sys.argv[1]
+rows = [json.loads(l) for l in subprocess.run([sys.executable, f"{here}/discord-source.py", "--list"], capture_output=True, text=True).stdout.splitlines()]
+banks = {}
+for r in rows:
+    n = subprocess.run([sys.executable, f"{here}/discord-source.py", r["guild"]], capture_output=True, text=True).stdout.count("\n")
+    banks[r["bank"]] = banks.get(r["bank"], 0) + n
+out = os.path.expanduser("~/.cache/relic5/hindsight-job.json")
+json.dump({"name": "discord → per-server banks", "banks": banks, "started": time.time()}, open(out + ".tmp", "w"))
+os.replace(out + ".tmp", out)
+print(f"job: {sum(banks.values()):,} items in {len(banks)} banks ({out})")
+PY
 python3 "$HERE/discord-source.py" --list | python3 -c "
 import json,sys
 rows=[json.loads(l) for l in sys.stdin]

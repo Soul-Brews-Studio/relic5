@@ -145,6 +145,7 @@ with full LLM extraction and observations on: a server's bank is for digging out
 embed/discord-all.sh                                   # every finished server, smallest first (resumable)
 python3 embed/hindsight-import.py discord:<guild_id>   # one server
 relic5 hindsight banks                                 # every bank with documents / memories / observations
+relic5 hindsight speed --watch                         # speed per machine + the job's overall progress, ETA
 relic5 hindsight recall "what did the team decide about X" --bank discord-<server>
 ```
 
@@ -153,6 +154,11 @@ conversation (a thread, or a channel's top level) in ~3,000-character blocks, "[
 messages marked (bot); tags `discord`, `guild:<id>`, `channel:<name>`. First server, Laris Co Ltd: 195 items → 90
 documents and 471 memories in about 90 s. The relic5 hub does not take Discord yet (a `discord` stream there, kept out
 of the public MCP, is the plan agreed with neo).
+
+Overall progress (Nat, 2026-10-26: "can we see total in percent of progress?"): `discord-all.sh` first counts every
+server's items into `~/.cache/relic5/hindsight-job.json` (38,084 items in 18 banks); `relic5 hindsight speed` shows
+items done (each bank's documents, which Hindsight writes when an item's extraction finished) against that total, the
+rate over the last 10 minutes of `--watch`, the ETA, and the five banks with the most left.
 
 ## Backup
 
