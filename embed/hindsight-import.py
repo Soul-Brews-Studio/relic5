@@ -62,6 +62,7 @@ def main() -> None:
           f"(~{blocks:,} blocks)", flush=True)
 
     t0, last_print, sent = time.time(), 0.0, 0
+    hist: list[tuple[float, int, int]] = []   # (time, open operations, documents) for the last 15 minutes
     docs0 = stats(a.bank).get("total_documents", 0)
     i = 0
     while i < len(todo):
@@ -88,15 +89,22 @@ def main() -> None:
         if time.time() - last_print >= 60 or i >= len(todo):
             last_print = time.time()
             st = stats(a.bank)
-            mins = (time.time() - t0) / 60
-            made = st.get("total_documents", 0) - docs0
-            rate = made / mins if mins > 0.5 else 0
-            left_docs = len(todo) - made
-            eta = f"{left_docs / rate / 60:.1f} h" if rate > 0 else "measuring"
-            print(f"{time.strftime('%H:%M')} {a.source}: queued {i:,}/{len(todo):,} · bank {st.get('total_documents', 0):,} docs, "
-                  f"{st.get('total_nodes', 0):,} memories · open ops {st.get('pending_operations', 0)} · "
-                  f"in flight {sent - (st.get('total_documents', 0) - docs0):,} · "
-                  f"{rate:.0f} docs/min · ETA {eta}", flush=True)
+            ops = st.get("pending_operations", 0)
+            hist.append((time.time(), ops, st.get("total_documents", 0)))
+            while len(hist) > 1 and hist[0][0] < time.time() - 900:
+                hist.pop(0)
+            span = (hist[-1][0] - hist[0][0]) / 60 if len(hist) > 1 else 0
+            ops_rate = (hist[0][1] - hist[-1][1]) / span if span > 0 else 0       # open operations closed a minute
+            doc_rate = (hist[-1][2] - hist[0][2]) / span if span > 0 else 0       # documents the bank made a minute
+            head = (f"{time.strftime('%H:%M')} {a.source}: queued {i:,}/{len(todo):,} · bank {st.get('total_documents', 0):,} docs, "
+                    f"{st.get('total_nodes', 0):,} memories · open ops {ops:,}")
+            if i == 0:   # nothing of this source sent yet: say what it waits for, not a rate it does not have
+                wait = f"{ops_rate:.0f} ops closed/min, starts in ~{(ops - a.max_pending) / ops_rate:.0f} min" if ops_rate > 0 else "measuring"
+                print(f"{head} · waiting for the queue to drop below {a.max_pending} ({wait})", flush=True)
+            else:
+                left = len(todo) - i + max(0, sent - (st.get("total_documents", 0) - docs0))
+                eta = f"{left / doc_rate / 60:.1f} h" if doc_rate > 0 else "measuring"
+                print(f"{head} · sent {sent:,} · bank {doc_rate:.0f} docs/min · ETA {eta}", flush=True)
     print(f"{a.source}: all {len(todo):,} queued; the bank finishes the queue on its own (relic5 memory status)", flush=True)
 
 
