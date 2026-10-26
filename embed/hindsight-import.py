@@ -56,13 +56,13 @@ def main() -> None:
     ap.add_argument("--max-inflight", type=int, default=600,
                     help="hold back while this many items sent here are not yet documents in the bank")
     ap.add_argument("--batch", type=int, default=40)
-    ap.add_argument("--parallel", type=int, default=8, help="with --strategy: synchronous batches in flight at once "
+    ap.add_argument("--parallel", type=int, default=32, help="with --strategy: synchronous batches in flight at once "
                     "(Hindsight handles one synchronous batch an item at a time)")
     a = ap.parse_args()
 
     ledger_path = os.path.expanduser(f"~/.cache/relic5/hindsight-{a.bank}-{a.source}{'.' + a.strategy if a.strategy else ''}.done")
     if a.strategy and a.batch == 40:
-        a.batch = 100
+        a.batch = 20   # small batches, many at once: a huge note (vault max 3.3 MB) holds up only its own batch
     os.makedirs(os.path.dirname(ledger_path), exist_ok=True)
     done = set(open(ledger_path).read().split("\n")) if os.path.exists(ledger_path) else set()
     done.discard("")
@@ -160,11 +160,20 @@ def main() -> None:
                     return False
 
             res: list[bool] = [False] * len(batches)
+            round_t = time.time()
             th = [threading.Thread(target=lambda k=k: res.__setitem__(k, send(batches[k]))) for k in range(len(batches))]
             for t_ in th:
                 t_.start()
-            for t_ in th:
-                t_.join()
+            while any(t_.is_alive() for t_ in th):   # heartbeat: the status file stays fresh while a round runs
+                next(t_ for t_ in th if t_.is_alive()).join(5)
+                rate_, eta_ = own()
+                status(source=a.source, strategy=a.strategy or "full", total=len(items), todo=len(todo), queued=i,
+                       skipped=len(items) - len(todo), percent=round(100 * i / max(len(todo), 1), 1), items_per_min=round(rate_, 1),
+                       eta_s=round(eta_) if eta_ else None, started=t0,
+                       state=f"sending {sum(t_.is_alive() for t_ in th)}/{len(th)} batches · round {time.time() - round_t:.0f}s")
+                if tty:
+                    tty.write(f"\r  round {time.time() - round_t:.0f}s · {sum(t_.is_alive() for t_ in th)}/{len(th)} batches in flight ")
+                    tty.flush()
             ok_upto = 0
             for k, b in enumerate(batches):   # advance only over the prefix that went in; the rest is retried
                 if not res[k]:

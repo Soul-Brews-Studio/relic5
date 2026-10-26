@@ -18,7 +18,7 @@ else
   # in a herdr pane on gb300 (a saved herdr machine): it outlives any ssh session (gb300 drops them) and can be read
   # from here with: herdr --machine gb300 pane read w1:p1 --source recent-unwrapped --lines 20
   PANE=$(herdr --machine gb300 pane list 2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin)['result']['panes'][0]['pane_id'])" 2>/dev/null)
-  herdr --machine gb300 pane run "${PANE:-w1:p1}" 'cd ~/embed-serve && HF_HUB_OFFLINE=1 TOKENIZERS_PARALLELISM=false ~/.local/bin/uv run gb300-serve.py --rerank BAAI/bge-reranker-v2-m3' >/dev/null
+  herdr --machine gb300 pane run "${PANE:-w1:p1}" 'cd ~/embed-serve && HF_HUB_OFFLINE=1 TOKENIZERS_PARALLELISM=false PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True ~/.local/bin/uv run gb300-serve.py --batch 32 --rerank BAAI/bge-reranker-v2-m3' >/dev/null
   echo "gb300 embed server: starting in herdr pane ${PANE:-w1:p1} on gb300"
 fi
 
