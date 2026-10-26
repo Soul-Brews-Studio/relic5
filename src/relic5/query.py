@@ -474,7 +474,9 @@ class Relic5:
             lo, hi, _ = window(since, until)
         except ValueError as ex:
             raise UsageError(str(ex))
-        where: list[str] = ["parent_sid IS NULL"]
+        # a session without an id cannot be opened (2026-10-26: an omp transcript on m5 with sid null broke the page's
+        # session list, link relic5://session/None); it stays out of the list and its counts
+        where: list[str] = ["parent_sid IS NULL", "sid IS NOT NULL"]
         params: list[object] = []
         for col, v in (("via", via), ("chat", chat), ("from_user", from_user)):
             if v and not self.meta_has(col):

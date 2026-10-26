@@ -61,7 +61,7 @@ function HitSpace({ hits, active, pick }: { hits: Hit[]; active: number; pick: (
             onHover={(i, x, y) => setHover({ i, x, y })} onSelect={i => { const x = view.hitIdx[i - view.nc]; if (x) pick(x.i); }} />
         </Suspense>
         {hv && <div className="pointer-events-none absolute z-[2] max-w-72 rounded-lg border border-line bg-panel px-3 py-2 text-xs shadow-[var(--shadow-pop)]" style={{ left: hover.x + 12, top: hover.y + 12 }}>
-          <b className="text-text">#{hv.i + 1}</b> <span className="text-soft">{hv.h.session_name ?? hv.h.session_uuid.slice(0, 8)}</span>
+          <b className="text-text">#{hv.i + 1}</b> <span className="text-soft">{hv.h.session_name ?? (hv.h.session_uuid ?? "?").slice(0, 8)}</span>
           <span className="block text-muted">score {hv.h.score.toFixed(2)} · {hv.h.role}</span></div>}
       </div>
       <p className="m-0 mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
