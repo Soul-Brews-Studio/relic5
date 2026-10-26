@@ -11,7 +11,7 @@ database. One progress line a minute: queued / total, documents in the bank, blo
 the next run picks up after the last queued batch. Pacing is on this run's own count (items sent minus documents
 created), since the bank's pending count lags an async post. Stdlib only.
 """
-import argparse, concurrent.futures, json, os, subprocess, sys, threading, time, urllib.error, urllib.request
+import argparse, concurrent.futures, json, os, subprocess, sys, threading, time, urllib.error, urllib.parse, urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 HUB = os.environ.get("RELIC5_HUB_SSH", "nat@white.follow-rankine.ts.net")
@@ -84,6 +84,109 @@ def status(**kw: object) -> None:
     os.replace(tmp, STATUS)
 
 
+def past(until: str) -> bool:
+    """True once the local clock is past HH:MM today (an HH:MM earlier than the start means tomorrow's)"""
+    if not until:
+        return False
+    h, m = (int(x) for x in until.split(":"))
+    now = time.localtime()
+    return (now.tm_hour, now.tm_min) >= (h, m) and (now.tm_hour - h) < 12
+
+
+def upgrade(a: argparse.Namespace, items: list, done: set, meta: dict, ledger, tty) -> None:
+    """The LLM precision pass over one source, in its order (newest first): every item becomes a fully extracted
+    document. Unchanged and held as embed-first chunks: retain it again without a strategy (the same content hash is
+    skipped, and the document's stored strategy is reset), then reprocess (a real extraction; reprocess alone keeps
+    the stored embed-first). New or changed: one async full retain (replace). Already full: skipped. Paced on the
+    bank's open operations like a full import; --until stops sending at a time."""
+    import hashlib
+    plan = {"new": 0, "changed": 0, "chunks": 0, "full": 0, "queued": 0}
+    todo = []
+    for x in items:
+        if x["document_id"] in done:
+            plan["queued"] += 1
+            continue
+        h, strat = meta.get(x["document_id"], (None, None))
+        if h is None:
+            kind = "new"
+        elif h != hashlib.sha256(x["content"].encode()).hexdigest():
+            kind = "changed"
+        elif strat:
+            kind = "chunks"
+        else:
+            kind = "full"
+        plan[kind] += 1
+        if kind != "full":
+            todo.append((kind, x))
+    if a.limit:
+        todo = todo[:a.limit]
+    print(f"{a.source}: upgrade plan · {plan['chunks']:,} embed-first to extract · {plan['new']:,} new · "
+          f"{plan['changed']:,} changed · {plan['full']:,} already full · {plan['queued']:,} done before"
+          + (f" · nothing new after {a.until}" if a.until else ""), flush=True)
+    t0, sent, i, last = time.time(), 0, 0, 0.0
+    docs_hist: list[tuple[float, int]] = []
+
+    def one(kind: str, x: dict) -> bool:
+        item = {k: v for k, v in x.items() if v is not None}
+        try:
+            if kind == "chunks":
+                call("POST", f"/v1/default/banks/{a.bank}/memories", {"items": [item], "async": False}, timeout=600)
+                call("POST", f"/v1/default/banks/{a.bank}/documents/{urllib.parse.quote(x['document_id'], safe='')}/reprocess", {}, timeout=120)
+            else:
+                call("POST", f"/v1/default/banks/{a.bank}/memories", {"items": [item], "async": True}, timeout=120)
+            return True
+        except (urllib.error.URLError, OSError) as ex:
+            print(f"{a.source}: {x['document_id']}: {ex}; will retry", flush=True)
+            return False
+
+    pool = concurrent.futures.ThreadPoolExecutor(8)
+    while i < len(todo):
+        if past(a.until):
+            print(f"{time.strftime('%H:%M')} {a.source}: past {a.until}, sending stops ({i:,}/{len(todo):,} sent); "
+                  "the queued ones finish on their own", flush=True)
+            break
+        st = stats(a.bank)
+        ops = st.get("pending_operations", 0)
+        if ops >= a.max_pending:
+            if tty:
+                tty.write(f"\r  {a.source} upgrade · {i:,}/{len(todo):,} · waiting, open ops {ops:,} ")
+                tty.flush()
+            time.sleep(5)
+        else:
+            batch = todo[i:i + min(8, a.max_pending - ops)]
+            ok = list(pool.map(lambda kx: one(*kx), batch))
+            for (kind, x), good in zip(batch, ok):
+                if good:
+                    ledger.write(x["document_id"] + "\n")
+            ledger.flush()
+            todo += [kx for kx, good in zip(batch, ok) if not good]   # failed ones go again, at the end
+            if not all(ok):
+                time.sleep(30)
+            i += len(batch)
+            sent += sum(ok)
+        status(source=a.source, strategy="upgrade", total=len(items), todo=len(todo), queued=i, skipped=len(items) - len(todo),
+               percent=round(100 * i / max(len(todo), 1), 1), items_per_min=round(i / max((time.time() - t0) / 60, 0.01), 1),
+               eta_s=None, started=t0, state="upgrading")
+        if time.time() - last >= 60:
+            last = time.time()
+            if tty:
+                tty.write("\r\x1b[2K")
+            mins = (time.time() - t0) / 60
+            rate = i / mins if mins > 0.5 else 0
+            eta = f"{(len(todo) - i) / rate / 60:.1f} h" if rate else "measuring"
+            print(f"{time.strftime('%H:%M')} {a.source}/upgrade: {100 * i / max(len(todo), 1):.1f}% · {i:,}/{len(todo):,} sent · "
+                  f"{rate:,.0f}/min · ETA {eta} · open ops {st.get('pending_operations', 0):,}", flush=True)
+    pool.shutdown()
+    status(source=a.source, strategy="upgrade", total=len(items), todo=len(todo), queued=i, skipped=len(items) - len(todo),
+           percent=round(100 * i / max(len(todo), 1), 1), items_per_min=0, eta_s=0, started=t0,
+           state="done" if i >= len(todo) else f"stopped at {a.until}")
+    print(box("▓▒░ RELIC5·HINDSIGHT UPGRADE ░▒▓", [
+        f"{a.source} · full LLM extraction · bank {a.bank}",
+        f"{i:,}/{len(todo):,} sent · {plan['full']:,} already full · {plan['queued']:,} done before",
+        f"{(time.time() - t0) / 60:.1f} min" + ("" if i >= len(todo) else f" · stopped: past {a.until}; run again to go on"),
+    ]), flush=True)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("source", help="memory | vault | git | thinking | sessions (read on the hub), or discord:<guild_id> "
@@ -97,6 +200,12 @@ def main() -> None:
     ap.add_argument("--batch", type=int, default=40)
     ap.add_argument("--parallel", type=int, default=32, help="with --strategy: synchronous batches in flight at once "
                     "(Hindsight handles one synchronous batch an item at a time)")
+    ap.add_argument("--upgrade", action="store_true", help="the LLM precision pass: full extraction for documents the bank "
+                    "holds as embed-first chunks (retain without a strategy, then reprocess), new or changed ones retained "
+                    "in full; documents already extracted in full are skipped; its own ledger")
+    ap.add_argument("--limit", type=int, default=0, help="--upgrade: only the first N to do (a test)")
+    ap.add_argument("--until", default="", help="HH:MM (local): send nothing new after it, so the queue drains by a time "
+                    "(Nat, 2026-10-26: done by 06:00)")
     a = ap.parse_args()
     if a.source not in ("memory", "vault", "git", "thinking", "sessions") and not a.source.startswith("discord:"):
         ap.error(f"unknown source {a.source}")
@@ -110,7 +219,8 @@ def main() -> None:
             a.bank = row["bank"]
         ensure_bank(a.bank, f"Discord server {row['name'].replace('_', ' ')} (maw atlas backup, guild {gid})")
 
-    ledger_path = os.path.expanduser(f"~/.cache/relic5/hindsight-{a.bank}-{a.source.replace(':', '-')}{'.' + a.strategy if a.strategy else ''}.done")
+    ledger_path = os.path.expanduser(f"~/.cache/relic5/hindsight-{a.bank}-{a.source.replace(':', '-')}"
+                                     f"{'.' + a.strategy if a.strategy else ''}{'.upgrade' if a.upgrade else ''}.done")
     if a.strategy and a.batch == 40:
         a.batch = 20   # small batches, many at once: a huge note (vault max 3.3 MB) holds up only its own batch
     os.makedirs(os.path.dirname(ledger_path), exist_ok=True)
@@ -183,6 +293,24 @@ def main() -> None:
     # never overwrite a document the bank already has (an earlier full LLM import of the same session would be
     # replaced by bare chunks): skip every id already in the bank, whatever ledger queued it
     have: set[str] = set()
+    meta: dict[str, tuple[str, str | None]] = {}   # --upgrade: id -> (content hash, retain strategy)
+    if a.upgrade:   # one lookup per item: paging a 424k-document bank by offset slows with every page
+        def look(x: dict) -> tuple[str, tuple[str, str | None] | None]:
+            try:
+                d = call("GET", f"/v1/default/banks/{a.bank}/documents/{urllib.parse.quote(x['document_id'], safe='')}", timeout=60)
+            except urllib.error.HTTPError as ex:
+                if ex.code == 404:
+                    return x["document_id"], None
+                raise
+            rp = d.get("retain_params") if isinstance(d.get("retain_params"), dict) else {}
+            return x["document_id"], (d.get("content_hash") or "", rp.get("strategy"))
+        with concurrent.futures.ThreadPoolExecutor(16) as ex_:
+            for k, v in ex_.map(look, [x for x in items if x["document_id"] not in done]):
+                if v is not None:
+                    meta[k] = v
+        print(f"{a.source}: looked up {len(items) - len(done & {x['document_id'] for x in items}):,} documents, "
+              f"{len(meta):,} in the bank", flush=True)
+        return upgrade(a, items, done, meta, ledger, tty)
     off = 0
     while True:
         page = call("GET", f"/v1/default/banks/{a.bank}/documents?limit=1000&offset={off}", timeout=120)

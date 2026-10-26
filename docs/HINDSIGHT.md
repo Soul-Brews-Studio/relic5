@@ -160,6 +160,23 @@ server's items into `~/.cache/relic5/hindsight-job.json` (38,084 items in 18 ban
 items done (each bank's documents, which Hindsight writes when an item's extraction finished) against that total, the
 rate over the last 10 minutes of `--watch`, the ETA, and the five banks with the most left.
 
+## The LLM precision pass (embed-first → full extraction)
+
+```sh
+python3 embed/hindsight-import.py thinking --upgrade [--until 05:30] [--limit N]
+embed/night.sh [05:30]       # Discord to the end, then thinking, then git; nothing new after the time
+```
+
+`--upgrade` looks up each item's document (one GET each: paging the 424k-document bank by offset slowed with every
+page) and sorts it: unchanged and held as embed-first chunks: retain it again without a strategy (the same content
+hash is skipped, and the stored strategy is reset), then `POST /documents/{id}/reprocess`, a real extraction (reprocess
+alone keeps embed-first); new or changed: one async full retain; already full: skipped. Ledger
+`~/.cache/relic5/hindsight-relic5-<source>.upgrade.done`. First test (2026-10-26 18:45): two thinking documents went
+from 1 to 5 and 1 to 10 memories. Plan for thinking: 13,162 to extract, 8 new, 20 changed.
+
+At about 95 items a minute on gb300 (vLLM `--max-num-seqs 32`), a night after Discord holds thinking (13,182) and git
+(10,318); sessions (301k) and vault (80k) are weeks at that rate.
+
 ## Backup
 
 ```sh
