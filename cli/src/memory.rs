@@ -397,7 +397,10 @@ fn speed(watch: bool) -> Result<(), Fail> {
         let job = job_progress(&mut samples);
         let w = term_cols();
         // every line cut to the pane: a wrapped line broke the redraw (fit)
-        macro_rules! put { ($($t:tt)*) => { println!("{}", fit(&format!($($t)*), w)) } }
+        // the whole frame is built first, then drawn over the last one in place: clearing first and fetching after
+        // left the screen blank while ~40 requests ran (it blinked, Nat 2026-10-27)
+        let mut frame: Vec<String> = Vec::new();
+        macro_rules! put { ($($t:tt)*) => { frame.push(fit(&format!($($t)*), w)) } }
         let mut lines: Vec<(String, String)> = Vec::new();   // (machine, line)
         let (mut emb_s, mut tok_s, mut calls_m) = (0.0f64, 0.0f64, 0i64);
         for kind in ["embed", "llm", "rerank"] {
@@ -428,9 +431,6 @@ fn speed(watch: bool) -> Result<(), Fail> {
                     name, bar(util, 16), util * 100.0, if kind == "llm" { commas(&w["tokens"]) + " tok" } else { commas(&w["texts"]) + " texts" },
                     w["inflight"], w["slots"].as_i64().unwrap_or(1), head(&model, 28), if up { String::new() } else { format!(" {am}DOWN{z}") })));
             }
-        }
-        if watch {
-            print!("\x1b[H\x1b[2J\x1b[3J");
         }
         put!("{p}{b} ▓▒░ RELIC5·SPEED ░▒▓ {z}{g} embed + summarize · last minute · {}{z}", clock_now());
         for m in ["m5", "gb300"] {
@@ -477,7 +477,19 @@ fn speed(watch: bool) -> Result<(), Fail> {
                 put!("{c}╰{}{z}", "─".repeat(66));
             }
         }
-        if !watch {
+        if watch {
+            let mut out = String::from("\x1b[H");
+            for l in &frame {
+                out.push_str(l);
+                out.push_str("\x1b[K\n");
+            }
+            out.push_str("\x1b[J");
+            print!("{out}");
+            let _ = std::io::Write::flush(&mut std::io::stdout());
+        } else {
+            for l in &frame {
+                println!("{l}");
+            }
             return Ok(());
         }
         std::thread::sleep(std::time::Duration::from_secs(2));
@@ -531,6 +543,10 @@ fn job_progress(samples: &mut Vec<(f64, f64)>) -> Option<(String, f64, f64, f64,
     Some((s(&j["name"]), done, total, rate, open))
 }
 
+/// Whether each bank has observations on, asked once per process (it does not change while a board runs)
+static OBS_ON: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, bool>>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
 /// Consolidation across every bank with observations on: (facts done, facts, facts waiting, facts/min, banks with the most waiting).
 /// Facts = world + experience; waiting = the bank's pending_consolidation. The rate comes from samples saved in
 /// ~/.cache/relic5/hindsight-consolidation.tsv (shared by every call, last 10 minutes); -1 while measuring.
@@ -541,7 +557,9 @@ fn consolidation_progress() -> Option<(f64, f64, f64, f64, Vec<(String, f64, f64
     for b in list["banks"].as_array()? {
         let id = s(&b["bank_id"]);
         // a bank with observations off (relic5: embed-first) never consolidates; its waiting count is not work
-        let on = http("GET", &bank_url(&id, "/config"), None, 10).map(|c| c["config"]["enable_observations"] != false).unwrap_or(true);
+        let on = *OBS_ON.lock().unwrap().entry(id.clone()).or_insert_with(|| {
+            http("GET", &bank_url(&id, "/config"), None, 10).map(|c| c["config"]["enable_observations"] != false).unwrap_or(true)
+        });
         if !on {
             continue;
         }
