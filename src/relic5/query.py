@@ -193,6 +193,11 @@ class Relic5:
         the query (relic3 falls back the same way, query.ts:127-140)."""
         if query is None or not query.split():   # None or blank
             raise UsageError(NEEDS_QUERY)
+        if with_ == "discord":
+            from .discord import guard
+            guard()   # never through the public MCP, whichever path answers (discord.py)
+            if not self.index.built():
+                raise UsageError("with discord needs the published index (relic5 index)")
         kw = SearchKw(since=since, until=until, horizon=horizon, repo=repo, session=session, role=role, tier=tier, with_=with_,
                        limit=limit, cursor=cursor)
         if vector is not None:
@@ -383,14 +388,19 @@ class Relic5:
                 layer = s
                 break
         # a memory note (memory.py) or a git commit (gitlog.py): its own table, no session neighbours
-        for side, (d, f), what in (("memory", ("_memory", "notes.parquet"), "memory note"), ("git", ("_git", "commits.parquet"), "git commit")):
+        for side, (d, f), what in (("memory", ("_memory", "notes.parquet"), "memory note"), ("git", ("_git", "commits.parquet"), "git commit"),
+                                   ("discord", ("_discord", "messages.parquet"), "Discord message")):
             mp = os.path.join(self.parts.root, "index", d, f)
             if parts or not rfs.exists(mp):
                 continue
             hit = self._rows(f"SELECT * EXCLUDE (machine) FROM read_parquet('{mp}') WHERE msgkey = ?", [msgkey])
             if hit:
+                if side == "discord":
+                    from .discord import guard
+                    guard()   # never through the public MCP (discord.py)
                 t = hit[0] | {"link": f"relic5://{hit[0]['month']}/{msgkey}", "uid": msgkey}
-                note = f"{what} ({t['role']}) from {t['path']}" + (f", {t['hash']} in {', '.join(t['repos'])}" if side == "git" else "")
+                note = f"{what} ({t['role']}) from {t['path']}" + (f", {t['hash']} in {', '.join(t['repos'])}" if side == "git" else
+                                                                     f", {t['guild_name']} {t['title']}" if side == "discord" else "")
                 return {"link": t["link"], "target": t, "notes": [note], "parts": [t], "before": [], "after": [], "raw": None, "layer": side}
         if not parts:
             raise NotFound(f"no message {msgkey}" + (f" in {month}" if month else ""))

@@ -100,3 +100,21 @@ def test_two_public_names_each_describe_themselves(root, tmp_path, monkeypatch):
         assert c.get("/.well-known/oauth-protected-resource").json()["resource"] == base + "/mcp"   # its own name
         assert c.get("/api/status", headers={"Authorization": "Bearer secret-m5"}).status_code == 404   # /mcp only
         assert c.get("/favicon.ico").status_code == 200
+
+
+def test_public_host_never_offers_discord(hub):
+    """Discord stays off the public MCP (discord.py; Nat, 2026-10-26): even a hub token on the public host gets no
+    `with: discord`, and the same token on the hub's own address does."""
+    from fastapi.testclient import TestClient
+
+    def with_enum(c):
+        r = c.post("/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, headers={"authorization": "Bearer secret-m5"})
+        t = next(t for t in r.json()["result"]["tools"] if t["name"] == "relic_search")
+        return t["inputSchema"]["properties"]["with"]["enum"]
+
+    assert "discord" not in with_enum(hub)
+    assert "discord" in with_enum(TestClient(hub.app, base_url="http://testserver"))
+    r = hub.post("/mcp", json={"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                               "params": {"name": "relic_search", "arguments": {"query": "x", "with": "discord"}}},
+                 headers={"authorization": "Bearer secret-m5"})
+    assert r.json()["result"]["isError"] and "public MCP" in r.json()["result"]["content"][0]["text"]

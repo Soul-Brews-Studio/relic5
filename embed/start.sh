@@ -1,6 +1,7 @@
 #!/bin/zsh
 # embed/start.sh: bring up, by hand, what Hindsight on m5 needs (Nat, 2026-10-26: no autostart on m5; started when wanted).
-#   1. gb300: embed/gb300-serve.py (embeddinggemma-300m bf16 + the bge-reranker-v2-m3 cross-encoder), 127.0.0.1:11437 there
+#   1. gb300: embed/gb300-serve.py (embeddinggemma-300m bf16 + the bge-reranker-v2-m3 cross-encoder), 127.0.0.1:11437 there,
+#      in a herdr pane on gb300 (herdr --machine gb300)
 #   2. m5: one ssh tunnel to gb300 (11437 the embed server, 11510 the qwen3.8-27b vLLM Hindsight uses as its LLM)
 #   3. m5: embed/embed-router.py on 127.0.0.1:11436 (big batches gb300 first, small ones the ANE first), in tmux
 #   4. m5: the hindsight-embed daemon (profile "relic"; it stops itself after a while idle)
@@ -14,9 +15,11 @@ if ssh -o BatchMode=yes $GB 'curl -s -m 3 127.0.0.1:11437/health' </dev/null 2>/
   echo "gb300 embed server: up"
 else
   scp -q "$HERE/gb300-serve.py" $GB:embed-serve/gb300-serve.py
-  # one command, no pkill here: a pattern would match this ssh's own command line
-  ssh -o BatchMode=yes $GB 'mkdir -p ~/embed-serve && cd ~/embed-serve && HF_HUB_OFFLINE=1 TOKENIZERS_PARALLELISM=false setsid nohup ~/.local/bin/uv run gb300-serve.py --rerank BAAI/bge-reranker-v2-m3 > serve.log 2>&1 < /dev/null &' </dev/null >/dev/null 2>&1 &
-  echo "gb300 embed server: starting (log ~/embed-serve/serve.log on gb300)"
+  # in a herdr pane on gb300 (a saved herdr machine): it outlives any ssh session (gb300 drops them) and can be read
+  # from here with: herdr --machine gb300 pane read w1:p1 --source recent-unwrapped --lines 20
+  PANE=$(herdr --machine gb300 pane list 2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin)['result']['panes'][0]['pane_id'])" 2>/dev/null)
+  herdr --machine gb300 pane run "${PANE:-w1:p1}" 'cd ~/embed-serve && HF_HUB_OFFLINE=1 TOKENIZERS_PARALLELISM=false PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True ~/.local/bin/uv run gb300-serve.py --batch 32 --rerank BAAI/bge-reranker-v2-m3' >/dev/null
+  echo "gb300 embed server: starting in herdr pane ${PANE:-w1:p1} on gb300"
 fi
 
 if up 127.0.0.1:11437/health && up 127.0.0.1:11510/v1/models; then
@@ -26,10 +29,17 @@ else
     -L 127.0.0.1:11437:127.0.0.1:11437 -L 127.0.0.1:11510:127.0.0.1:11510 $GB && echo "tunnel: started"
 fi
 
+# m5's own LLM worker for the router's /v1/chat/completions split (Ollama qwen3.6 on the M5 Max GPU)
+if up 127.0.0.1:11434/api/tags; then
+  echo "ollama (m5 LLM worker): up"
+else
+  tmux new-session -d -s ollama "ollama serve" && echo "ollama: started (tmux attach -t ollama)"
+fi
+
 if up 127.0.0.1:11436/health; then
   echo "embed router: up"
 else
-  tmux new-session -d -s embed-router "python3 $HERE/embed-router.py" && echo "embed router: started (tmux attach -t embed-router)"
+  tmux new-session -d -s embed-router "python3 $HERE/embed-router.py --big 8" && echo "embed router: started (tmux attach -t embed-router)"
 fi
 
 for i in $(seq 1 60); do up 127.0.0.1:11437/health && break; sleep 2; done

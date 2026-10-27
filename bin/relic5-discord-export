@@ -1,0 +1,82 @@
+#!/usr/bin/env python3
+"""relic5-discord-export: this machine's Discord backups (maw atlas, neo-oracle#205) as raw rows for the hub's "discord"
+layer (src/relic5/discord.py), one gzip'd JSON-lines file per server:
+
+  ~/.cache/relic5/discord/<guild_id>.jsonl.gz      (bin/relic5-push sends it to parts/<machine>/discord/)
+
+Only the servers neo's ~/.maw/atlas-blobs/manifest.json marks verified=true (messages in server.md = in server.sqlite).
+Text and file names only, never the files: one row per message
+  {"id", "guild", "guild_name", "channel", "channel_name", "thread", "thread_name", "author", "bot", "ts", "text", "files"}
+A server is re-read only when its run folder or its server.sqlite changed (a .stamp beside the file).
+Discord is other people's words: the hub serves this layer to the local CLI, the web UI on the tailnet and m5's MCP,
+never through the public MCP (Nat, 2026-10-26: no guild at all).
+
+  bin/relic5-discord-export            # prints one line per server written
+"""
+import gzip, json, os, sqlite3, sys
+
+ROOT = os.path.expanduser(os.environ.get("ATLAS_BLOBS", "~/.maw/atlas-blobs"))
+OUT = os.path.expanduser(os.environ.get("RELIC5_DISCORD_CACHE", "~/.cache/relic5/discord"))
+
+
+def guilds() -> list[dict]:
+    man = os.path.join(ROOT, "manifest.json")
+    if not os.path.exists(man):
+        return []
+    m = json.load(open(man))
+    rows = m.get("guilds", []) if isinstance(m, dict) else m
+    return [r for r in rows if r.get("verified") is True and os.path.exists(os.path.join(r.get("folder") or "", "server.sqlite"))]
+
+
+def export(g: dict) -> int:
+    gid, folder = str(g["guild_id"]), g["folder"]
+    db_path = os.path.join(folder, "server.sqlite")
+    st = os.stat(db_path)
+    stamp = f"{os.path.realpath(folder)}\t{st.st_size}\t{int(st.st_mtime)}"
+    out = os.path.join(OUT, f"{gid}.jsonl.gz")
+    if os.path.exists(out) and os.path.exists(out + ".stamp") and open(out + ".stamp").read() == stamp:
+        return -1
+    db = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    names = {str(i): n or "" for i, n in db.execute("SELECT id, name FROM channels")}
+    n = 0
+    with gzip.open(out + ".tmp", "wt", encoding="utf-8") as f:
+        for mid, ch, th, author, bot, content, att, ts in db.execute(
+                "SELECT message_id, channel_id, thread_id, author_name, author_is_bot, content, attachments_json, ts "
+                "FROM discord_messages ORDER BY ts, message_id"):
+            try:
+                files = [a.get("filename") or a.get("name") or "" for a in json.loads(att or "[]")]
+            except ValueError:
+                files = []
+            files = [x for x in files if x]
+            text = (content or "").strip()
+            if not text and not files:
+                continue
+            f.write(json.dumps({"id": str(mid), "guild": gid, "guild_name": g.get("name") or gid, "channel": str(ch),
+                                "channel_name": names.get(str(ch), ""), "thread": str(th) if th else None,
+                                "thread_name": names.get(str(th), "") if th else None, "author": author or "?",
+                                "bot": bool(bot), "ts": ts, "text": text, "files": files}, ensure_ascii=False) + "\n")
+            n += 1
+    os.replace(out + ".tmp", out)
+    with open(out + ".stamp", "w") as s:
+        s.write(stamp)
+    return n
+
+
+def main() -> int:
+    gs = guilds()
+    if not gs:
+        print(f"discord: no verified servers ({os.path.join(ROOT, 'manifest.json')})")
+        return 0
+    os.makedirs(OUT, exist_ok=True)
+    wrote = 0
+    for g in gs:
+        n = export(g)
+        if n >= 0:
+            wrote += 1
+            print(f"discord: {g.get('name')} ({g['guild_id']}) {n:,} messages")
+    print(f"discord: {len(gs)} verified servers, {wrote} written, {len(gs) - wrote} unchanged -> {OUT}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
