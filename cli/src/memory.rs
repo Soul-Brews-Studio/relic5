@@ -544,8 +544,9 @@ fn job_progress(samples: &mut Vec<(f64, f64)>) -> Option<(String, f64, f64, f64,
     Some((s(&j["name"]), done, total, rate, open))
 }
 
-/// Whether each bank has observations on, asked once per process (it does not change while a board runs)
-static OBS_ON: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, bool>>> =
+/// Whether each bank has observations on, and when that was asked: re-asked after 60 s (a board running for hours
+/// kept showing the Discord banks after their observations were switched off, 2026-10-27 07:52)
+static OBS_ON: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, (bool, u64)>>> =
     std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
 
 /// Consolidation across every bank with observations on: (facts done, facts, facts waiting, facts/min, banks with the most waiting).
@@ -558,9 +559,16 @@ fn consolidation_progress() -> Option<(f64, f64, f64, f64, Vec<(String, f64, f64
     for b in list["banks"].as_array()? {
         let id = s(&b["bank_id"]);
         // a bank with observations off (relic5: embed-first) never consolidates; its waiting count is not work
-        let on = *OBS_ON.lock().unwrap().entry(id.clone()).or_insert_with(|| {
-            http("GET", &bank_url(&id, "/config"), None, 10).map(|c| c["config"]["enable_observations"] != false).unwrap_or(true)
-        });
+        let now_s = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        let cached = OBS_ON.lock().unwrap().get(&id).copied();
+        let on = match cached {
+            Some((v, at)) if now_s.saturating_sub(at) < 60 => v,
+            _ => {
+                let v = http("GET", &bank_url(&id, "/config"), None, 10).map(|c| c["config"]["enable_observations"] != false).unwrap_or(true);
+                OBS_ON.lock().unwrap().insert(id.clone(), (v, now_s));
+                v
+            }
+        };
         if !on {
             continue;
         }
