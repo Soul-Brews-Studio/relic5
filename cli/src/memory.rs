@@ -7,7 +7,7 @@
 //!   relic5 hindsight import  <session> [<session> ...] [--bank B] [--wait]   a relic5 session's turns, queued (async)
 //!   relic5 hindsight import  --source memory|vault|git|thinking   a whole relic5 source from the hub, paced and resumable
 //!                         (runs embed/hindsight-import.py; Nat, 2026-10-26: "memory first then vault, git, thinking")
-//!   relic5 hindsight speed [--watch]                    embed + summarize speed per machine (m5, gb300), job progress %, relic-scan look
+//!   relic5 hindsight speed [--watch]                    embed + summarize speed per machine (m5, gb300), job + observations progress, ETA
 //!   relic5 hindsight banks                              every bank (relic5, one per Discord server) with its counts
 //!   relic5 hindsight backup                             pg_dump of the bank into relic5's backup volume (newest 3 kept)
 //!   relic5 hindsight top                                   live TUI: bank, queue + sparkline + ETA, workers, feeder log
@@ -461,6 +461,22 @@ fn speed(watch: bool) -> Result<(), Fail> {
             }
             put!("{c}╰{}{z}", "─".repeat(66));
         }
+        // observations: each bank's facts still waiting for consolidation, against all its facts
+        if let Some((done, total, pending, rate, banks)) = consolidation_progress() {
+            if pending > 0.0 {
+                let pct = if total > 0.0 { done / total } else { 0.0 };
+                let eta = if rate < 0.0 { "measuring".to_string() } else if rate > 0.0 { fmt_secs(pending / rate * 60.0) } else { "?".into() };
+                put!("{c}╭─ {b}observations{z}{c} · consolidation of the facts {}{z}", "─".repeat(28));
+                put!("{c}│{z}  {gr}{}{z} {b}{:>5.1}%{z}  {} waiting  {g}{} · ETA {eta}{z}", bar(pct, 30), pct * 100.0,
+                     commas(&Value::from(pending as i64)),
+                     if rate < 0.0 { "rate: measuring (1 min)".to_string() } else { format!("{rate:.0} facts/min") });
+                for (bank, p_, t) in banks.iter().take(5) {
+                    put!("{c}│{z}    {g}{:<34}{z} {} {:>5.1}%  {} waiting", head(&bank.replace("discord-", ""), 34),
+                         bar((t - p_) / t, 12), (t - p_) / t * 100.0, commas(&Value::from(*p_ as i64)));
+                }
+                put!("{c}╰{}{z}", "─".repeat(66));
+            }
+        }
         if !watch {
             return Ok(());
         }
@@ -513,6 +529,47 @@ fn job_progress(samples: &mut Vec<(f64, f64)>) -> Option<(String, f64, f64, f64,
     open.sort_by(|a, b| (b.2 - b.1).total_cmp(&(a.2 - a.1)));
     open.truncate(5);
     Some((s(&j["name"]), done, total, rate, open))
+}
+
+/// Consolidation across every bank with observations on: (facts done, facts, facts waiting, facts/min, banks with the most waiting).
+/// Facts = world + experience; waiting = the bank's pending_consolidation. The rate comes from samples saved in
+/// ~/.cache/relic5/hindsight-consolidation.tsv (shared by every call, last 10 minutes); -1 while measuring.
+#[allow(clippy::type_complexity)]
+fn consolidation_progress() -> Option<(f64, f64, f64, f64, Vec<(String, f64, f64)>)> {
+    let list = http("GET", &format!("{}/v1/default/banks", base()), None, 20).ok()?;
+    let (mut total, mut pending, mut banks) = (0.0, 0.0, Vec::new());
+    for b in list["banks"].as_array()? {
+        let id = s(&b["bank_id"]);
+        // a bank with observations off (relic5: embed-first) never consolidates; its waiting count is not work
+        let on = http("GET", &bank_url(&id, "/config"), None, 10).map(|c| c["config"]["enable_observations"] != false).unwrap_or(true);
+        if !on {
+            continue;
+        }
+        let Ok(st) = http("GET", &bank_url(&id, "/stats"), None, 10) else { continue };
+        let f = &st["nodes_by_fact_type"];
+        let t = f["world"].as_f64().unwrap_or(0.0) + f["experience"].as_f64().unwrap_or(0.0);
+        let p = st["pending_consolidation"].as_f64().unwrap_or(0.0).min(t);
+        total += t;
+        pending += p;
+        if p > 0.0 {
+            banks.push((id, p, t));
+        }
+    }
+    banks.sort_by(|a, b| b.1.total_cmp(&a.1));
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
+    let tsv = format!("{}/.cache/relic5/hindsight-consolidation.tsv", std::env::var("HOME").unwrap_or_default());
+    let mut pts: Vec<(f64, f64)> = std::fs::read_to_string(&tsv).unwrap_or_default().lines()
+        .filter_map(|l| { let mut f = l.split('\t').filter_map(|x| x.parse::<f64>().ok()); Some((f.next()?, f.next()?)) })
+        .filter(|(t, _)| now - t <= 600.0).collect();
+    if pts.last().is_none_or(|(t, _)| now - t >= 10.0) {
+        pts.push((now, pending));
+        let _ = std::fs::write(&tsv, pts.iter().map(|(t, p)| format!("{t:.0}\t{p:.0}\n")).collect::<String>());
+    }
+    // waiting only falls while consolidation runs; a rise means new facts came in: start after the newest rise
+    let cut = pts.windows(2).rposition(|w| w[1].1 > w[0].1).map(|i| i + 1).unwrap_or(0);
+    let (t0, p0) = pts[cut];
+    let rate = if now - t0 >= 60.0 && pending <= p0 { (p0 - pending) / (now - t0) * 60.0 } else { -1.0 };
+    Some((total - pending, total, pending, rate, banks))
 }
 
 fn fmt_secs(x: f64) -> String {
