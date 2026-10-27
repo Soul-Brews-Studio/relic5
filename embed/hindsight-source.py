@@ -11,6 +11,7 @@ runs it over ssh and queues the items (Nat, 2026-10-26: "memory first then vault
   sessions  every session's user and assistant turns, de-duplicated across machines (msgkey, chunk), in ~3,000-character
             blocks, id "<session>#<n>" as `relic5 memory import <session>` writes them; newest sessions first
   readings  relic-extract's LLM insight per window (day, 3h, 1h, 15m), one per window, zai first; id "readings:<grain>:<start>"
+            readings-day | readings-3h | readings-1h | readings-15m: one window size alone; readings-15m-2026-10: one month of it
 """
 import json, os, re, sys, time
 from datetime import datetime, timezone
@@ -141,7 +142,7 @@ def sessions() -> None:
     flush()
 
 
-def readings() -> None:
+def readings(only: str | None = None, month: str | None = None) -> None:
     """relic-extract's readings (Nat, 2026-10-27: "import readings into hindsight"): an LLM's insight per time window
     (day, 3h, 1h, 15m) from <root>/readings/*.jsonl, which the hub already serves (src/relic5/readings.py parses the
     three scripts' unit strings and keeps the newest answer per window and model). One item per window, one model per
@@ -161,6 +162,8 @@ def readings() -> None:
                 best[w] = r
     label = {"day": "day", "3h": "3 hours", "1h": "1 hour", "15m": "15 minutes"}
     for (grain, start), r in sorted(best.items(), key=lambda kv: kv[0][1], reverse=True):
+        if (only and grain != only) or (month and not start.startswith(month)):
+            continue
         lines = [f"What happened, {label[grain]} from {start} to {r['end'][-5:]} (Bangkok time):"]
         for k in ("type", "focus", "work", "agents", "pattern", "distraction", "friction", "lesson", "en", "th"):
             v = r.get(k)
@@ -178,7 +181,11 @@ def readings() -> None:
 
 if __name__ == "__main__":
     src = sys.argv[1] if len(sys.argv) > 1 else ""
-    fn = {"memory": memory, "vault": vault, "git": git, "thinking": thinking, "sessions": sessions, "readings": readings}.get(src)
+    fn = {"memory": memory, "vault": vault, "git": git, "thinking": thinking, "sessions": sessions, "readings": readings,
+          # one window size alone (Nat, 2026-10-27: a bank per size consolidates four at a time)
+          **{f"readings-{g}": (lambda g=g: readings(g)) for g in ("day", "3h", "1h", "15m")}}.get(src)
+    if fn is None and (m := re.fullmatch(r"readings-(day|3h|1h|15m)-(\d{4}-\d{2})", src)):   # one size, one month
+        fn = lambda: readings(m[1], m[2])
     if not fn:
         sys.exit("hindsight-source.py memory|vault|git|thinking|sessions|readings [--parts DIR]")
     t0 = time.time()
