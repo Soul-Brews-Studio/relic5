@@ -395,6 +395,9 @@ fn speed(watch: bool) -> Result<(), Fail> {
         let h = http("GET", &format!("{}/health", router()), None, 30)
             .map_err(|_| Fail::Other(format!("relic5 hindsight: the dispatcher is not up at {} (embed/start.sh)", router()), 1))?;
         let job = job_progress(&mut samples);
+        let w = term_cols();
+        // every line cut to the pane: a wrapped line broke the redraw (fit)
+        macro_rules! put { ($($t:tt)*) => { println!("{}", fit(&format!($($t)*), w)) } }
         let mut lines: Vec<(String, String)> = Vec::new();   // (machine, line)
         let (mut emb_s, mut tok_s, mut calls_m) = (0.0f64, 0.0f64, 0i64);
         for kind in ["embed", "llm", "rerank"] {
@@ -427,36 +430,36 @@ fn speed(watch: bool) -> Result<(), Fail> {
             }
         }
         if watch {
-            print!("\x1b[2J\x1b[H");
+            print!("\x1b[H\x1b[2J\x1b[3J");
         }
-        println!("{p}{b} ▓▒░ RELIC5·SPEED ░▒▓ {z}{g} embed + summarize · last minute · {}{z}", clock_now());
+        put!("{p}{b} ▓▒░ RELIC5·SPEED ░▒▓ {z}{g} embed + summarize · last minute · {}{z}", clock_now());
         for m in ["m5", "gb300"] {
             let ls: Vec<&String> = lines.iter().filter(|(mm, _)| mm == m).map(|(_, l)| l).collect();
             if ls.is_empty() {
                 continue;
             }
             let about = if m == "m5" { "M5 Max · ANE + GPU" } else { "GB300 · shared GPU, through the tunnel" };
-            println!("{c}╭─ {b}{m}{z}{c} · {about} {}{z}", "─".repeat(60usize.saturating_sub(about.len())));
+            put!("{c}╭─ {b}{m}{z}{c} · {about} {}{z}", "─".repeat(60usize.saturating_sub(about.len())));
             for l in ls {
-                println!("{c}│{z}{l}");
+                put!("{c}│{z}{l}");
             }
-            println!("{c}╰{}{z}", "─".repeat(66));
+            put!("{c}╰{}{z}", "─".repeat(66));
         }
-        println!("  {b}total{z}  embed {gr}{emb_s:.1} texts/s{z} · summarize {gr}{tok_s:.0} tok/s{z} ({calls_m} calls/min)");
+        put!("  {b}total{z}  embed {gr}{emb_s:.1} texts/s{z} · summarize {gr}{tok_s:.0} tok/s{z} ({calls_m} calls/min)");
         if let Some((name, done, total, rate, banks)) = &job {
             let pct = if *total > 0.0 { done / total } else { 0.0 };
             let eta = if done >= total { "done".into() } else if *rate < 0.0 { "measuring".into() } else if *rate > 0.0 { fmt_secs((total - done) / rate * 60.0) } else { "?".into() };
-            println!("{c}╭─ {b}job{z}{c} · {name} {}{z}", "─".repeat(60usize.saturating_sub(name.chars().count())));
-            println!("{c}│{z}  {gr}{}{z} {b}{:>5.1}%{z}  {} / {} items  {g}{} · ETA {eta}{z}",
+            put!("{c}╭─ {b}job{z}{c} · {name} {}{z}", "─".repeat(60usize.saturating_sub(name.chars().count())));
+            put!("{c}│{z}  {gr}{}{z} {b}{:>5.1}%{z}  {} / {} items  {g}{} · ETA {eta}{z}",
                      bar(pct, 30), pct * 100.0, commas(&Value::from(*done as i64)), commas(&Value::from(*total as i64)),
                      if *rate < 0.0 { "rate: measuring (1 min)".to_string() } else { format!("{rate:.0} items/min") });
             for (bank, d, t) in banks {
                 if d < t {
-                    println!("{c}│{z}    {g}{:<34}{z} {} {:>5.1}%  {}/{}", head(bank, 34), bar(d / t, 12), d / t * 100.0,
+                    put!("{c}│{z}    {g}{:<34}{z} {} {:>5.1}%  {}/{}", head(bank, 34), bar(d / t, 12), d / t * 100.0,
                              commas(&Value::from(*d as i64)), commas(&Value::from(*t as i64)));
                 }
             }
-            println!("{c}╰{}{z}", "─".repeat(66));
+            put!("{c}╰{}{z}", "─".repeat(66));
         }
         if !watch {
             return Ok(());
@@ -515,6 +518,33 @@ fn job_progress(samples: &mut Vec<(f64, f64)>) -> Option<(String, f64, f64, f64,
 fn fmt_secs(x: f64) -> String {
     let m = (x / 60.0).round() as i64;
     if m >= 60 { format!("{}h {:02}m", m / 60, m % 60) } else { format!("{m}m") }
+}
+
+/// The terminal's width in columns (80 when it cannot tell, e.g. a pipe)
+fn term_cols() -> usize {
+    unsafe {
+        let mut ws: libc::winsize = std::mem::zeroed();
+        if libc::ioctl(1, libc::TIOCGWINSZ, &mut ws) == 0 && ws.ws_col > 0 { ws.ws_col as usize } else { 80 }
+    }
+}
+
+/// A line cut to `w` visible columns, colour codes kept (a wrapped line broke the --watch redraw: Nat's screenshot,
+/// 2026-10-27, a narrow pane showed old frames under the new one)
+fn fit(line: &str, w: usize) -> String {
+    let mut out = String::new();
+    let (mut n, mut esc) = (0usize, false);
+    for c in line.chars() {
+        if esc {
+            out.push(c);
+            if c.is_ascii_alphabetic() { esc = false; }
+            continue;
+        }
+        if c == '\x1b' { esc = true; out.push(c); continue; }
+        if n >= w { continue; }
+        out.push(c);
+        n += 1;
+    }
+    out + "\x1b[0m"
 }
 
 fn clock_now() -> String {
