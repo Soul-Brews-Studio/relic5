@@ -462,6 +462,17 @@ fn speed(watch: bool) -> Result<(), Fail> {
             }
             put!("{c}╰{}{z}", "─".repeat(66));
         }
+        // the importer's own run (embed/hindsight-import.py: ~/.cache/relic5/hindsight-feeder.json), e.g. the sessions
+        // full-extraction pass: sent / to do, the rate over the last 10 minutes of samples, ETA
+        if let Some((name, sent, todo, rate)) = feeder_progress() {
+            let pct = if todo > 0.0 { sent / todo } else { 0.0 };
+            let eta = if rate < 0.0 { "measuring".to_string() } else if rate > 0.0 { fmt_secs((todo - sent) / rate * 60.0) } else { "?".into() };
+            put!("{c}╭─ {b}import{z}{c} · {name} {}{z}", "─".repeat(58usize.saturating_sub(name.chars().count())));
+            put!("{c}│{z}  {gr}{}{z} {b}{:>5.1}%{z}  {} / {} items  {g}{} · ETA {eta}{z}", bar(pct, 30), pct * 100.0,
+                 commas(&Value::from(sent as i64)), commas(&Value::from(todo as i64)),
+                 if rate < 0.0 { "rate: measuring (1 min)".to_string() } else { format!("{rate:.0} items/min") });
+            put!("{c}╰{}{z}", "─".repeat(66));
+        }
         // observations: each bank's facts still waiting for consolidation, against all its facts
         if let Some((done, total, pending, rate, banks)) = consolidation_progress() {
             if pending > 0.0 {
@@ -597,6 +608,31 @@ fn consolidation_progress() -> Option<(f64, f64, f64, f64, Vec<(String, f64, f64
     let (t0, p0) = pts[cut];
     let rate = if now - t0 >= 60.0 && pending <= p0 { (p0 - pending) / (now - t0) * 60.0 } else { -1.0 };
     Some((total - pending, total, pending, rate, banks))
+}
+
+/// The importer's running pass, when one is running (state not "done", status written in the last 5 minutes):
+/// (source · strategy, items sent, items to do, items/min from ~/.cache/relic5/hindsight-feeder.tsv; -1 measuring)
+fn feeder_progress() -> Option<(String, f64, f64, f64)> {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let f: Value = serde_json::from_str(&std::fs::read_to_string(format!("{home}/.cache/relic5/hindsight-feeder.json")).ok()?).ok()?;
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
+    if s(&f["state"]).starts_with("done") || now - f["at"].as_f64().unwrap_or(0.0) > 300.0 {
+        return None;
+    }
+    let (sent, todo) = (f["queued"].as_f64().unwrap_or(0.0), f["todo"].as_f64().unwrap_or(0.0));
+    let key = format!("{}\t{}", s(&f["source"]), f["started"].as_f64().unwrap_or(0.0));
+    let tsv = format!("{home}/.cache/relic5/hindsight-feeder.tsv");
+    let mut pts: Vec<(f64, f64)> = std::fs::read_to_string(&tsv).unwrap_or_default().lines()
+        .filter(|l| l.starts_with(&format!("{key}\t")))
+        .filter_map(|l| { let v: Vec<f64> = l.rsplitn(3, '\t').take(2).filter_map(|x| x.parse().ok()).collect(); (v.len() == 2).then(|| (v[1], v[0])) })
+        .filter(|(t, _)| now - t <= 600.0).collect();
+    if pts.last().is_none_or(|(t, _)| now - t >= 10.0) {
+        pts.push((now, sent));
+        let _ = std::fs::write(&tsv, pts.iter().map(|(t, n)| format!("{key}\t{t:.0}\t{n:.0}\n")).collect::<String>());
+    }
+    let (t0, n0) = pts[0];
+    let rate = if now - t0 >= 60.0 && sent >= n0 { (sent - n0) / (now - t0) * 60.0 } else { -1.0 };
+    Some((format!("{} · {}", s(&f["source"]), s(&f["strategy"])), sent, todo, rate))
 }
 
 fn fmt_secs(x: f64) -> String {
