@@ -505,6 +505,13 @@ fn speed(watch: bool) -> Result<(), Fail> {
             }
         }
         if watch {
+            // never taller than the pane: a frame that scrolls leaves the old one above it (Nat's paste, 10:14)
+            let rows = term_size().1;
+            if rows > 1 && frame.len() > rows - 1 {
+                let cut = frame.len() - (rows - 2);
+                frame.truncate(rows - 2);
+                frame.push(format!("  {g}… {cut} more lines: make the pane taller{z}"));
+            }
             let mut out = String::from("\x1b[H");
             for l in &frame {
                 out.push_str(l);
@@ -696,9 +703,14 @@ fn fmt_secs(x: f64) -> String {
 
 /// The terminal's width in columns (80 when it cannot tell, e.g. a pipe)
 fn term_cols() -> usize {
+    term_size().0
+}
+
+/// (columns, rows) of the terminal; (80, 0) when it cannot tell (rows 0 = no limit)
+fn term_size() -> (usize, usize) {
     unsafe {
         let mut ws: libc::winsize = std::mem::zeroed();
-        if libc::ioctl(1, libc::TIOCGWINSZ, &mut ws) == 0 && ws.ws_col > 0 { ws.ws_col as usize } else { 80 }
+        if libc::ioctl(1, libc::TIOCGWINSZ, &mut ws) == 0 && ws.ws_col > 0 { (ws.ws_col as usize, ws.ws_row as usize) } else { (80, 0) }
     }
 }
 
