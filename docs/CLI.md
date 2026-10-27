@@ -10,6 +10,7 @@ embedder and the MCP server stay in Python, unchanged.
 | command | where it runs | done by |
 |---|---|---|
 | `search`, `show`, `recap`, `conversation`, `readings`, `handoff`, `tail [-f] [--full]`, `pending`, `status`, `--version` | any machine, over the tailnet | **Rust** (`cli/src/cmds.rs`, line for line from `src/relic5/cli.py`) |
+| `searched <words>`, `searched --link relic5://…`, `trace [<id>]` | any machine | **Rust** (`cli/src/searched.rs`): search what was already searched (past queries, found notes, tags), the way back from a message to the searches that found it, a trace chain. Hub: `/api/searched`, MCP `relic_searched` |
 | `memory status \| list \| search` | any machine | **Rust** (`cli/src/notes.rs`): relic5's memory notes on the hub |
 | `hindsight …` | m5 | **Rust** (`cli/src/memory.rs`, `top.rs`): the Hindsight bank, its dispatcher workers, the live TUI (docs/HINDSIGHT.md) |
 | `import` (no subcommand) | each machine, by hand | **Rust** (`cli/src/import.rs`, docs/IMPORT.md); `bin/relic5-import` now calls it |

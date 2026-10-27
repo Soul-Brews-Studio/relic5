@@ -215,6 +215,73 @@ def tagged(root: str, name: str | None = None, since: str | None = None, until: 
             "targets": sorted(items, key=lambda v: str(v["last"]), reverse=True)[:100]}
 
 
+# ---- the searched: search what was already searched -------------------------------------------------------------
+# Nat, 2026-10-27: "we should have search from the searched! and we can add relic link trace?", "relic tag it seems
+# helper". Before searching again, an agent asks what was asked before: the queries, the found notes (goal, how,
+# found) and the tags, grouped by chain, the ones that found something first. With a link, the way back from a message
+# to every search that returned it, the calls that opened it, the found notes that cite it, and its tags.
+
+def _norm_link(x: object) -> str:
+    """A relic5:// link or a bare msgkey, compared by its last path part (the msgkey[:chunk])."""
+    s = str(x or "").strip()
+    return s.rsplit("/", 1)[-1] if s else ""
+
+
+def searched(root: str, query: str | None = None, link: str | None = None, since: str | None = None,
+             until: str | None = None, limit: int = 20) -> Json:
+    from .query import UsageError
+    words = [w.lower() for w in (query or "").split() if w.strip()]
+    want = _norm_link(link)
+    if not words and not want:
+        raise UsageError("searched needs query (words to look for in past searches, found notes and tags) or link")
+    lo, hi = span(since, until)
+    tags = tags_of(root)
+    groups: dict[str, Json] = {}
+    for r in rows(root):
+        if str(r.get("client") or "").startswith("eval") or not _in(r.get("at"), lo, hi):
+            continue
+        tool, args = r.get("tool"), r.get("args") or {}
+        rid = str(r.get("id") or "")
+        if want:
+            hit = (any(_norm_link(h.get("link")) == want for h in (r.get("top") or []) if isinstance(h, dict))
+                   or (tool in ("relic_show", "relic_session") and _norm_link(args.get("id")) == want)
+                   or (tool == "relic_found" and any(_norm_link(x) == want for x in (args.get("links") or []))))
+            why = "returned" if r.get("top") else "opened" if tool in ("relic_show", "relic_session") else "cited"
+        else:
+            hay = " ".join(str(x or "") for x in (r.get("query"), args.get("goal"), args.get("how"), args.get("found"),
+                                                   " ".join((tags.get(rid) or {}).get("tags") or []))).lower()
+            hit = tool in ("relic_search", "relic_found") and all(w in hay for w in words)
+            why = "found note" if tool == "relic_found" else "search"
+        if not hit:
+            continue
+        key = str(r.get("root") or rid)
+        g = groups.setdefault(key, {"root": key, "first": r.get("at"), "last": r.get("at"), "queries": [], "found": [],
+                                    "hits": [], "why": [], "links": []})
+        g["last"] = r.get("at")
+        if why not in g["why"]:
+            g["why"].append(why)
+        if r.get("query") and r["query"] not in g["queries"]:
+            g["queries"].append(r["query"])
+        if r.get("hits") is not None and tool == "relic_search":
+            g["hits"].append(r["hits"])
+        if tool == "relic_found":
+            g["found"].append({k: args.get(k) for k in ("goal", "how", "found", "links")} | {"at": r.get("at")})
+        for h in (r.get("top") or [])[:3]:
+            if isinstance(h, dict) and h.get("link") and h["link"] not in g["links"]:
+                g["links"].append(h["link"])
+    out = []
+    for g in groups.values():
+        g["tags"] = sorted({t for tid in [g["root"]] for t in (tags.get(tid) or {}).get("tags") or []})
+        g["hits"] = max(g["hits"]) if g["hits"] else None
+        g["links"] = g["links"][:5]
+        out.append(g)
+    out.sort(key=lambda g: (bool(g["found"]), str(g["last"])), reverse=True)
+    res: Json = {"query": query or None, "link": link or None, "chains": out[:limit], "total": len(out)}
+    if want:
+        res["tags"] = (tags.get(str(link)) or tags.get(want) or {}).get("tags") or []
+    return res
+
+
 # ---- chains ---------------------------------------------------------------------------------------------------
 
 def _step(r: Json) -> Json:
