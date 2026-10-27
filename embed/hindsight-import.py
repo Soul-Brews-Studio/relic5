@@ -247,7 +247,7 @@ def main() -> None:
     ap.add_argument("--until", default="", help="HH:MM (local): send nothing new after it, so the queue drains by a time "
                     "(Nat, 2026-10-26: done by 06:00)")
     a = ap.parse_args()
-    if a.source not in ("memory", "vault", "git", "thinking", "sessions", "readings") and not a.source.startswith("discord:"):
+    if a.source not in ("memory", "vault", "git", "thinking", "sessions", "readings") and not a.source.startswith(("discord:", "readings-")):
         ap.error(f"unknown source {a.source}")
     if a.source.startswith("discord:"):   # one bank per server unless --bank names one
         gid = a.source.split(":", 1)[1]
