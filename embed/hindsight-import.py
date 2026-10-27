@@ -229,7 +229,7 @@ def upgrade(a: argparse.Namespace, items: list, done: set, meta: dict, ledger, t
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("source", help="memory | vault | git | thinking | sessions (read on the hub), or discord:<guild_id> "
+    ap.add_argument("source", help="memory | vault | git | thinking | sessions | readings (read on the hub), or discord:<guild_id> "
                     "(a maw atlas Discord backup on this machine, embed/discord-source.py; bank discord-<server> by default)")
     ap.add_argument("--strategy", default="", help="a bank retain strategy, e.g. embed-first (chunks only, no LLM): "
                     "posted synchronously, so it does not queue behind LLM retains; its own ledger")
@@ -247,7 +247,7 @@ def main() -> None:
     ap.add_argument("--until", default="", help="HH:MM (local): send nothing new after it, so the queue drains by a time "
                     "(Nat, 2026-10-26: done by 06:00)")
     a = ap.parse_args()
-    if a.source not in ("memory", "vault", "git", "thinking", "sessions") and not a.source.startswith("discord:"):
+    if a.source not in ("memory", "vault", "git", "thinking", "sessions", "readings") and not a.source.startswith("discord:"):
         ap.error(f"unknown source {a.source}")
     if a.source.startswith("discord:"):   # one bank per server unless --bank names one
         gid = a.source.split(":", 1)[1]

@@ -10,6 +10,7 @@ runs it over ssh and queues the items (Nat, 2026-10-26: "memory first then vault
   thinking  thinking blocks per session, in about 3,000-character blocks
   sessions  every session's user and assistant turns, de-duplicated across machines (msgkey, chunk), in ~3,000-character
             blocks, id "<session>#<n>" as `relic5 memory import <session>` writes them; newest sessions first
+  readings  relic-extract's LLM insight per window (day, 3h, 1h, 15m), one per window, zai first; id "readings:<grain>:<start>"
 """
 import json, os, re, sys, time
 from datetime import datetime, timezone
@@ -140,11 +141,46 @@ def sessions() -> None:
     flush()
 
 
+def readings() -> None:
+    """relic-extract's readings (Nat, 2026-10-27: "import readings into hindsight"): an LLM's insight per time window
+    (day, 3h, 1h, 15m) from <root>/readings/*.jsonl, which the hub already serves (src/relic5/readings.py parses the
+    three scripts' unit strings and keeps the newest answer per window and model). One item per window, one model per
+    window: zai glm-5.3 first (its deep pass for 15m), else gb300 qwen3:14b; the trial models are skipped (relic-extract,
+    2026-10-27). The text is already an LLM summary, so it goes in embed-first: no second extraction."""
+    sys.path.insert(0, os.path.join(os.path.dirname(PARTS), "app", "src"))
+    from relic5 import readings as R
+    rank = {("zai:glm-5.3", True): 0, ("zai:glm-5.3", False): 1, ("gb300:qwen3:14b", True): 2, ("gb300:qwen3:14b", False): 3}
+    best: dict[tuple[str, str], dict] = {}
+    for path in R.files(os.path.dirname(PARTS)):
+        for r in R._load(path):
+            k = (r["model"], r["deep"])
+            if k not in rank:
+                continue
+            w = (r["grain"], r["start"])
+            if w not in best or rank[k] < rank[(best[w]["model"], best[w]["deep"])]:
+                best[w] = r
+    label = {"day": "day", "3h": "3 hours", "1h": "1 hour", "15m": "15 minutes"}
+    for (grain, start), r in sorted(best.items(), key=lambda kv: kv[0][1], reverse=True):
+        lines = [f"What happened, {label[grain]} from {start} to {r['end'][-5:]} (Bangkok time):"]
+        for k in ("type", "focus", "work", "agents", "pattern", "distraction", "friction", "lesson", "en", "th"):
+            v = r.get(k)
+            if v in (None, "", [], {}):
+                continue
+            if isinstance(v, list):
+                v = "; ".join(str(x) for x in v)
+            elif isinstance(v, dict):
+                v = json.dumps(v, ensure_ascii=False)
+            lines.append(f"{k}: {v}")
+        model = r["model"] + (" deep" if r["deep"] else "")
+        out(f"readings:{grain}:{start.replace(' ', 'T')}", "\n".join(lines), start.replace(" ", "T") + ":00+07:00",
+            f"relic-extract reading by {model} of the {label[grain]} window {start}", ["relic5", "source:readings", f"grain:{grain}"])
+
+
 if __name__ == "__main__":
     src = sys.argv[1] if len(sys.argv) > 1 else ""
-    fn = {"memory": memory, "vault": vault, "git": git, "thinking": thinking, "sessions": sessions}.get(src)
+    fn = {"memory": memory, "vault": vault, "git": git, "thinking": thinking, "sessions": sessions, "readings": readings}.get(src)
     if not fn:
-        sys.exit("hindsight-source.py memory|vault|git|thinking|sessions [--parts DIR]")
+        sys.exit("hindsight-source.py memory|vault|git|thinking|sessions|readings [--parts DIR]")
     t0 = time.time()
     fn()
     print(f"# {src} done in {time.time() - t0:.0f}s", file=sys.stderr)
