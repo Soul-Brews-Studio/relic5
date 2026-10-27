@@ -450,9 +450,10 @@ fn speed(watch: bool) -> Result<(), Fail> {
             let pct = if *total > 0.0 { done / total } else { 0.0 };
             let eta = if done >= total { "done".into() } else if *rate < 0.0 { "measuring".into() } else if *rate > 0.0 { fmt_secs((total - done) / rate * 60.0) } else { "?".into() };
             put!("{c}╭─ {b}job{z}{c} · {name} {}{z}", "─".repeat(60usize.saturating_sub(name.chars().count())));
-            put!("{c}│{z}  {gr}{}{z} {b}{:>5.1}%{z}  {} / {} items  {g}{} · ETA {eta}{z}",
+            put!("{c}│{z}  {gr}{}{z} {b}{:>5.1}%{z}  {} / {} items  {g}{}{}{z}",
                      bar(pct, 30), pct * 100.0, commas(&Value::from(*done as i64)), commas(&Value::from(*total as i64)),
-                     if *rate < 0.0 { "rate: measuring (1 min)".to_string() } else { format!("{rate:.0} items/min") });
+                     if done >= total { String::new() } else { format!(" · ETA {eta}") },
+                     if done >= total { "finished".to_string() } else if *rate < 0.0 { "rate: measuring (1 min)".to_string() } else { format!("{rate:.0} items/min") });
             for (bank, d, t) in banks {
                 if d < t {
                     put!("{c}│{z}    {g}{:<34}{z} {} {:>5.1}%  {}/{}", head(bank, 34), bar(d / t, 12), d / t * 100.0,
