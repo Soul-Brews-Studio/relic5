@@ -20,6 +20,9 @@ until_time() {   # sleep until HH:MM (today, or tomorrow if it has passed)
 }
 in_night() { local h; h=$(date +%H%M); [ "$h" -ge "${START/:/}" ] || [ "$h" -lt "${LAST/:/}" ]; }
 say "night runner start (window $START-$END, nothing new after $LAST)"
+# the first night starts at $START even when the runner is started inside the window (09:14 on 2026-10-27 it began at
+# once); RUN_NOW=1 starts the first night right away
+[ "${RUN_NOW:-0}" = 1 ] || until_time "$START"
 while true; do
   in_night || until_time "$START"
   slots "$NIGHT" "night"; consolidation true
