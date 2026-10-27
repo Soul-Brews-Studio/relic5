@@ -337,6 +337,17 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
         from . import trace
         return trace.stats(relic.parts.root, max(1, min(hours, 24 * 14)))
 
+    @app.get("/api/searched", response_model=None)
+    def searched_route(q: str = "", link: str = "", since: str = "", until: str = "", limit: int = 20) -> Response | Json:
+        """Search the searched: past queries, found notes and tags (q), or the way back from a message (link)."""
+        from . import trace
+        from .query import UsageError
+        from .window import WindowError
+        try:
+            return trace.searched(relic.parts.root, q or None, link or None, since or None, until or None, max(1, min(limit, 200)))
+        except (UsageError, WindowError) as ex:
+            return JSONResponse({"error": str(ex)}, status_code=400)
+
     @app.get("/api/saved", response_model=None)
     def saved_list() -> Json:
         from . import trace

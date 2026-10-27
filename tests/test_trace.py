@@ -134,3 +134,34 @@ def test_a_period_tells_what_was_asked_and_found_and_tags_label_it(root, monkeyp
     acc = c.get("/api/access", params={"since": today, "tool": "relic_search"}, headers=H).json()
     assert len(acc["rows"]) == 3 and c.get("/api/access", params={"since": "nonsense"}, headers=H).status_code == 400
     assert c.get("/api/tags", headers=H).json()["tags"][0]["tag"] == "hub"
+
+
+def test_the_searched_can_be_searched_and_a_link_leads_back_to_its_searches(root, monkeypatch):
+    """Nat, 2026-10-27: "we should have search from the searched! and we can add relic link trace?", "relic tag it
+    seems helper": past queries, found notes and tags are searchable; a link leads back to what returned, opened or cited it."""
+    monkeypatch.setenv("RELIC5_WARM", "0")
+    c = app(root)
+    _, s = rpc(c, "relic_search", {"query": "hub"})
+    link = s["hits"][0]["link"]
+    _, sh = rpc(c, "relic_show", {"id": link, "parent": s["trace"]["id"]})
+    rpc(c, "relic_found", {"parent": sh["trace"]["id"], "goal": "where the relic5 hub runs", "how": "searched hub",
+                           "found": "on white", "links": [link]})
+    rpc(c, "relic_tag", {"target": s["trace"]["id"], "add": ["deploy"]})
+    rpc(c, "relic_tag", {"target": link, "add": ["answer"]})
+    _, other = rpc(c, "relic_search", {"query": "unrelated"})
+
+    _, by_word = rpc(c, "relic_searched", {"query": "white"})                    # a word only in the found note
+    assert by_word["total"] == 1 and by_word["chains"][0]["root"] == s["trace"]["id"]
+    g = by_word["chains"][0]
+    assert g["found"][0]["found"] == "on white" and g["tags"] == ["deploy"] and "found note" in g["why"]
+    _, by_tag = rpc(c, "relic_searched", {"query": "deploy"})                      # a word only in the tags
+    assert [x["root"] for x in by_tag["chains"]] == [s["trace"]["id"]]
+    _, back = rpc(c, "relic_searched", {"link": link})                             # the way back from the message
+    assert back["chains"][0]["root"] == s["trace"]["id"] and back["tags"] == ["answer"]
+    assert set(back["chains"][0]["why"]) >= {"returned", "opened", "cited"}
+    assert other["trace"]["id"] not in [x["root"] for x in back["chains"]] or "unrelated" in back["chains"][-1]["queries"]
+    api = c.get("/api/searched", params={"q": "relic5 hub"}, headers=H).json()
+    assert "where the relic5 hub runs" in api["chains"][0]["queries"]      # a found note is logged with its goal as query
+    assert c.get("/api/searched", headers=H).status_code == 400
+    body = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "relic_searched", "arguments": {}}}
+    assert c.post("/mcp", json=body, headers=H).json()["result"]["isError"]

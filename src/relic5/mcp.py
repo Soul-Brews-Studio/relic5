@@ -141,6 +141,13 @@ TOOLS = [
      "agent's relic_found, or Nat's \"Keep this hit\" on the Search page) with their links, and the chains. since/until: "
      "YYYY-MM-DD (a Bangkok day), an ISO time, or Nd/Nh before now; default the last 24 hours.",
      "inputSchema": {"type": "object", "properties": {"since": STR, "until": STR, "limit": INT}, "additionalProperties": False}},
+    {"name": "relic_searched", "description": "Search what was already searched, before searching again: with query, the past "
+     "searches, found notes (goal, how, found) and tags whose words match, grouped by chain, the ones that found something "
+     "first, each with its queries, best hit count, first links and found notes. With link (a relic5:// link or a msgkey): "
+     "the way back from that message to every search that returned it, every call that opened it and every found note that "
+     "cites it, plus its tags. since/until as relic_asked.",
+     "inputSchema": {"type": "object", "properties": {"query": STR, "link": STR, "since": STR, "until": STR, "limit": INT},
+                     "additionalProperties": False}},
     {"name": "relic_tag", "description": "Put labels on something found, like digger's node tags: a message (its relic5:// link), "
      "a session (its id) or a search (its trace.id). add and remove are lists of tags (letters, digits, Thai, - . / _); a "
      "note says why. Read them back with relic_tags.",
@@ -181,7 +188,9 @@ INSTRUCTIONS = (
     "trace.id you are following> on your next call (opening a hit, a narrower search, another try), so the hub keeps one "
     "trace chain per question. When you have the answer, or are giving up, call relic_found {parent, goal, how, found, "
     "links} once: what you looked for, how you searched, and what you found. relic_trace {id} reads a chain back; "
-    "relic_asked {since, until} tells what was looked into in a period and what was found.")
+    "relic_asked {since, until} tells what was looked into in a period and what was found; relic_searched {query} finds "
+    "earlier searches, found notes and tags on the same question (ask it first), and relic_searched {link} goes from a "
+    "message back to the searches that found it.")
 UNAVAILABLE = {
     "relic_chain": "relic_chain is not available in relic5 (as in relic3 v3)",
     "relic_now": "relic_now is not available in relic5; use relic_sessions with since=1h",
@@ -235,6 +244,15 @@ def run_tool(relic: Relic5, name: str, a: Json, door: str | None = None) -> Json
         _check(a, ["since", "until", "limit"])
         try:
             return trace.asked(relic.parts.root, _str(a, "since") or ("1d" if not a.get("until") else None), _str(a, "until"), min(_int(a, "limit", 1) or 50, 500))
+        except WindowError as ex:
+            raise UsageError(str(ex))
+    if name == "relic_searched":
+        from . import trace
+        from .window import WindowError
+        _check(a, ["query", "link", "since", "until", "limit"])
+        try:
+            return trace.searched(relic.parts.root, _str(a, "query"), _str(a, "link"), _str(a, "since"), _str(a, "until"),
+                                  min(_int(a, "limit", 1) or 20, 200))
         except WindowError as ex:
             raise UsageError(str(ex))
     if name == "relic_found":
