@@ -433,6 +433,21 @@ fn speed(watch: bool) -> Result<(), Fail> {
             }
         }
         put!("{p}{b} ▓▒░ RELIC5·SPEED ░▒▓ {z}{g} embed + summarize · last minute · {}{z}", clock_now());
+        // NOW: what is being done, its progress, ETA, and what the LLM's calls of the last 2 minutes went to, at the
+        // top so a short pane shows it (Nat, 2026-10-27: "i dont know progress and what happened, what doing")
+        match feeder_progress() {
+            Some((name, sent, todo, rate)) => {
+                let eta = if rate > 0.0 { fmt_secs((todo - sent) / rate * 60.0) } else { "measuring".into() };
+                put!("  {am}{b}NOW{z}  {b}{}{z}  {gr}{}{z} {b}{:.1}%{z}  {} / {}  {g}{} · ETA {eta}{z}", format!("{}{}", if name.starts_with("discord") { "" } else { "relic5 " }, name.replace(" · upgrade", " · full extraction")),
+                     bar(if todo > 0.0 { sent / todo } else { 0.0 }, 16), if todo > 0.0 { sent / todo * 100.0 } else { 0.0 },
+                     commas(&Value::from(sent as i64)), commas(&Value::from(todo as i64)),
+                     if rate > 0.0 { format!("{rate:.0} items/min") } else { "rate: measuring".into() });
+            }
+            None => put!("  {am}{b}NOW{z}  {g}no import running{z}"),
+        }
+        if let Some(line) = llm_work() {
+            put!("  {am}{b}LLM{z}  {line}");
+        }
         for m in ["m5", "gb300"] {
             let ls: Vec<&String> = lines.iter().filter(|(mm, _)| mm == m).map(|(_, l)| l).collect();
             if ls.is_empty() {
@@ -633,6 +648,45 @@ fn feeder_progress() -> Option<(String, f64, f64, f64)> {
     let (t0, n0) = pts[0];
     let rate = if now - t0 >= 60.0 && sent >= n0 { (sent - n0) / (now - t0) * 60.0 } else { -1.0 };
     Some((format!("{} · {}", s(&f["source"]), s(&f["strategy"])), sent, todo, rate))
+}
+
+/// What the LLM calls of the last 2 minutes went to, from the hindsight-embed log (~/.hindsight/profiles/relic.log):
+/// fact extraction (retain) vs consolidation per bank. None when there is no log or no call.
+fn llm_work() -> Option<String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let path = format!("{}/.hindsight/profiles/relic.log", std::env::var("HOME").unwrap_or_default());
+    let mut f = std::fs::File::open(path).ok()?;
+    let len = f.metadata().ok()?.len();
+    f.seek(SeekFrom::Start(len.saturating_sub(3_000_000))).ok()?;
+    let mut buf = String::new();
+    let mut raw = Vec::new();
+    f.read_to_end(&mut raw).ok()?;
+    buf.push_str(&String::from_utf8_lossy(&raw));
+    let cutoff = unsafe {
+        let t = libc::time(std::ptr::null_mut()) - 120;
+        let mut tm: libc::tm = std::mem::zeroed();
+        libc::localtime_r(&t, &mut tm);
+        format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02}", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec)
+    };
+    let (mut extract, mut cons) = (0usize, std::collections::BTreeMap::<String, usize>::new());
+    for l in buf.lines().filter(|l| l.len() > 19 && l[..19] >= cutoff[..]) {
+        if l.contains("scope=retain") {
+            extract += 1;
+        } else if let Some(i) = l.find("[CONSOLIDATION] bank=") {
+            let b: String = l[i + 21..].chars().take_while(|c| !c.is_whitespace()).collect();
+            *cons.entry(if b.starts_with("discord-") { "discord".to_string() } else { b }).or_default() += 1;
+        }
+    }
+    let total = extract + cons.values().sum::<usize>();
+    if total == 0 {
+        return None;
+    }
+    let pc = |n: usize| n * 100 / total;
+    let mut parts = vec![format!("extracting facts {}%", pc(extract))];
+    for (b, n) in &cons {
+        parts.push(format!("consolidating {b} {}%", pc(*n)));
+    }
+    Some(format!("{} \x1b[38;2;128;136;156m(last 2 min, {total} calls)\x1b[0m", parts.join(" · ")))
 }
 
 fn fmt_secs(x: f64) -> String {
