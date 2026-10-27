@@ -25,7 +25,7 @@ are kept (`RELIC5_BACKUP_KEEP`). The directories are 700.
 `bin/relic5-offsite` runs on white every night at 03:45 (`deploy/systemd/relic5-offsite.timer`) and copies `parts/`,
 `vectors/`, `resolve/`, `logs/`, `attic/` and `hub-status.json` into relic5's own bucket, `s3://relic5-hub` on
 `http://black.follow-rankine.ts.net:9200` (region `black-ssd-rustfs`). It runs `aws s3 sync` without `--delete`; the
-bucket keeps versions, and black's nightly `mirror-to-odin` copies it to odin's Garage. Key: user `relic5`, read/write on
+bucket keeps versions. (black's nightly `mirror-to-odin` to odin's Garage was retired 2026-10-27, docs/RETIRED.md: RustFS only.) Key: user `relic5`, read/write on
 `relic5-hub` only, kept in `pass rustfs-black/relic5-key` and in white's `~/.config/relic5/s3-black` (0600). Each run is a
 JobEvent `offsite`; `relic_status` shows it as `offsite` and warns when the newest is older than 36 h.
 
