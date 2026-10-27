@@ -351,14 +351,18 @@ def main() -> None:
         print(f"{a.source}: looked up {len(items) - len(done & {x['document_id'] for x in items}):,} documents, "
               f"{len(meta):,} in the bank", flush=True)
         return upgrade(a, items, done, meta, ledger, tty)
-    off = 0
-    while True:
-        page = call("GET", f"/v1/default/banks/{a.bank}/documents?limit=1000&offset={off}", timeout=120)
-        ids = [d["id"] for d in page.get("items") or []]
-        have.update(ids)
-        off += len(ids)
-        if not ids or off >= page.get("total", 0):
-            break
+    # every mode: one lookup per item that is not in the ledger yet. Paging a big bank by offset slowed with every page
+    # (the readings into relic5, 427k documents: still paging after 15 min, 2026-10-27 09:06)
+    def exists(x: dict) -> str | None:
+        try:
+            call("GET", f"/v1/default/banks/{a.bank}/documents/{urllib.parse.quote(x['document_id'], safe='')}", timeout=60)
+            return x["document_id"]
+        except urllib.error.HTTPError as ex:
+            if ex.code == 404:
+                return None
+            raise
+    with concurrent.futures.ThreadPoolExecutor(16) as ex_:
+        have.update(d for d in ex_.map(exists, [x for x in items if x["document_id"] not in done]) if d)
     todo = [x for x in items if x["document_id"] not in done and x["document_id"] not in have]
     if have:
         print(f"{a.source}: {len(have):,} documents already in the bank are skipped", flush=True)
