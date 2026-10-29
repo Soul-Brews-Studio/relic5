@@ -1,7 +1,7 @@
 [project]
 license = "AGPL-3.0-or-later"
 name = "relic5"
-version = "26.10.28a1750"
+version = "26.10.29a1017"
 description = "One hub on white for every machine's extracted history and vectors: push, import, embed, serve"
 requires-python = ">=3.12"
 dependencies = [
@@ -44,6 +44,8 @@ python_version = "3.12"
 files = ["src/relic5"]
 
 [[tool.mypy.overrides]]
-# no type information shipped: their values are typed where they enter our code
-module = ["pyarrow", "pyarrow.*", "lancedb", "lancedb.*", "duckdb", "uvicorn", "numpy", "numpy.*", "coremltools", "coremltools.*"]
+# no type information shipped: their values are typed where they enter our code. torch / sentence_transformers are the
+# optional `embed` extra (Mac clients only), coremltools the `ane2` extra: a venv without them must still type-check clean
+module = ["pyarrow", "pyarrow.*", "lancedb", "lancedb.*", "duckdb", "uvicorn", "numpy", "numpy.*", "torch", "torch.*",
+          "sentence_transformers", "sentence_transformers.*", "coremltools", "coremltools.*"]
 ignore_missing_imports = true
