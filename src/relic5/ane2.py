@@ -34,6 +34,10 @@ HF = {"unsloth--embeddinggemma-300m@806f5f90": "unsloth/embeddinggemma-300m"}
 ASSETS = Path(os.path.expanduser(os.environ.get("RELIC5_ANE2_ASSETS",
                                                 "~/Library/Application Support/ANEEmbed/embeddinggemma-w16")))
 NEG = -1e4   # additive mask
+# The Neural Engine's share of the batches in split mode. Measured on m5 (2026-10-29, 2,252 real chunks, texts/s):
+# GPU alone 83.7, ANE alone 99.1; split at 0.3 134.6, 0.5 101.0/137.3/191.9, 0.6 174.6/137.9,
+# 0.7 151.6/151.9/151.1, 0.8 131.5/132.1. 0.7 is the best mean, and the steadiest.
+ANE_SHARE = 0.7
 
 
 def buckets() -> tuple[tuple[int, int], ...]:
@@ -172,7 +176,7 @@ _pool: ProcessPoolExecutor | None = None
 def encode(texts: list[str], model: str, kind: str = "document", mode: str | None = None,
            ane_share: float | None = None) -> list[list[float]]:
     """-> unit vectors in input order. mode: split (Neural Engine in a child process + GPU here, the default) | ane | gpu.
-    ane_share: the Neural Engine's fraction of the batches in split mode (RELIC5_ANE2_SHARE, default 0.5)."""
+    ane_share: the Neural Engine's fraction of the batches in split mode (RELIC5_ANE2_SHARE, default ANE_SHARE)."""
     from .encode import PROMPT
     global _pool
     mode = mode or os.environ.get("RELIC5_ANE2_MODE", "split")
@@ -180,7 +184,7 @@ def encode(texts: list[str], model: str, kind: str = "document", mode: str | Non
     if mode in ("ane", "gpu"):
         rows, vecs, _ = _share(mode, model, texts, (0.0, 1.0))
     else:
-        a = float(ane_share if ane_share is not None else os.environ.get("RELIC5_ANE2_SHARE", "0.5"))
+        a = float(ane_share if ane_share is not None else os.environ.get("RELIC5_ANE2_SHARE", ANE_SHARE))
         if _pool is None:
             _pool = ProcessPoolExecutor(max_workers=1, mp_context=get_context("spawn"))
         far = _pool.submit(_share, "ane", model, texts, (0.0, a))
