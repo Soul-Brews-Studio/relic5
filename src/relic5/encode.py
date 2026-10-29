@@ -61,8 +61,12 @@ def encode_ane(texts: list[str], model: str, kind: str = "query", batch: int = 6
 
 def encode(texts: Iterable[str], model: str, kind: str = "query", engine: str | None = None) -> list[list[float]]:
     """-> list of unit vectors (lists of float). kind = query | document; engine = mps (sentence-transformers here,
-    the default) | ane (ANEEmbedBar on this Mac). RELIC5_ENGINE sets the default."""
+    the default) | ane (ANEEmbedBar on this Mac) | ane2 (Neural Engine + GPU in-process, ane2.py). RELIC5_ENGINE sets
+    the default."""
     engine = engine or os.environ.get("RELIC5_ENGINE", "mps")
+    if engine == "ane2":
+        from . import ane2
+        return ane2.encode(list(texts), model, kind)
     if engine == "ane":
         return encode_ane(list(texts), model, kind)
     m = _model(model)

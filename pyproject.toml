@@ -15,6 +15,7 @@ dependencies = [
 
 [project.optional-dependencies]
 embed = ["sentence-transformers==6.2.0", "torch==2.14.1", "transformers==5.20.2"]   # Mac clients only (encode.py)
+ane2 = ["coremltools==9.0"]   # engine ane2 (ane2.py): runs ANEEmbedBar's compiled packages in-process
 
 [dependency-groups]
 dev = [
@@ -44,5 +45,5 @@ files = ["src/relic5"]
 
 [[tool.mypy.overrides]]
 # no type information shipped: their values are typed where they enter our code
-module = ["pyarrow", "pyarrow.*", "lancedb", "lancedb.*", "duckdb", "uvicorn", "numpy", "numpy.*"]
+module = ["pyarrow", "pyarrow.*", "lancedb", "lancedb.*", "duckdb", "uvicorn", "numpy", "numpy.*", "coremltools", "coremltools.*"]
 ignore_missing_imports = true
