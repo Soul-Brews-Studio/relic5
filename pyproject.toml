@@ -15,6 +15,7 @@ dependencies = [
 
 [project.optional-dependencies]
 embed = ["sentence-transformers==6.2.0", "torch==2.14.1", "transformers==5.20.2"]   # Mac clients only (encode.py)
+ane2 = ["coremltools==9.0"]   # engine ane2 (ane2.py): runs ANEEmbedBar's compiled packages in-process
 
 [dependency-groups]
 dev = [
@@ -44,7 +45,7 @@ files = ["src/relic5"]
 
 [[tool.mypy.overrides]]
 # no type information shipped: their values are typed where they enter our code. torch / sentence_transformers are the
-# optional `embed` extra (Mac clients only): a venv without it must still type-check clean
+# optional `embed` extra (Mac clients only), coremltools the `ane2` extra: a venv without them must still type-check clean
 module = ["pyarrow", "pyarrow.*", "lancedb", "lancedb.*", "duckdb", "uvicorn", "numpy", "numpy.*", "torch", "torch.*",
-          "sentence_transformers", "sentence_transformers.*"]
+          "sentence_transformers", "sentence_transformers.*", "coremltools", "coremltools.*"]
 ignore_missing_imports = true
