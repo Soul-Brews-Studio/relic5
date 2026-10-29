@@ -57,7 +57,7 @@ pet-studio:
 # `uv tool upgrade relic5`, which puts the Python one back. A Mac gets the `embed` extra (torch): without it
 # `relic5 embed` dies at `import torch` (m5, 2026-10-29).
 cli:
-    if [ "$(uname)" = Darwin ]; then uv tool install --force --reinstall "$(pwd)[embed]"; else uv tool install --force --reinstall "$(pwd)"; fi
+    if [ "$(uname)" = Darwin ]; then uv tool install --force --reinstall "$(pwd)[embed,ane2]"; else uv tool install --force --reinstall "$(pwd)"; fi
     just cli-bin
     @command -v relic5-core && relic5-core --version
 
