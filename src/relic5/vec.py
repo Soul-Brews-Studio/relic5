@@ -191,13 +191,16 @@ def table_sql(parts: Parts, root: str, model: str, months: Collection[str]) -> s
 
 def probe_rows(root: str, con: "duckdb.DuckDBPyConnection", model: str = DEFAULT, n: int = 200) -> list[Json]:
     """n random text chunks (>= MIN_CHARS) with their stored vector: a parity probe for another engine."""
-    src, have = text_sql(Parts(root)), vectors_sql(root, model)
-    if src is None or have is None:
+    src, fs = text_sql(Parts(root)), shards(root, model)
+    if src is None or not fs:
         return []
     rows = con.execute(f"""SELECT key, any_value(substr(text, 1, 6000)) AS text FROM {src} WHERE length(text) >= {MIN_CHARS}
                            GROUP BY key USING SAMPLE reservoir({int(n)} ROWS) REPEATABLE (23)""").fetchall()
     keys = [k for k, _ in rows]
-    vec = dict(con.execute(f"SELECT key, vector FROM {have} WHERE key IN (SELECT unnest(?))", [keys]).fetchall())
+    # filter the keys BEFORE the GROUP BY: vectors_sql groups every shard first, which held all ~1.16 M vectors in the
+    # hash table and ran the hub out of memory (white, 2026-10-29: OOM at 5.6 of 5.5 GiB, /probe answered 500)
+    vec = dict(con.execute(f"""SELECT key, any_value(vector) AS vector FROM read_parquet({sql_list(fs)})
+                               WHERE key IN (SELECT unnest(?)) GROUP BY key""", [keys]).fetchall())
     return [{"key": k, "text": t, "vector": list(vec[k])} for k, t in rows if k in vec]
 
 

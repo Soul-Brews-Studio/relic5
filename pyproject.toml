@@ -43,6 +43,8 @@ python_version = "3.12"
 files = ["src/relic5"]
 
 [[tool.mypy.overrides]]
-# no type information shipped: their values are typed where they enter our code
-module = ["pyarrow", "pyarrow.*", "lancedb", "lancedb.*", "duckdb", "uvicorn", "numpy", "numpy.*"]
+# no type information shipped: their values are typed where they enter our code. torch / sentence_transformers are the
+# optional `embed` extra (Mac clients only): a venv without it must still type-check clean
+module = ["pyarrow", "pyarrow.*", "lancedb", "lancedb.*", "duckdb", "uvicorn", "numpy", "numpy.*", "torch", "torch.*",
+          "sentence_transformers", "sentence_transformers.*"]
 ignore_missing_imports = true
