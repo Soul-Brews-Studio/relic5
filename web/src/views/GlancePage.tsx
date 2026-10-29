@@ -14,17 +14,27 @@ import type { AskedStats, HomeRow, JobEvent, Queries, Status } from "../types";
 
 export interface Check { key: string; title: string; level: Level; text: string; command?: string; big?: ReactNode; icon: ComponentType<{ size?: number }> }
 
+const WEEK = 7 * 24 * 3600;
+// one manual pass per machine (relic4-scan docs/MANUAL.md)
+const IMPORT: Record<string, string> = {
+  m5: "relic5 import",
+  white: "ssh white systemctl --user start relic-chain.service",
+  mba: "ssh mba 'RELIC5_MACHINE=mba ~/.local/bin/relic-chain'",
+};
+
 export function checks(s: Status, evs: JobEvent[]): Check[] {
   const out: Check[] = [];
   // a copy (COPY.json) gets no pushes, backups or seals: those checks belong to the live hub, not to it
   for (const m of s.copy ? [] : Object.keys({ ...s.machines, ...s.versions }).filter(m => !m.endsWith("-import")).sort()) {
     const f = s.freshness.machines[m] ?? {}, c = syncChip(f.sync), age = f.push_age_s;
-    const level: Level = c.tone === "bad" ? "failed" : age == null ? "unknown" : age > 1800 ? "warning" : c.tone === "ok" ? "ok" : "unknown";
+    // imports are manual since 2026-10-26 (relic4-scan docs/MANUAL.md): a quiet machine is normal, so only a push older
+    // than a week is worth a look, and the hint is that machine's one-pass command, not a 10-minute loop's log
+    const level: Level = c.tone === "bad" ? "failed" : age == null ? "unknown" : age > WEEK ? "warning" : "ok";
     out.push({ key: "m-" + m, title: m, level, icon: Machine, big: age == null ? "unknown" : secs(age),
-      text: c.tone === "bad" ? `Its chain reports ${c.text}: what it holds and what the hub holds differ.` :
-        age != null && age > 1800 ? `No push for ${secs(age)}; the chain pushes every 10 minutes.` :
-          `Pushed ${ago(f.pushed_at)}; its chain says ${c.text}.`,
-      command: level === "ok" ? undefined : `ssh ${m} tail -20 ~/Library/Logs/relic-chain.log` });
+      text: c.tone === "bad" ? `Its last import reports ${c.text}: what it holds and what the hub holds differ.` :
+        age != null && age > WEEK ? `No push for ${secs(age)}. Imports are manual: run one to make its newest history searchable.` :
+          `Pushed ${ago(f.pushed_at)} (manual imports); ${c.text}.`,
+      command: level === "ok" ? undefined : IMPORT[m] ?? `ssh ${m} relic-chain   # one pass, see docs/MANUAL.md` });
   }
   const fts = s.freshness.fts?.age_s;
   out.push({ key: "index", title: "Search index", icon: Search, level: fts == null ? "failed" : fts > 3600 ? "warning" : "ok", big: fts == null ? "none" : secs(fts),
@@ -36,7 +46,7 @@ export function checks(s: Status, evs: JobEvent[]): Check[] {
     command: pending ? "relic5 embed" : undefined });
   const b = s.backup, stale = !b?.at || (b.age_s ?? 0) > 36 * 3600;
   if (!s.copy) out.push({ key: "backup", title: "Backup", icon: Shield, level: !b?.at ? "failed" : stale ? "warning" : "ok", big: b?.at ? secs(b.age_s) : "none",
-    text: b?.at ? `Snapshot of ${bytes(b.bytes)} on ${b.host}, restore-tested; the next one runs at 03:30.` : "No snapshot of the hub exists yet.",
+    text: b?.at ? `Snapshot of ${bytes(b.bytes)} on ${b.host}, restore-tested. Backups run by hand since 2026-10-26 (no nightly job).` : "No snapshot of the hub exists yet.",
     command: stale ? "bin/relic5-backup && bin/relic5-restore-test" : undefined });
   const d = s.store.disk.free_pct;
   out.push({ key: "disk", title: s.copy ? "Disk on this machine" : "Disk on white", icon: Disk, level: d < 10 ? "failed" : d < 20 ? "warning" : "ok", big: `${d}%`,

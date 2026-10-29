@@ -1,7 +1,7 @@
 """worker.py: `relic5 embed` on a client. Asks the hub which chunks have no vector, embeds them here, ships a shard.
 
   relic5 embed --probe [--n 200]        parity: re-embed n keys the hub already has; cosine of each with the stored vector
-  relic5 embed [--engine auto|ane|mps|gb300] [--limit 5000] [--prefix 0-7]   auto = the policy ([embed] in
+  relic5 embed [--engine auto|ane|ane2|mps|gb300] [--limit 5000] [--prefix 0-7]   auto = the policy ([embed] in
                                         ~/.config/relic5/config.toml): backlog > 50,000 -> gb300, else ane. Embeds missing
                                         chunks (newest first), rsyncs a shard, then
                                         `relic5 index --vectors` on the hub. --prefix: take only keys starting with one
@@ -11,6 +11,7 @@ Shard: vectors/<model@hash>/<machine>-<engine>-<run>.parquet (key, vector) with 
 engine / precision / machine / at, and one embed job in the hub's jobs.jsonl (via `relic5 index --vectors`).
 Engines (Nat, 2026-10-23: "sometimes m5, sometimes gb300, sometimes ANE"): mps (here, float32), gb300 (relic4's
 remote_embed, bf16), ane (ANEEmbedBar 11435: other prompts, so its own model@hash unless the probe says otherwise).
+ane2 (ane2.py: ANEEmbedBar's packages in-process on the Neural Engine + float32 on the GPU, two processes; no app).
 """
 import json, os, socket, subprocess, sys, time, urllib.parse, urllib.request
 from typing import Callable, TypedDict
@@ -143,7 +144,7 @@ def run(url: str, model: str, limit: int = 5000, prefixes: str = "", engine: str
     name = f"{me}-{engine}-{run_id}.parquet"
     tmp = os.path.join(os.environ.get("TMPDIR", "/tmp"), name)
     tab = pa.table({"key": [r["key"] for r in rows], "vector": pa.array(vecs, type=pa.list_(pa.float32()))})
-    tab = tab.replace_schema_metadata({"engine": engine, "precision": {"mps": "float32", "ane": "w8a16", "gb300": "bfloat16"}.get(engine, engine),
+    tab = tab.replace_schema_metadata({"engine": engine, "precision": {"mps": "float32", "ane": "w8a16", "ane2": "w8a16+float32", "gb300": "bfloat16"}.get(engine, engine),
                                        "machine": me, "at": time.strftime("%FT%T%z"), "model": model})
     pq.write_table(tab, tmp)
     dest = f"relic5/vectors/{model}/"
