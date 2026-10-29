@@ -75,3 +75,19 @@ cli-bin:
 cli-test:
     cd cli && cargo test --release && cargo build --release
     uv run pytest -q tests/test_rust_cli.py
+
+# ── embedding benchmark: the same script and the same texts on m5 and on gb300 (embed/bench_embed.py) ──
+# TEXTS: a parquet with a `text` column. Results and vectors go to /tmp/bench-embed (outside the repo: they hold text).
+bench-embed TEXTS:
+    uv run --quiet --extra embed --extra ane2 python -W ignore embed/bench_embed.py --machine m5 --texts {{TEXTS}} --out /tmp/bench-embed
+
+# gb300 runs the same file locally (uv run --script: its own torch + CUDA), then the results come back and the copies go
+bench-embed-gb300 TEXTS:
+    ssh gb300 'mkdir -p ~/relic5-bench'
+    scp -q embed/bench_embed.py {{TEXTS}} gb300:relic5-bench/
+    ssh gb300 'cd ~/relic5-bench && HF_HUB_OFFLINE=1 ~/.local/bin/uv run --quiet --script bench_embed.py --machine gb300 --texts $(basename {{TEXTS}}) --out out'
+    mkdir -p /tmp/bench-embed && scp -q 'gb300:relic5-bench/out/*' /tmp/bench-embed/
+    ssh gb300 'rm -rf ~/relic5-bench'
+
+bench-embed-compare IDLE="":
+    uv run --quiet --with numpy python embed/bench_embed.py --compare /tmp/bench-embed {{ if IDLE != "" { "--idle-watts " + IDLE } else { "" } }}
