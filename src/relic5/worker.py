@@ -2,7 +2,7 @@
 
   relic5 embed --probe [--n 200]        parity: re-embed n keys the hub already has; cosine of each with the stored vector
   relic5 embed [--engine auto|ane|ane2|mps|gb300] [--limit 5000] [--prefix 0-7]   auto = the policy ([embed] in
-                                        ~/.config/relic5/config.toml): backlog > 50,000 -> gb300, else ane. Embeds missing
+                                        ~/.config/relic5/config.toml): backlog > 2,500 -> gb300, else ane. Embeds missing
                                         chunks (newest first), rsyncs a shard, then
                                         `relic5 index --vectors` on the hub. --prefix: take only keys starting with one
                                         of these hex digits, so two workers (m5, gb300) never take the same key
@@ -39,7 +39,10 @@ class Probe(TypedDict):
     texts_per_s: float | None
 
 
-POLICY: Policy = {"backlog_gb300": 50000, "small": "ane", "big": "gb300", "query": ["ane", "mps"]}
+# backlog_gb300: measured 2026-10-29 end to end (PR #265), embeddinggemma-300m on real chunks: m5 ane2 150.7 texts/s at 2,252
+# and 146.2 at 20,268; gb300 through `--engine gb300` (ssh + model load each call) 151.4 at 2,252 and 620.0 at 20,268. They
+# tie near 2,250 chunks, so anything bigger than an increment goes to gb300 (was 50,000).
+POLICY: Policy = {"backlog_gb300": 2500, "small": "ane", "big": "gb300", "query": ["ane", "mps"]}
 
 
 def policy() -> Policy:
@@ -63,6 +66,9 @@ def gb300(rows: list[Json], model: str) -> list[list[float]]:
     trip, resumable. Run in relic4's own venv with a scratch RELIC4_ROOT, so its shards land here, not in relic4's cache."""
     import tempfile, pyarrow as pa, pyarrow.parquet as pq
     d = tempfile.mkdtemp(prefix="relic5-gb300-")
+    # relic4 rsyncs each result shard into RELIC4_ROOT/vec/_cache/<model@hash>/ and does not create that folder:
+    # without it every run failed at the rsync (exit 3) after gb300 had done the work (2026-10-29)
+    os.makedirs(os.path.join(d, "vec", "_cache", model), exist_ok=True)
     src = os.path.join(d, "missing.parquet")
     pq.write_table(pa.table({"key": [r["key"] for r in rows], "text": [r["text"] for r in rows]}), src)
     out = subprocess.run([os.path.join(RELIC4, ".venv/bin/python"), "-c",

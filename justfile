@@ -57,7 +57,8 @@ pet-studio:
 # `uv tool upgrade relic5`, which puts the Python one back. A Mac gets the `embed` extra (torch): without it
 # `relic5 embed` dies at `import torch` (m5, 2026-10-29).
 cli:
-    if [ "$(uname)" = Darwin ]; then uv tool install --force --reinstall "$(pwd)[embed]"; else uv tool install --force --reinstall "$(pwd)"; fi
+    @PATH="$HOME/.cargo/bin:$PATH" command -v cargo >/dev/null || { echo "cargo not found: nothing installed (uv would replace the Rust relic5 and cli-bin could not put it back)" >&2; exit 1; }
+    if [ "$(uname)" = Darwin ]; then uv tool install --force --reinstall "$(pwd)[embed,ane2]"; else uv tool install --force --reinstall "$(pwd)"; fi
     just cli-bin
     @command -v relic5-core && relic5-core --version
 
@@ -65,9 +66,9 @@ cli:
 # cli/target: a machine may build elsewhere (white sets build.target-dir in ~/.cargo/config.toml). The replaced file
 # is kept as relic5.bak-<its version>.
 cli-bin:
-    @command -v cargo >/dev/null || { echo "cargo is not on PATH (add ~/.cargo/bin); relic5 left as it is" >&2; exit 1; }
+    @PATH="$HOME/.cargo/bin:$PATH" command -v cargo >/dev/null || { echo "cargo not found (not in ~/.cargo/bin nor on PATH)" >&2; exit 1; }
     @f="$HOME/.local/bin/relic5"; [ -e "$f" ] && cp -p "$f" "$f.bak-$("$f" --version 2>/dev/null | sed 's/^[^ ]* //')"; rm -f "$f"
-    cargo install --quiet --locked --force --path cli --root "$HOME/.local"
+    PATH="$HOME/.cargo/bin:$PATH" cargo install --quiet --locked --force --path cli --root "$HOME/.local"
     @"$HOME/.local/bin/relic5" --version
 
 # Rust CLI against the Python CLI on a test hub (same output, same exit codes)

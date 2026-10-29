@@ -37,6 +37,7 @@ def test_serve_forwards_and_reports_an_unreachable_hub(monkeypatch):
 
 def test_policy_chooses_by_backlog(tmp_path, monkeypatch):
     from relic5 import worker
+    monkeypatch.setattr(worker, "CONFIG", str(tmp_path / "none.toml"))   # the defaults, not this machine's config
     assert worker.choose(810_000)[0] == "gb300" and worker.choose(1_200)[0] == "ane"
     cfg = tmp_path / "config.toml"
     cfg.write_text('[embed]\nbacklog_gb300 = 1000\nsmall = "mps"\n')
