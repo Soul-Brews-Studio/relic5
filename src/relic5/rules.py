@@ -150,6 +150,14 @@ def commits(root: str, terms: list[str]) -> list[Json]:
     return [dict(zip(cols, r)) for r in cur.fetchall()]
 
 
+def commit_total(root: str) -> int:
+    p = os.path.join(root, "index", "_git", "commits.parquet")
+    if not rfs.exists(p):
+        return 0
+    import duckdb
+    return int(rfs.duck(duckdb.connect(), root).execute(f"SELECT count(*) FROM read_parquet('{p}')").fetchone()[0])  # type: ignore[index]
+
+
 def own_repos(root: str, notes: list[Json], dirs: set[str]) -> set[str]:
     """The fleet's own repos ('github.com/org/repo'): one with a commit gitlog.py kept (it keeps only our commits of
     open-source clones) or one an agent's memory folder names."""
@@ -249,23 +257,32 @@ def rule(root: str, phrase: str, forbids: list[str] | None = None, since: str | 
                 x = f[0]
                 since_t = retired.get(x["term"]) or first
                 ack = ACK.search(n["text"] or "")
+                where = [f"{m}:~/.{n.get('engine') or 'claude'} memory/{str(n['sid'] or '')[len('memory:'):]}" for m in (n.get("machines") or [])]
                 flags.append({"ts": n["ts"], "kind": "memory", "repo": n["cat"], "name": n["title"], "link": _link(n),
-                              **x, "sentences": f, "retired_since": since_t,
+                              "where": where, "weight": 4, "loads": "a memory note (read when recalled)", **x, "sentences": f, "retired_since": since_t,
                               "acknowledged": (f"marked superseded {ack.group(1)}" if ack and ack.group(1) else "marked as history") if ack else None,
                               "reason": f"names {x['term']!r} as a place in use ({x['cue']}) with no retirement word in the sentence,"
                                         f" written {n['ts'][:10]}, after the rule named it retired ({str(since_t)[:10]})"})
         own = own_repos(root, notes, dirs)
+        swept_config = 0
         for s in cur:
             path = str(s["scope"])
             if path.startswith("ghq/") and path.count("/") >= 4 and "/".join(path[4:].split("/")[:3]) not in own:
                 continue   # a clone of someone else's repo (netbirdio/netbird documents NetBird): not the fleet's rule to break
             if _carries(s["text"] or "", words):
                 continue   # the rule's own section names what it retires
+            swept_config += 1
             fs = flag(s["text"] or "", forbids)
             if fs:
                 x = fs[0]
+                home = not path.startswith("ghq/")
+                weight, reach = ((0, "loads into every session of " + ", ".join(s.get("accounts") or [])) if home and s["file"] in ("CLAUDE.md", "AGENTS.md")
+                                 else (1, "a skill of " + ", ".join(s.get("accounts") or [])) if s["role"] == "config-skill"
+                                 else (2, "loads under the whole " + (os.path.dirname(path[4:]) or "ghq root") + " tree") if path.count("/") < 4
+                                 else (3, "loads in " + "/".join(path[4:].split("/")[:3])))
+                where = [q.replace(":home/", ":~/.", 1) for q in (s.get("paths") or [])]
                 flags.append({"ts": s.get("first_seen"), "kind": "config", "repo": s["cat"], "name": s["title"], "link": _link(s),
-                              **x, "sentences": fs, "retired_since": retired.get(x["term"]) or first, "acknowledged": None,
+                              "where": where, "weight": weight, "loads": reach, **x, "sentences": fs, "retired_since": retired.get(x["term"]) or first, "acknowledged": None,
                               "reason": f"a loading config file names {x['term']!r} as a place in use ({x['cue']}): it enforces the retired thing"})
         for c in commits(root, forbids):
             f = [x for x in flag(c["text"] or "", forbids) if not ((retired.get(x["term"]) or first) and c["ts"] < str(retired.get(x["term"]) or first))]
@@ -273,10 +290,11 @@ def rule(root: str, phrase: str, forbids: list[str] | None = None, since: str | 
                 x = f[0]
                 since_t = retired.get(x["term"]) or first
                 flags.append({"ts": c["ts"], "kind": "commit", "repo": c["repo"], "name": f"{str(c['hash'])[:7]} {c['title'] or ''}".strip(),
-                              "link": _link(c), **x, "sentences": f, "retired_since": since_t, "acknowledged": None,
+                              "link": _link(c), "where": [c["repo"]], "weight": 5, "loads": "history (a commit message)", **x, "sentences": f, "retired_since": since_t, "acknowledged": None,
                               "reason": f"a commit names {x['term']!r} as a place in use ({x['cue']}), {c['ts'][:10]},"
                                         f" after the rule named it retired ({str(since_t)[:10]})"})
-        flags.sort(key=lambda g: str(g["ts"]))
+        # enforcement first: a global CLAUDE.md that loads everywhere, then skills, tree-level and repo files, notes, commits
+        flags.sort(key=lambda g: (g["weight"], str(g["ts"])))
 
     digs: dict[str, Json] = {}
     if searched is None:
@@ -297,11 +315,17 @@ def rule(root: str, phrase: str, forbids: list[str] | None = None, since: str | 
     dug = sorted(digs.values(), key=lambda d: str(d["first"]))
 
     live = [g for g in flags if not g["acknowledged"]]
+    swept = {"memory": len(notes), "config": swept_config if forbids else 0, "commit": commit_total(root) if forbids else 0}
+    live_by = {k: sum(1 for g in live if g["kind"] == k) for k in swept}
+    given_terms = [t for t in forbids if retired_by.get(t) == "given"]
     globals_now = [c for c in config if c["global"] and c["current"]]
     triple = {"reissued": 0, "candidates": len(rest), "dug": len(dug), "contradicted": len(live) if forbids else None,
-              "flagged": len(flags) if forbids else None}
+              "flagged": len(flags) if forbids else None, "swept": swept if forbids else None, "live_by": live_by if forbids else None}
     line = (f"re-issued {triple['reissued']} bound · candidates {triple['candidates']} · dug for {triple['dug']} · "
-            + (f"contradicted {triple['contradicted']} live ({triple['flagged']} flagged)" if forbids else "contradicted ? (pass forbids)"))
+            + (f"contradicted {len(live)} live ({len(flags)} flagged) of {sum(swept.values()):,} swept: {live_by['config']} of"
+               f" {swept['config']:,} config sections, {live_by['commit']} of {swept['commit']:,} commits, {live_by['memory']} of"
+               f" {swept['memory']:,} memory notes · retirement dates: {len(given_terms)} given ({', '.join(given_terms) or 'none'}),"
+               f" {len(forbids) - len(given_terms)} derived" if forbids else "contradicted ? (pass forbids)"))
     return {"phrase": phrase, "key": key, "words": words, "forbids": forbids, "triple": triple, "line": line,
             "restatements": rest, "config": config,
             "reachability": {

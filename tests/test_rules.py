@@ -181,13 +181,32 @@ def test_the_triple_counts_digs_from_recorded_chains(tmp_path):
     ])
     r = rules.rule(root, "tailscale only", forbids=FORBIDS)
     assert [d["root"] for d in r["digs"]] == ["c15b98d7c4"] and r["digs"][0]["found"]
-    assert r["triple"] == {"reissued": 0, "candidates": 9, "dug": 1, "contradicted": 2, "flagged": 4}
-    assert r["line"] == "re-issued 0 bound · candidates 9 · dug for 1 · contradicted 2 live (4 flagged)"
+    assert {k: r["triple"][k] for k in ("reissued", "candidates", "dug", "contradicted", "flagged")} == \
+        {"reissued": 0, "candidates": 9, "dug": 1, "contradicted": 2, "flagged": 4}
+    assert r["triple"]["live_by"] == {"memory": 1, "config": 0, "commit": 1}
+    assert r["line"].startswith("re-issued 0 bound · candidates 9 · dug for 1 · contradicted 2 live (4 flagged) of ")
+    assert "1 of 2 commits" in r["line"] and "retirement dates: 0 given (none), 6 derived" in r["line"]
     given = rules.rule(root, "tailscale only", forbids=FORBIDS, retired_at={"netbird": "2026-10-22"})
     assert given["retired"]["netbird"] == "2026-10-22" and given["retired_by"]["netbird"] == "given"
+    assert "retirement dates: 1 given (netbird), 5 derived" in given["line"]
     assert "ats-netbird-ip-literal" not in [x["name"] for x in given["contradictions"]]   # 10-07: before the given date
     other = rules.rule(root, "gb300 power cap")
     assert other["triple"]["dug"] == 1 and other["triple"]["contradicted"] is None   # no forbids: K is not computed
+
+
+def test_enforcement_flags_come_first_with_their_account(tmp_path):
+    """A global CLAUDE.md that still names the retired route loads into every session: it leads the list, labeled with
+    the account and home it lives in (nexus, 2026-10-29: nat@white's host table)."""
+    root = str(tmp_path)
+    fleet(root)
+    put_config(root, "white", "nat", "home/claude/CLAUDE.md", "# nat\n\n## Fleet — SSH Hosts\n\n| mba | 192.168.1.187 | mba.local | LAN |\n")
+    put_config(root, "white", "nat", "home/claude/skills/hey/SKILL.md", "# hey\n\n## Fleet machine names\n\n| mba | mba.wg / 10.20.0.3 | WireGuard |\n")
+    config.build(root)
+    r = rules.rule(root, "tailscale only", forbids=FORBIDS + ["10.20.0."], retired_at={"10.20.0.": "2026-10-22"})
+    top = r["contradictions"][:2]
+    assert [x["loads"] for x in top] == ["loads into every session of nat@white", "a skill of nat@white"]
+    assert top[0]["where"] == ["nat@white:~/.claude/CLAUDE.md"] and top[1]["where"] == ["nat@white:~/.claude/skills/hey/SKILL.md"]
+    assert r["triple"]["live_by"]["config"] == 2 and r["contradictions"][-1]["kind"] == "commit"
 
 
 def test_cwd_of_needs_a_known_directory():
