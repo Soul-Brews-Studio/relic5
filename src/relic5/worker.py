@@ -63,6 +63,9 @@ def gb300(rows: list[Json], model: str) -> list[list[float]]:
     trip, resumable. Run in relic4's own venv with a scratch RELIC4_ROOT, so its shards land here, not in relic4's cache."""
     import tempfile, pyarrow as pa, pyarrow.parquet as pq
     d = tempfile.mkdtemp(prefix="relic5-gb300-")
+    # relic4 rsyncs each result shard into RELIC4_ROOT/vec/_cache/<model@hash>/ and does not create that folder:
+    # without it every run failed at the rsync (exit 3) after gb300 had done the work (2026-10-29)
+    os.makedirs(os.path.join(d, "vec", "_cache", model), exist_ok=True)
     src = os.path.join(d, "missing.parquet")
     pq.write_table(pa.table({"key": [r["key"] for r in rows], "text": [r["text"] for r in rows]}), src)
     out = subprocess.run([os.path.join(RELIC4, ".venv/bin/python"), "-c",
