@@ -54,9 +54,10 @@ pet-studio:
 
 # The Rust CLI (cli/) on a client machine: the Python core as relic5-core (uv tool), then the Rust binary at
 # ~/.local/bin/relic5 (the uv tool writes a Python `relic5` there too; the Rust one replaces it). Rerun after
-# `uv tool upgrade relic5`, which puts the Python one back.
+# `uv tool upgrade relic5`, which puts the Python one back. A Mac gets the `embed` extra (torch): without it
+# `relic5 embed` dies at `import torch` (m5, 2026-10-29).
 cli:
-    uv tool install --force --reinstall "$(pwd)"
+    if [ "$(uname)" = Darwin ]; then uv tool install --force --reinstall "$(pwd)[embed]"; else uv tool install --force --reinstall "$(pwd)"; fi
     just cli-bin
     @command -v relic5-core && relic5-core --version
 
