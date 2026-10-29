@@ -143,18 +143,18 @@ def search(relic: "Relic5", index: "Index", query: str, since: str | None = None
     if sort not in (None, "", "relevant", "newest"):
         raise UsageError("sort is relevant | newest")
     words = query.split()
-    if with_ in ("memory", "git", "discord"):   # memory notes, git commits or Discord messages alone, not mixed with talk
+    if with_ in ("memory", "config", "git", "discord"):   # memory notes, config files, git commits or Discord messages alone, not mixed with talk
         if with_ == "discord":
             from .discord import guard
             guard()   # never through the public MCP (discord.py)
         layers = [with_]
     else:
-        layers = ["prose"] + ([w for w in (with_ or "").split(",") if w] if with_ != "all" else ["tools", "thinking", "memory", "git"])
+        layers = ["prose"] + ([w for w in (with_ or "").split(",") if w] if with_ != "all" else ["tools", "thinking", "memory", "config", "git"])
     layers = ["prose" if l == "vault" else l for l in layers]
     layers = list(dict.fromkeys(layers))
     for l in layers:
-        if l not in ("prose", "tools", "thinking", "memory", "git") and layers != ["discord"]:
-            raise UsageError(f"with {l}: one of tools, thinking, vault, memory, git, all; or discord alone")
+        if l not in ("prose", "tools", "thinking", "memory", "config", "git") and layers != ["discord"]:
+            raise UsageError(f"with {l}: one of tools, thinking, vault, memory, config, git, all; or discord alone")
     try:
         lo, hi, _ = window(since, until, None)
     except ValueError as ex:

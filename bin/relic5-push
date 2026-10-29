@@ -15,7 +15,7 @@ set -u
 STAMP=                                          # set by bin/relic5-install on a copy outside this checkout
 # What this push sends, as a number: bumped only when the behaviour changes (streams, meta files, _sync.json, local
 # hub...). relic_status compares this, not the git hash, which differs after every commit (relic4-scan, 2026-10-23).
-PUSH_FORMAT=8
+PUSH_FORMAT=9
 # The ssh target. RELIC5_HUB_SSH wins; RELIC5_HUB may be the hub's HTTP url (relic-chain sets it for its SYNC check):
 # then the ssh target is nat@<its host>, not the url.
 HUB="${RELIC5_HUB_SSH:-${RELIC5_HUB:-nat@white.follow-rankine.ts.net}}"
@@ -176,6 +176,145 @@ for H in "$HOME"/.claude "$HOME"/.claude-* ${RELIC5_MEMORY_ROOTS:-}; do
     "$H/projects/" "$R$target/memory/$name/" 2>&1) || { echo "$out" >&2; rc=1; continue; }
   report "memory:$name" "$out"
 done
+# Config files, raw (relic5 config.py makes them the "config" search layer, issue #269): where a rule is enforced, not
+# only remembered. Per account: ~/.claude*/CLAUDE.md and AGENTS.md, ~/.codex/AGENTS.md, every SKILL.md under
+# ~/.claude*/skills and ~/.claude*/plugins/cache; the ghq tree's own CLAUDE.md / AGENTS.md (the root, each host, each
+# org: in no repo) and every CLAUDE.md / AGENTS.md git knows in a repo of `ghq list`. Copied into a fresh staging folder
+# (~/.cache/relic5/config/<user>), then -> parts/<machine>/config/<user>/, with _files.json listing what was sent.
+# Only those three file names are read; settings.json, .envrc, .env*, *.pem, *.key, *.conf never are. A file holding
+# anything key-shaped is refused whole before it leaves the machine (the same check as relic5 config.key_shaped; the
+# block between the KEY_SHAPED markers is kept identical, tests/test_config.py compares them). RELIC5_CONFIG=0: off;
+# RELIC5_CONFIG_STAGE moves the staging folder.
+if [ "${RELIC5_CONFIG:-1}" != 0 ] && command -v python3 >/dev/null 2>&1; then
+  CUSER=$(id -un | tr 'A-Z' 'a-z')
+  CSTAGE="${RELIC5_CONFIG_STAGE:-$HOME/.cache/relic5/config}/$CUSER"
+  case "$CUSER" in *[!a-z0-9_-]*|"") echo "config: bad account name '$CUSER'" >&2; rc=1;; *)
+  # GNU stat first (see the git block below). Re-collected at most every RELIC5_CONFIG_EVERY seconds (default 3600:
+  # a full pass reads every repo's file list, 35 s on m5's 1,334 repos); between, the staged copy is sent as it is.
+  cage=$(( $(date +%s) - $(stat -c %Y "$CSTAGE/_files.json" 2>/dev/null || stat -f %m "$CSTAGE/_files.json" 2>/dev/null || echo 0) ))
+  if [ "$cage" -lt "${RELIC5_CONFIG_EVERY:-3600}" ] || python3 - "$CSTAGE" "$(ghq root 2>/dev/null || true)" "$HOME" <<'PY'; then
+import json, math, os, re, shutil, subprocess, sys, time
+stage, groot, home = sys.argv[1], sys.argv[2], sys.argv[3]
+NAMES = ("CLAUDE.md", "AGENTS.md", "SKILL.md")
+# KEY_SHAPED begin
+_VAL = r"[\"']?(?=[\w~+/=-]*\d)(?=[\w~+/=-]*[A-Za-z])[\w~+/=-]{16,}(?![\w.~+/=-])"
+KEY_SHAPED = [
+    ("private-key-block", re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----")),
+    ("wireguard-key", re.compile(r"(?im)^\s*(?:PrivateKey|PresharedKey)\s*=\s*[A-Za-z0-9+/]{42,43}=")),
+    ("github-token", re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,})")),
+    ("api-key", re.compile(r"\bsk-(?:ant-|proj-)?[A-Za-z0-9_-]{24,}")),
+    ("slack-token", re.compile(r"\bxox[abprs]-[A-Za-z0-9-]{10,}")),
+    ("aws-key", re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b")),
+    ("google-key", re.compile(r"\bAIza[0-9A-Za-z_-]{35}\b")),
+    ("jwt", re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}")),
+    ("bearer", re.compile(r"(?i)\bbearer\s+" + _VAL)),
+    ("secret-assigned", re.compile(r"(?i)\b(?:api[_-]?key|secret|token|password|passwd|client[_-]?secret|access[_-]?key)"
+                                   r"\b[\"']?\s*[:=]\s*" + _VAL)),
+]
+_RUN = re.compile(r"[A-Za-z0-9+/]{24,}")
+
+
+def _entropy(s: str) -> float:
+    n = len(s)
+    return -sum(c / n * math.log2(c / n) for c in (s.count(ch) for ch in set(s)))
+
+
+def key_shaped(text: str) -> "str | None":
+    for name, rx in KEY_SHAPED:
+        m = rx.search(text)
+        if m:
+            return f"{name} line {text.count(chr(10), 0, m.start()) + 1}"
+    for m in _RUN.finditer(text):
+        s = m.group(0).strip("/")
+        if (m.start() and text[m.start() - 1] == "/") or "/" in s and "://" in text[max(0, m.start() - 200):m.start()]:
+            continue   # a URL's path segment, not a value
+        if len(s) >= 24 and any(c.isupper() for c in s) and any(c.islower() for c in s) and any(c.isdigit() for c in s) \
+                and _entropy(s) >= 4.2:
+            return f"high-entropy line {text.count(chr(10), 0, m.start()) + 1}"
+    return None
+# KEY_SHAPED end
+want = []   # (source, rel under the stage)
+
+
+def walk(top, rel):   # every SKILL.md under top; follows symlinked skill folders once each
+    seen = set()
+    for d, dirs, fs in os.walk(top, followlinks=True):
+        r = os.path.realpath(d)
+        if r in seen:
+            dirs[:] = []
+            continue
+        seen.add(r)
+        dirs[:] = [x for x in dirs if not x.startswith(".") and x != "node_modules"]
+        if "SKILL.md" in fs:
+            want.append((os.path.join(d, "SKILL.md"), os.path.join(rel, os.path.relpath(d, top), "SKILL.md")))
+
+
+for h in sorted(os.listdir(home)):
+    H = os.path.join(home, h)
+    if not (h == ".codex" or h == ".claude" or h.startswith(".claude-")) or not os.path.isdir(H):
+        continue
+    base = os.path.join("home", h[1:])
+    for n in ("CLAUDE.md", "AGENTS.md"):
+        if os.path.isfile(os.path.join(H, n)):
+            want.append((os.path.join(H, n), os.path.join(base, n)))
+    if os.path.isdir(os.path.join(H, "skills")):
+        walk(os.path.join(H, "skills"), os.path.join(base, "skills"))
+    if os.path.isdir(os.path.join(H, "plugins", "cache")):
+        walk(os.path.join(H, "plugins", "cache"), os.path.join(base, "plugins", "cache"))
+if groot and os.path.isdir(groot):
+    repos = subprocess.run(["ghq", "list"], capture_output=True, text=True).stdout.split()
+    dirs = {""}
+    for r in repos:
+        p = r.split("/")
+        if p[0].startswith(("_", ".")):
+            continue   # _archive/, .rescue-husks-*/: copies listed again under their host
+        dirs |= {p[0], "/".join(p[:2])}
+    for d in sorted(dirs):
+        for n in ("CLAUDE.md", "AGENTS.md"):
+            src = os.path.join(groot, d, n)
+            if os.path.isfile(src):
+                want.append((src, os.path.join("ghq", d, n)))
+    for r in repos:
+        if r.split("/")[0].startswith(("_", ".")):
+            continue
+        top = os.path.join(groot, r)
+        out = subprocess.run(["git", "-C", top, "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--",
+                              ":(glob)**/CLAUDE.md", ":(glob)**/AGENTS.md"], capture_output=True, text=True).stdout
+        for f in sorted(set(x for x in out.split("\0") if x)):
+            if os.path.basename(f) in NAMES and not f.startswith(("wt/", "node_modules/")) and "/node_modules/" not in f:
+                if os.path.isfile(os.path.join(top, f)):
+                    want.append((os.path.join(top, f), os.path.join("ghq", r, f)))
+shutil.rmtree(stage, ignore_errors=True)   # our own staging copy: rebuilt every push, so a removed file goes too
+os.makedirs(stage)
+sent, refused = [], []
+for src, rel in want:
+    try:
+        if os.path.getsize(src) > 1 << 20:
+            refused.append({"rel": rel, "why": "over 1 MB"})
+            continue
+        text = open(src, encoding="utf-8", errors="replace").read()
+    except OSError:
+        continue
+    why = key_shaped(text)
+    if why:
+        refused.append({"rel": rel, "why": why})
+        continue
+    dst = os.path.join(stage, rel)
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    shutil.copy2(src, dst)
+    sent.append(rel)
+json.dump({"files": sorted(set(sent)), "refused": refused, "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())},
+          open(os.path.join(stage, "_files.json"), "w"), indent=1)
+for r in refused:
+    print(f"config refused {r['rel']}: {r['why']}", file=sys.stderr)
+PY
+    if [ -n "$DRY" ] || on_hub "mkdir -p '$target/config/$CUSER'"; then
+      out=$(rsync -a $DRY --timeout=120 --stats "$CSTAGE/" "$R$target/config/$CUSER/" 2>&1) || { echo "$out" >&2; rc=1; }
+      report "config:$CUSER" "$out"
+    fi
+  else rc=1; fi ;;
+  esac
+fi
 # Git commits, raw (relic5 gitlog.py makes them the "git" search layer): the work from before any transcript survived.
 # Claude Code co-wrote commits from 2025-03-25, but the oldest transcript left is 2025-09-19 (Claude Code deletes
 # transcripts after 30 days by default). One `git log --all` per repo of `ghq list` -> parts/<machine>/git/<host>/<org>/<repo>.log,
