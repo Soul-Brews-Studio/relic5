@@ -348,6 +348,18 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
         except (UsageError, WindowError) as ex:
             return JSONResponse({"error": str(ex)}, status_code=400)
 
+    @app.get("/api/rule", response_model=None)
+    def rule_route(phrase: str = "", forbids: str = "", since: str = "", until: str = "", retired: str = "") -> Response | Json:
+        """One rule's chain (rules.py): restatements, config sections, reachability, contradictions, digs, the triple.
+        forbids: comma-separated retired things; retired: term=date,... when the data cannot date a term."""
+        from . import rules
+        from .query import UsageError
+        try:
+            ra = dict(x.split("=", 1) for x in retired.split(",") if "=" in x)
+            return rules.rule(relic.parts.root, phrase, [f for f in forbids.split(",") if f.strip()], since or None, until or None, retired_at=ra)
+        except UsageError as ex:
+            return JSONResponse({"error": str(ex)}, status_code=400)
+
     @app.get("/api/saved", response_model=None)
     def saved_list() -> Json:
         from . import trace
