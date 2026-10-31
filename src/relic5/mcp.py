@@ -44,7 +44,7 @@ SEARCH_PROPS = {
     "home": {**STR, "description": "whose .claude (or .codex) the message was written in, a substring of its folder, case-blind: "
              "/Users/nat/.claude, beta/.claude, .claude1, a project's own .../.claude-hello/.claude. relic_homes lists them"},
     "title": {**STR, "description": "sessions whose host title contains this (case-blind)"},
-    "with": {**STR, "enum": ["tools", "thinking", "vault", "memory", "git", "discord", "all"], "description": "also search tool calls, thinking, ψ notes, or all; memory = only the agents' memory notes (rules, decisions, references; role memory-feedback / memory-project / memory-reference / memory-user); git = only git commits of every ghq repo, back to 2025 when no transcript survives (role commit-claude = Claude co-wrote it, commit-codex, commit); discord = only messages of our Discord servers (maw atlas backups; role discord / discord-bot; cat = the server, title = #channel › thread; not part of all)"},
+    "with": {**STR, "enum": ["tools", "thinking", "vault", "memory", "config", "git", "discord", "all"], "description": "also search tool calls, thinking, ψ notes, or all; memory = only the agents' memory notes (rules, decisions, references; role memory-feedback / memory-project / memory-reference / memory-user); config = only the config files that load into sessions, one row per ## section: every CLAUDE.md / AGENTS.md of the ghq tree and ~/.claude*, every skill's SKILL.md (role config-claudemd / config-agentsmd / config-skill; ts = the rule's own date when its heading has one; secrets are never indexed); git = only git commits of every ghq repo, back to 2025 when no transcript survives (role commit-claude = Claude co-wrote it, commit-codex, commit); discord = only messages of our Discord servers (maw atlas backups; role discord / discord-bot; cat = the server, title = #channel › thread; not part of all)"},
     "limit": {"type": "integer", "minimum": 1, "description": f"default {DEFAULT_LIMIT}"},
     "cursor": {**STR, "description": "next_cursor from a previous result"},
     "semantic": {"type": "boolean", "description": "route to semantic search (errors if unavailable)"},
@@ -141,6 +141,19 @@ TOOLS = [
      "agent's relic_found, or Nat's \"Keep this hit\" on the Search page) with their links, and the chains. since/until: "
      "YYYY-MM-DD (a Bangkok day), an ISO time, or Nd/Nh before now; default the last 24 hours.",
      "inputSchema": {"type": "object", "properties": {"since": STR, "until": STR, "limit": INT}, "additionalProperties": False}},
+    {"name": "relic_rule", "description": "One rule's chain, from what relic5 already holds (memory notes, config files, "
+     "search chains): the memory notes that restate it, oldest first (candidates until a rule event binds them), the "
+     "CLAUDE.md / AGENTS.md / SKILL.md sections that carry every word of the phrase (dated by their heading, or seen since "
+     "the first push), whether each restatement was reachable: the config files that load at its cwd, walked up the real "
+     "parent chain, then and now; with forbids (the retired things: netbird, 192.168., black.local), every note or config "
+     "section after the term's retirement that names one as a place in use, with its reason, and whether it is marked "
+     "superseded; the search chains that dug for it. triple: re-issued (bound) · candidates · dug for · contradicted live "
+     "(of flagged). Read-only: it never edits a file. The rule still lives in CLAUDE.md, not here.",
+     "inputSchema": {"type": "object", "properties": {"phrase": STR, "forbids": {"type": "array", "items": STR}, "since": STR,
+                     "until": STR, "retired_at": {"type": "object", "additionalProperties": STR, "description":
+                     "a retired thing's date when the data cannot tell it ({\"wireguard\": \"2026-10-22\"}); otherwise each "
+                     "term's date is its first negated restatement or the config section that names it"}},
+                     "required": ["phrase"], "additionalProperties": False}},
     {"name": "relic_searched", "description": "Search what was already searched, before searching again: with query, the past "
      "searches, found notes (goal, how, found) and tags whose words match, grouped by chain, the ones that found something "
      "first, each with its queries, best hit count, first links and found notes. With link (a relic5:// link or a msgkey): "
@@ -246,6 +259,16 @@ def run_tool(relic: Relic5, name: str, a: Json, door: str | None = None) -> Json
             return trace.asked(relic.parts.root, _str(a, "since") or ("1d" if not a.get("until") else None), _str(a, "until"), min(_int(a, "limit", 1) or 50, 500))
         except WindowError as ex:
             raise UsageError(str(ex))
+    if name == "relic_rule":
+        from . import rules
+        _check(a, ["phrase", "forbids", "since", "until", "retired_at"])
+        fb = a.get("forbids") or []
+        ra = a.get("retired_at") or {}
+        if not isinstance(fb, list) or not all(isinstance(x, str) for x in fb):
+            raise UsageError("forbids: a list of strings")
+        if not isinstance(ra, dict) or not all(isinstance(v, str) for v in ra.values()):
+            raise UsageError("retired_at: {term: date}")
+        return rules.rule(relic.parts.root, _str(a, "phrase") or "", fb, _str(a, "since"), _str(a, "until"), retired_at=ra)
     if name == "relic_searched":
         from . import trace
         from .window import WindowError

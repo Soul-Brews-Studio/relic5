@@ -130,6 +130,11 @@ def status(root: str, now: _datetime | None = None) -> Json:
     copy = copy_of(p.root)
     if not copy:   # a copy gets no pushes, backups or seals of its own: those checks belong to the live hub
         warnings += SD.overdue(seal_days, now)
+    from . import config as C
+    cref = C.refused(p.root)
+    if cref:   # a refused file loses every rule in it from the config layer: say which, so a climbing count is seen
+        warnings.append(f"config: {len(cref)} file(s) refused as key-shaped, not indexed: " + ", ".join(
+            f"{r['user']}@{r['machine']}:{r['rel']} ({r['why']})" for r in cref[:5]) + (" ..." if len(cref) > 5 else ""))
     from .jobs import last_done
     # the tail (evs) first; a nightly event older than the tail is still the last backup, not "no backup yet"
     backup = last_backup(evs, now) if any(e.get("verb") == "backup" and e.get("state") == "done" for e in evs) \
@@ -205,6 +210,8 @@ def status(root: str, now: _datetime | None = None) -> Json:
         "offsite": offsite,
         "copy": copy,
         "memory": __import__("relic5.memory", fromlist=["counts"]).counts(p.root),
+        "config": __import__("relic5.config", fromlist=["counts"]).counts(p.root),
+        "config_refused": cref,   # [{machine, user, rel, why}]: path and rule, never the text
         "git": __import__("relic5.gitlog", fromlist=["counts"]).counts(p.root),
         # server names are not for the public door (discord.py)
         "discord": None if __import__("relic5.discord", fromlist=["PUBLIC"]).PUBLIC.get() else __import__("relic5.discord", fromlist=["counts"]).counts(p.root),

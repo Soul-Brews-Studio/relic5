@@ -388,7 +388,7 @@ class Relic5:
                 layer = s
                 break
         # a memory note (memory.py) or a git commit (gitlog.py): its own table, no session neighbours
-        for side, (d, f), what in (("memory", ("_memory", "notes.parquet"), "memory note"), ("git", ("_git", "commits.parquet"), "git commit"),
+        for side, (d, f), what in (("memory", ("_memory", "notes.parquet"), "memory note"), ("config", ("_config", "sections.parquet"), "config section"), ("git", ("_git", "commits.parquet"), "git commit"),
                                    ("discord", ("_discord", "messages.parquet"), "Discord message")):
             mp = os.path.join(self.parts.root, "index", d, f)
             if parts or not rfs.exists(mp):
@@ -400,7 +400,8 @@ class Relic5:
                     guard()   # never through the public MCP (discord.py)
                 t = hit[0] | {"link": f"relic5://{hit[0]['month']}/{msgkey}", "uid": msgkey}
                 note = f"{what} ({t['role']}) from {t['path']}" + (f", {t['hash']} in {', '.join(t['repos'])}" if side == "git" else
-                                                                     f", {t['guild_name']} {t['title']}" if side == "discord" else "")
+                                                                     f", {t['guild_name']} {t['title']}" if side == "discord" else
+                                                                     f", {'current' if t['current'] else 'an older wording, last seen ' + t['last_seen']} in {len(t['paths'])} place(s)" if side == "config" else "")
                 return {"link": t["link"], "target": t, "notes": [note], "parts": [t], "before": [], "after": [], "raw": None, "layer": side}
         if not parts:
             raise NotFound(f"no message {msgkey}" + (f" in {month}" if month else ""))

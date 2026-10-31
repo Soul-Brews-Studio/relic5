@@ -1,0 +1,48 @@
+#!/bin/sh
+# relic5 rule check: one rule's triple from the live hub (GET /api/rule, rules.py), the live counterpart of
+# tests/test_rules.py, whose fixtures cannot follow the real notes as they change.
+#
+#   bin/relic5-rule-check                                 # the tailscale rule, with its retired things
+#   bin/relic5-rule-check "tailscale only" netbird,wg0    # any phrase, comma-separated forbids
+#   RELIC5_HUB=http://white.follow-rankine.ts.net:8795 bin/relic5-rule-check ...
+#
+# Prints the triple, the restatements (date, repo, note, reachable then / now), the config sections that carry the
+# rule, the flagged notes with their reasons, and the search chains that dug for it. Read-only.
+set -eu
+PHRASE="${1:-tailscale only}"
+FORBIDS="${2:-netbird,wireguard,wg0,wg1,wg-quick,black.local,192.168.,10.10.0.,10.20.0.}"
+# Dates the data cannot tell yet (candidates are unbound until #270): WireGuard stayed the production mesh until Nat's
+# 2026-10-22 order, though an April note already said "not WireGuard". RETIRED= (empty) derives every date.
+RETIRED="${RETIRED-wireguard=2026-10-22,wg0=2026-10-22,wg1=2026-10-22,wg-quick=2026-10-22,10.10.0.=2026-10-22,10.20.0.=2026-10-22}"
+HUB="${RELIC5_HUB:-http://white.follow-rankine.ts.net:8795}"
+curl -fsS -G "$HUB/api/rule" --data-urlencode "phrase=$PHRASE" --data-urlencode "forbids=$FORBIDS" --data-urlencode "retired=$RETIRED" > "${TMPDIR:-/tmp}/relic5-rule.$$.json"
+python3 - "${TMPDIR:-/tmp}/relic5-rule.$$.json" <<'PY'
+import json, sys
+r = json.load(open(sys.argv[1]))
+if "error" in r:
+    sys.exit("relic5 rule: " + r["error"])
+yes = lambda v: "-" if v is None else "yes" if v else "NO"
+t = r["triple"]
+print('rule "%s" (key word %r)' % (r["phrase"], r["key"]))
+print("  " + r["line"])
+print("  retired since: " + ", ".join("%s %s (%s)" % (k, str(v)[:10], r["retired_by"][k][:40]) for k, v in r["retired"].items()))
+print("\nrestatements (candidates until bound, #270): %d" % len(r["restatements"]))
+for x in r["restatements"]:
+    print("  %s  %-34s  %-40s  then %-3s  now %s" % (x["ts"][:10], x["repo"][:34], x["name"][:40], yes(x["reachable_then"]), yes(x["reachable"])))
+print("\ncarried by config now: %d" % len(r["reachability"]["carried_now"]))
+for g in r["reachability"]["global"]:
+    print("  global %s: %s" % (g["scope"], g["since"]))
+for s in r["reachability"]["carried_now"][:12]:
+    print("  " + s)
+print("\ncontradictions, enforcement first: %s live of %s flagged" % (t["contradicted"], t["flagged"]))
+for c in r["contradictions"]:
+    print("  %s  %-6s  %-36s  %s" % (str(c["ts"])[:10], c["kind"], c["name"][:36], c["acknowledged"] or "LIVE"))
+    print("      where: %s  (%s)" % (", ".join(c["where"][:3]) + (" +%d" % (len(c["where"]) - 3) if len(c["where"]) > 3 else ""), c["loads"]))
+    print("      " + c["reason"])
+    print("      \u201c%s\u201d" % c["sentence"][:150])
+print("\ndug for it: %d search chain(s)" % len(r["digs"]))
+for d in r["digs"][:15]:
+    print("  %s  %s  %s%s" % (str(d["first"])[:16], d["root"], " | ".join(d["queries"])[:80], "  (found)" if d["found"] else ""))
+print("\n" + r["reachability"]["note"])
+PY
+rm -f "${TMPDIR:-/tmp}/relic5-rule.$$.json"

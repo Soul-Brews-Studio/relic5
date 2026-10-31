@@ -25,8 +25,8 @@ def explain(relic: object, q: str, with_: str | None = None) -> Json:
         raise UsageError("explain needs a query")
     if not index.built():
         raise UsageError("no index published yet")
-    layers = [with_] if with_ in ("memory", "git") else ["prose"] + (
-        ["tools", "thinking", "memory", "git"] if with_ == "all" else [w for w in (with_ or "").split(",") if w in ("tools", "thinking")])
+    layers = [with_] if with_ in ("memory", "config", "git") else ["prose"] + (
+        ["tools", "thinking", "memory", "config", "git"] if with_ == "all" else [w for w in (with_ or "").split(",") if w in ("tools", "thinking")])
     index._load()   # the generation now, so the cache never answers from an older index
     key = (q.strip(), ",".join(layers), index.seen)
     if key in _cache:
