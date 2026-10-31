@@ -364,7 +364,13 @@ if [ "${RELIC5_DISCORD:-1}" != 0 ] && [ -f "${ATLAS_BLOBS:-$HOME/.maw/atlas-blob
   fi
 fi
 # What this machine runs, so the hub can tell when machines differ (relic_status warns on a mismatch).
-ver() { command -v "$1" >/dev/null 2>&1 && "$1" --version 2>/dev/null | head -1 | sed 's/^[^ ]* //' || echo none; }
+# Over a non-login ssh (white pushing to itself, 2026-10-29) ~/.local/bin and ~/.cargo/bin are not on PATH: look there too,
+# or a machine that runs both tools reports "none" (relic-extract and relic4-scan, room relic5, 2026-10-31).
+ver() {
+  b=$(command -v "$1" 2>/dev/null) || b=
+  for d in "$HOME/.local/bin" "$HOME/.cargo/bin"; do [ -z "$b" ] && [ -x "$d/$1" ] && b="$d/$1"; done
+  [ -n "$b" ] && "$b" --version 2>/dev/null | head -1 | sed 's/^[^ ]* //' || echo none
+}
 here=${STAMP:-$(cd "$(dirname "$0")" && git log -1 --format=%h -- relic5-push 2>/dev/null)}; here=${here:-unknown}   # the commit that last changed this file
 printf '{"machine": "%s", "at": "%s", "relic-scan": "%s", "relic-extract": "%s", "relic5-push": "%s", "push-format": %s, "os": "%s"}\n' \
   "$MACHINE" "$(date '+%FT%T%z')" "$(ver relic-scan)" "$(ver relic-extract)" "$here" "$PUSH_FORMAT" "$(uname -sm)" > "${TMPDIR:-/tmp}/relic5-versions.$$"
