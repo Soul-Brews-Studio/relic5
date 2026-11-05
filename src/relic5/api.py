@@ -5,9 +5,10 @@
   GET  /health
 
 Token: ported from agent-relic-v4 src/relic4/api.py (PR #5 localhost-no-token @febfdb7, PR #6 relic-toml @b399119):
-the bearer check with hmac.compare_digest, the 0600 token file. Changed on purpose, per relic4's advice (2026-10-23):
-no loopback exemption. A hub serves many machines, and a proxy on the same box would make every client look like
-127.0.0.1, so every request shows a token, /health too (an open /health would confirm the service exists; v3 http.ts).
+the bearer check with hmac.compare_digest, the 0600 token file. relic4 advised no loopback exemption (2026-10-23); Nat
+then opened two tokenless doors (doors.py): loopback and his own tailnet nodes, both with a Host check. Everyone else
+shows a token, /health too (an open /health would confirm the service exists; v3 http.ts). No proxy may sit in front
+of the hub: it would make every client look like 127.0.0.1 and walk in through the loopback door.
 
 Parts arrive over ssh (bin/relic5-push), never over HTTP. The routes that write are the hub's own records: tokens
 (Connect), artifacts, and saved searches (trace.py); a POST that changes settings needs X-Relic5-Request: 1.
