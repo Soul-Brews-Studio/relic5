@@ -1,7 +1,7 @@
 //! relic5: the command line. The hub client is here, in Rust: search, show, recap, conversation, readings, handoff,
 //! tail, pending, status, searched, trace, --version, `import` (one manual import), `memory` (relic5's memory notes) and `hindsight` (the Hindsight bank). Every other command (index, serve, seals,
 //! seal-day, token, embed, mcp, tui, eval, gc, log, import repair-meta|relic3|relic3-links|jsonl-truth, --help) is
-//! handed, with the same arguments, to the Python core `relic5-core`, which stays the one implementation of the hub.
+//! handed, with the same arguments (chain, at and arc too), to the Python core `relic5-core`, which stays the one implementation of the hub.
 //! Output, flags and exit codes match the Python CLI (src/relic5/cli.py); tests/test_rust_cli.py compares the two.
 mod cmds;
 mod core;

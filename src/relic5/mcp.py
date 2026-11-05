@@ -80,14 +80,41 @@ TOOLS = [
      "pass next_offset back as offset. role: user | assistant | tool; since/until: Bangkok time 'YYYY-MM-DDTHH:MM'.",
      "inputSchema": {"type": "object", "properties": {"id": STR, "offset": INT, "limit": INT, "role": STR, "since": STR, "until": STR,
                      "tools": {"type": "boolean"}, "parent": PARENT}, "required": ["id"], "additionalProperties": False}},
+    {"name": "relic_recap", "description": "What happened in one session, short: the human's last turns (limit, default 20; "
+     "0 = all), the tools that ran (counts), the files edited, how it ended (the agent's last reply), and when relic-extract "
+     "has read it, the model's reading of the whole session (focus, work, how it ended, open items) and a display_title "
+     "for sessions whose own title says nothing ('hello'). Cheaper than relic_conversation; open that for the full text.",
+     "inputSchema": {"type": "object", "properties": {"id": STR, "limit": INT, "parent": PARENT}, "required": ["id"],
+                     "additionalProperties": False}},
+    {"name": "relic_chain", "description": "Time travel along one worktree: the sessions before and after one session, "
+     "oldest first, each with when (Bangkok), machine, the first ask and the last reply in one line, the files edited and, "
+     "when read, the session reading. Gaps longer than gap_hours (default 6) and sessions that ran in parallel are "
+     "marked. scope: auto (worktree when it holds 2+ sessions, else repo) | worktree (same cwd) | repo | branch; "
+     "before/after: how many each side (default 3). Use it for 'what happened around this session' and /time-travel --chain.",
+     "inputSchema": {"type": "object", "properties": {"id": STR, "before": INT, "after": INT, "scope": STR,
+                     "gap_hours": {"type": "number", "minimum": 0}, "parent": PARENT}, "required": ["id"], "additionalProperties": False}},
+    {"name": "relic_at", "description": "Time travel to one moment: give a hit (relic5:// link or uid) or a Bangkok time "
+     "'YYYY-MM-DD HH:MM'. Returns, for span either side (default 30m; 2h, 1d): the readings whose windows hold the moment "
+     "(15m, 1h, 3h, day, each model), every session running then with what it last said, the commits, the searches made of "
+     "the hub and the found notes, and for a hit its neighbouring turns. Every line has a link to open next.",
+     "inputSchema": {"type": "object", "properties": {"moment": STR, "span": STR, "limit": INT, "parent": PARENT},
+                     "required": ["moment"], "additionalProperties": False}},
+    {"name": "relic_arc", "description": "How a topic began and changed, in one call: the best hits for the words (BM25; "
+     "all words kept when enough hits hold them all), counted per month with sessions, top projects and machines; the "
+     "first and the last hit; turning points (the month's top project changed, or its hits doubled) each with its best "
+     "hit; the day readings and session readings that name it; and earlier found notes on it. since/until narrow it. "
+     "Use it for /time-travel --back and 'when did we start X / how did X evolve'.",
+     "inputSchema": {"type": "object", "properties": {"words": STR, "since": STR, "until": STR, "cap": INT, "parent": PARENT},
+                     "required": ["words"], "additionalProperties": False}},
     {"name": "relic_readings", "description": "What relic-extract's models (gb300 qwen3:14b, z.ai glm-5.3, and the trial models) made of "
      "each stretch of time: per window (day, 3h, 1h, 15m, across every session in it) type, focus, distraction, work, agents, "
      "pattern, en and th summaries, and for deep readings friction and lesson. Newest first. since/until: 'YYYY-MM-DD' or "
      "'YYYY-MM-DD HH:MM' Bangkok time, on the window's start; grain: day | 3h | 1h | 15m; model: substring (gb300, zai); "
      "q: words that must all appear. Answers are a model's reading, not the transcript: open the window with relic_search "
-     "or relic_conversation for what was said.",
+     "or relic_conversation for what was said. kind sessions: one reading per whole session instead (focus, work, how it "
+     "ended, open items), newest first, q filters them.",
      "inputSchema": {"type": "object", "properties": {"since": STR, "until": STR, "grain": STR, "model": STR, "q": STR,
-                     "limit": INT, "offset": INT}, "additionalProperties": False}},
+                     "limit": INT, "offset": INT, "kind": {**STR, "enum": ["windows", "sessions"]}}, "additionalProperties": False}},
     {"name": "relic_hours", "description": "What happened on a day (Bangkok time), hour by hour: odin-oracle's Huginn "
      "hourly flights (who typed what, commits, which oracles worked, the hour's theme) and its daily roll-up, Munin's searches, "
      "and what z.ai / gb300 made of each hour (relic_readings). Start here for 'what happened today / yesterday'. date: "
@@ -205,7 +232,6 @@ INSTRUCTIONS = (
     "earlier searches, found notes and tags on the same question (ask it first), and relic_searched {link} goes from a "
     "message back to the searches that found it.")
 UNAVAILABLE = {
-    "relic_chain": "relic_chain is not available in relic5 (as in relic3 v3)",
     "relic_now": "relic_now is not available in relic5; use relic_sessions with since=1h",
     "relic_pending": "relic_pending is not available in relic5; relic_status reports pending/warnings",
 }
@@ -357,6 +383,33 @@ def run_tool(relic: Relic5, name: str, a: Json, door: str | None = None) -> Json
         lim = _int(a, "limit", 1)
         return conversation(relic, _str(a, "id") or "", offset=_int(a, "offset") or 0, limit=min(lim or 200, 1000),
                             tools=a.get("tools") is True, role=_str(a, "role"), since=_str(a, "since"), until=_str(a, "until"))
+    if name == "relic_recap":
+        from .recap import recap
+        _check(a, ["id", "limit"])
+        lim = _int(a, "limit")
+        return recap(relic, _str(a, "id") or "", 20 if lim is None else min(lim, 2000))
+    if name == "relic_chain":
+        from . import timetravel
+        _check(a, ["id", "before", "after", "scope", "gap_hours"])
+        gh = a.get("gap_hours", 6)
+        if isinstance(gh, str):   # a GET query string (/api/chain?gap_hours=12)
+            try:
+                gh = float(gh)
+            except ValueError:
+                raise UsageError("gap_hours must be a number >= 0")
+        if isinstance(gh, bool) or not isinstance(gh, (int, float)) or gh < 0:
+            raise UsageError("gap_hours must be a number >= 0")
+        b, f = _int(a, "before"), _int(a, "after")
+        return timetravel.chain(relic, _str(a, "id") or "", 3 if b is None else min(b, 50), 3 if f is None else min(f, 50),
+                                _str(a, "scope") or "auto", float(gh))
+    if name == "relic_at":
+        from . import timetravel
+        _check(a, ["moment", "span", "limit"])
+        return timetravel.at(relic, _str(a, "moment") or "", _str(a, "span") or "30m", min(_int(a, "limit", 1) or 30, 200))
+    if name == "relic_arc":
+        from . import timetravel
+        _check(a, ["words", "since", "until", "cap"])
+        return timetravel.arc(relic, _str(a, "words") or "", _str(a, "since"), _str(a, "until"), min(_int(a, "cap", 10) or 3000, 20000))
     if name == "relic_hours":
         import time as _time
         from . import ravens
@@ -409,11 +462,11 @@ def run_tool(relic: Relic5, name: str, a: Json, door: str | None = None) -> Json
         return out
     if name == "relic_readings":
         from . import readings
-        _check(a, ["since", "until", "grain", "model", "q", "limit", "offset"])
+        _check(a, ["since", "until", "grain", "model", "q", "limit", "offset", "kind"])
         try:
             return readings.readings(relic.parts.root, since=_str(a, "since"), until=_str(a, "until"), grain=_str(a, "grain"),
                                      model=_str(a, "model"), q=_str(a, "q"), limit=min(_int(a, "limit", 1) or 50, 500),
-                                     offset=_int(a, "offset") or 0)
+                                     offset=_int(a, "offset") or 0, kind=_str(a, "kind"))
         except ValueError as ex:
             raise UsageError(str(ex)) from ex
     if name == "relic_artifact_put":

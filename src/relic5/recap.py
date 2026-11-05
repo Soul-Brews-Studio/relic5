@@ -88,7 +88,9 @@ def recap(relic: "Relic5", ident: str, limit: int = 20) -> Json:
             # ties by name: the counts come from an unordered scan, so a plain sort by count gave a new order each call
             "tools": dict(sorted(tools.items(), key=lambda x: (-x[1], x[0]))), "files_edited": dict(sorted(files.items(), key=lambda x: (-x[1], x[0]))),
             "ended": {"ts": last["ts"], "text": (last["text"] or "")[:1200]} if last else None,
-            "more": None if not limit or len(user) <= limit else f"relic5 recap {sid[:8]} --limit 0   ({len(user) - limit} earlier turns)"}
+            "more": None if not limit or len(user) <= limit else f"relic5 recap {sid[:8]} --limit 0   ({len(user) - limit} earlier turns)",
+            # what a model made of the whole session (session_readings.py, #280), when relic-extract has read it
+            "reading": s.get("reading"), "display_title": s.get("display_title")}
 
 
 def handoff(relic: "Relic5", ident: str, user_only: bool = False) -> Json:

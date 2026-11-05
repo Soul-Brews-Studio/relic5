@@ -15,6 +15,7 @@ embedder and the MCP server stay in Python, unchanged.
 | `hindsight …` | m5 | **Rust** (`cli/src/memory.rs`, `top.rs`): the Hindsight bank, its dispatcher workers, the live TUI (docs/HINDSIGHT.md) |
 | `import` (no subcommand) | each machine, by hand | **Rust** (`cli/src/import.rs`, docs/IMPORT.md); `bin/relic5-import` now calls it |
 | `index`, `serve`, `seals`, `seal-day`, `gc`, `log`, `token`, `import repair-meta / relic3 / relic3-links / jsonl-truth` | the hub | Python core |
+| `chain <session>`, `at <moment>`, `arc <words>` | any machine, over the tailnet | Python core (`src/relic5/timetravel.py`): time travel. `chain` = the sessions before and after one in the same worktree (relic3's `session --tree` / `chain`), `at` = everything around one hit or Bangkok time, `arc` = how a topic began and changed. Hub: `/api/chain`, `/api/at`, `/api/arc`; MCP `relic_chain`, `relic_at`, `relic_arc` (and `relic_recap`) |
 | `embed`, `mcp`, `tui`, `eval`, `--help`, no arguments, an unknown command | Mac clients / anywhere | Python core |
 
 A command for the core replaces the Rust process (`exec`), so its output, exit code and signals are the core's own.

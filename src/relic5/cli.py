@@ -25,7 +25,14 @@
   relic5 conversation <session> [--tools] [--role user] [--offset 0] [--limit 0]   the whole session, every turn in full
   relic5 readings [--since D] [--until D] [--grain day|3h|1h|15m] [--model zai] [--q words] [--limit 20]
                                   what gb300 / z.ai made of each window (relic-extract's readings on the hub)
+  relic5 readings --kind sessions [--q words]   one reading per whole session (relic-extract session_readings.py)
   relic5 handoff <session> [--role user]   paste-ready block for a new session's first prompt (relic3 tail --handoff)
+  relic5 chain <session> [--before 3] [--after 3] [--scope auto|worktree|repo|branch] [--gap-hours 6]
+                                  time travel: the sessions before and after one, same worktree; gaps and parallel runs marked
+  relic5 at <relic5://… | uid | 'YYYY-MM-DD HH:MM'> [--span 30m]   everything around one moment: readings, sessions
+                                  running, commits, hub searches, the hit's neighbours
+  relic5 arc <words> [--since D] [--until D] [--cap 3000]   how a topic began and changed: hits per month, first and
+                                  last, turning points, readings and found notes that name it
   relic5 pending                  what is not searchable yet: stale months (BM25), chunks without vectors, push lag
   relic5 tail [--session S] [--machine M] [--n 50] [-f] [--full]   the newest messages as they land, users and agents
                                   (-f: keep following; --full: each whole message, not its first line)
@@ -366,11 +373,24 @@ def _main(argv: list[str] | None = None) -> None:
                 break
             off = r["next_offset"]
     elif cmd == "readings":
-        p = {k: o for k in ("since", "until", "grain", "model", "q", "limit", "offset") if (o := _opt(rest, "--" + k))}
+        p = {k: o for k in ("since", "until", "grain", "model", "q", "limit", "offset", "kind") if (o := _opt(rest, "--" + k))}
         p.setdefault("limit", "20")
         r = call("/api/readings", p)
         if as_json:
             print(json.dumps(r, ensure_ascii=False, indent=1))
+        elif r.get("kind") == "sessions":
+            print(f"{r['total']:,} session readings" + (f"\n{r['note']}" if r.get("note") else ""))
+            for x in r["rows"]:
+                print(f"\n── {(x.get('at') or '')[:16]} {x['sid']}  {x['model']}  {x.get('type') or ''}")
+                print(f"focus: {x.get('focus')}")
+                for w in x.get("work") or []:
+                    print(f"  - {w}")
+                if x.get("ended"):
+                    print(f"ended: {x['ended']}")
+                for o in x.get("open") or []:
+                    print(f"  open: {o}")
+                if x.get("th"):
+                    print(f"th: {x['th']}")
         else:
             print(f"{r['total']:,} readings · " + ", ".join(f"{m} {n:,}" for m, n in r["models"].items()) + (f"\n{r['note']}" if r.get("note") else ""))
             for x in r["rows"]:
@@ -396,8 +416,72 @@ def _main(argv: list[str] | None = None) -> None:
             print("files edited: " + (", ".join(list(r["files_edited"])[:12]) or "none"))
             if r["ended"]:
                 print(f"ended {r['ended']['ts'][:16]}: {' '.join(r['ended']['text'].split())[:300]}")
+            rd = r.get("reading")
+            if rd:
+                print(f"reading ({rd.get('model')}): {rd.get('focus')}")
+                for o in rd.get("open") or []:
+                    print(f"  open: {o}")
             if r["more"]:
                 print(r["more"])
+    elif cmd == "chain" and rest:
+        p = {"id": rest[0]} | {k: o for k in ("before", "after", "scope", "gap-hours") if (o := _opt(rest, "--" + k))}
+        p = {k.replace("-", "_"): v for k, v in p.items()}
+        r = call("/api/chain", p)
+        if as_json:
+            print(json.dumps(r, ensure_ascii=False, indent=1))
+        else:
+            print(f"{r['scope']} {r['scope_value']}: session {r['position']} of {r['in_scope']}"
+                  + (f"  ({r['more']})" if r.get("more") else ""))
+            for n in r["nodes"]:
+                if n.get("gap_before") == "gap":
+                    print(f"   ┆ {n['gap_before_s'] / 3600:.1f} h gap")
+                elif n.get("gap_before") == "parallel":
+                    print("   ┆ ran in parallel with the one above")
+                mark = "▶" if n["is_target"] else "•"
+                print(f"{mark} {n['start_th']} .. {(n['end_th'] or '')[11:]}  {n['uuid'][:8]} {n['machine']}  {n.get('title') or ''}")
+                if n.get("first_ask"):
+                    print(f"     asked: {n['first_ask']}")
+                if n.get("last_reply"):
+                    print(f"     ended: {n['last_reply']}")
+                if n.get("files_edited"):
+                    print("     edited: " + ", ".join(n["files_edited"]))
+    elif cmd == "at" and rest:
+        p = {"moment": rest[0]} | {k: o for k in ("span", "limit") if (o := _opt(rest, "--" + k))}
+        r = call("/api/at", p)
+        if as_json:
+            print(json.dumps(r, ensure_ascii=False, indent=1))
+        else:
+            print(f"at {r['moment_th']} (Bangkok), {r['from_th']} .. {r['to_th'][11:]}")
+            for x in r["readings"]:
+                print(f"  reading {x['grain']:>3} {x['start'][11:]}-{x['end'][11:]} {x['model']}: {x.get('focus')}")
+            print(f"{len(r['sessions'])} sessions running")
+            for x in r["sessions"]:
+                lt = x.get("last_turn") or {}
+                print(f"  {'▶' if x['is_hit'] else '•'} {x['uuid'][:8]} {x['machine']}  {x.get('title') or ''}")
+                if lt.get("text"):
+                    print(f"      {lt.get('at_th') or ''} {lt.get('role')}: {lt['text']}")
+            for c in r["commits"]:
+                print(f"  commit {c['at_th']} {c['repo']} {c['hash'][:8]}  {c['title']}")
+            for q in r["searches"]:
+                print(f"  searched: {q['query']} ({q['times']}x, {q['hits']} hits)")
+    elif cmd == "arc" and rest:
+        rest2 = list(rest)
+        p = {k: o for k in ("since", "until", "cap") if (o := _opt(rest2, "--" + k))}
+        p["words"] = " ".join(w for w in rest2 if not w.startswith("--"))
+        r = call("/api/arc", p)
+        if as_json:
+            print(json.dumps(r, ensure_ascii=False, indent=1))
+        else:
+            print(f"arc of '{r['words']}': {r['hits']:,} hits ({r['how']})")
+            for k in ("first", "last"):
+                if r.get(k):
+                    print(f"{k}: {r[k]['at_th']} [{r[k]['project']}] {r[k]['text'][:160]}\n       {r[k]['link']}")
+            for m in r["months"]:
+                print(f"  {m['month']}  {m['hits']:>5} hits  {m['sessions']:>4} sessions  " + ", ".join(f"{k} {v}" for k, v in m["projects"].items()))
+            for t in r["turning_points"]:
+                print(f"turn {t['month']}: {t['why']}\n   {t['hit']['text'][:160]}\n   {t['hit']['link']}")
+            for x in r["readings"][:12]:
+                print(f"  read {x['day']} {x['model']}: {x.get('focus')}")
     elif cmd == "handoff" and rest:
         print(call("/api/handoff", {"id": rest[0], "user_only": "1" if "--role" in rest else "0"})["text"])
     elif cmd == "pending":   # relic3 `pending`: what is not searchable yet, by lane
@@ -409,6 +493,10 @@ def _main(argv: list[str] | None = None) -> None:
             print(f"vectors {model}: " + ", ".join(f"{m} {x['pending']:,} pending (embedded to {x['at']})" for m, x in sorted(per.items())))
         for m, x in sorted(f.get("machines", {}).items()):
             print(f"push {m}: newest row {x['newest_ts']}, pushed {x['pushed_at']}, {x['lag_s']} s behind now")
+        rd = st.get("readings") or {}
+        if rd.get("newest_day"):
+            print(f"readings: newest day {rd['newest_day']}, {rd['lag_days']} days behind"
+                  + (f"; month recap missing: {', '.join(rd['recap_missing'])}" if rd.get("recap_missing") else ""))
     elif cmd == "tail":
         import time as _t
         params = {k: o for k in ("session", "machine", "n") if (o := _opt(rest, "--" + k))}

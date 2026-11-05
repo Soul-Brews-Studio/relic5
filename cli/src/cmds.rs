@@ -184,13 +184,35 @@ pub fn conversation(mut a: Args, json: bool) -> Result<(), Fail> {
 }
 
 pub fn readings(mut a: Args, json: bool) -> Result<(), Fail> {
-    let mut p = flags(&mut a, &["since", "until", "grain", "model", "q", "limit", "offset"])?;
+    let mut p = flags(&mut a, &["since", "until", "grain", "model", "q", "limit", "offset", "kind"])?;
     if !p.iter().any(|(k, _)| k == "limit") {
         p.push(kv("limit", "20"));
     }
     let r = hub::call("/api/readings", &p)?;
     if json {
         println!("{}", dumps(&r));
+        return Ok(());
+    }
+    if r.get("kind").map(s).as_deref() == Some("sessions") {
+        // one reading per whole session (session_readings.py, #280)
+        let note = if py::truthy(r.get("note")) { format!("\n{}", s(&r["note"])) } else { String::new() };
+        println!("{} session readings{note}", commas(g(&r, "total")?));
+        for x in arr(r.get("rows")) {
+            println!("\n── {} {}  {}  {}", head(&text(x.get("at")), 16), gs(&x, "sid")?, gs(&x, "model")?, text(x.get("type")));
+            println!("focus: {}", x.get("focus").map(s).unwrap_or_else(|| "None".into()));
+            for w in arr(x.get("work")) {
+                println!("  - {}", s(&w));
+            }
+            if py::truthy(x.get("ended")) {
+                println!("ended: {}", s(&x["ended"]));
+            }
+            for o in arr(x.get("open")) {
+                println!("  open: {}", s(&o));
+            }
+            if py::truthy(x.get("th")) {
+                println!("th: {}", s(&x["th"]));
+            }
+        }
         return Ok(());
     }
     let models = g(&r, "models")?.as_object().cloned().unwrap_or_default();
@@ -251,6 +273,12 @@ pub fn recap(mut a: Args, json: bool) -> Result<(), Fail> {
     if py::truthy(Some(ended)) {
         println!("ended {}: {}", head(&gs(ended, "ts")?, 16), head(&squash(&gs(ended, "text")?), 300));
     }
+    if let Some(rd) = r.get("reading").filter(|x| py::truthy(Some(x))) {
+        println!("reading ({}): {}", text(rd.get("model")), rd.get("focus").map(s).unwrap_or_else(|| "None".into()));
+        for o in arr(rd.get("open")) {
+            println!("  open: {}", s(&o));
+        }
+    }
     if py::truthy(r.get("more")) {
         println!("{}", s(&r["more"]));
     }
@@ -296,6 +324,12 @@ pub fn pending() -> Result<(), Fail> {
     machines.sort_by(|x, y| x.0.cmp(&y.0));
     for (m, x) in machines {
         println!("push {m}: newest row {}, pushed {}, {} s behind now", gs(&x, "newest_ts")?, gs(&x, "pushed_at")?, gs(&x, "lag_s")?);
+    }
+    // how far behind relic-extract's readings are (readings.freshness, #282)
+    if let Some(rd) = st.get("readings").filter(|x| py::truthy(x.get("newest_day"))) {
+        let missing = arr(rd.get("recap_missing")).iter().map(s).collect::<Vec<_>>();
+        let tail = if missing.is_empty() { String::new() } else { format!("; month recap missing: {}", missing.join(", ")) };
+        println!("readings: newest day {}, {} days behind{tail}", gs(rd, "newest_day")?, gs(rd, "lag_days")?);
     }
     Ok(())
 }
