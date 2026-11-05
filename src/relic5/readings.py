@@ -17,6 +17,7 @@ Unit strings in the file, oldest format first:
 A window read more than once by one model keeps its newest answer.
 """
 import glob, json, os, re, threading
+from datetime import datetime
 
 
 from .types_ import Json
@@ -87,10 +88,15 @@ def files(root: str) -> list[str]:
 
 
 def readings(root: str, since: str | None = None, until: str | None = None, grain: str | None = None,
-             model: str | None = None, q: str | None = None, limit: int = 50, offset: int = 0) -> Json:
+             model: str | None = None, q: str | None = None, limit: int = 50, offset: int = 0, kind: str | None = None) -> Json:
     """Readings newest first. since/until: a date or 'YYYY-MM-DD HH:MM' (Bangkok time, as the windows are),
     compared with the window's start. grain: day | 3h | 1h | 15m. model: substring (gb300, zai, qwen3:14b).
     q: words that must all appear in focus, work, en, th, friction or lesson (case-blind)."""
+    if kind == "sessions":   # one reading per session (session_readings.py), not per window
+        from . import session_readings as SR
+        return SR.listing(root, q, limit, offset)
+    if kind not in (None, "", "windows"):
+        raise ValueError("kind is windows (default) or sessions")
     if grain and grain not in GRAINS:
         raise ValueError(f"grain is one of {', '.join(GRAINS)}")
     src = files(root)
@@ -126,3 +132,51 @@ def readings(root: str, since: str | None = None, until: str | None = None, grai
     if not src:
         out["note"] = "no readings on the hub yet: relic-extract's ~/.relic-extract/report/readings.jsonl is rsynced to <root>/readings/<machine>.jsonl"
     return out
+
+
+STALE_DAYS = 2   # a day is read the next day at the earliest; two days behind means the lane stopped
+
+
+def freshness(root: str, now: datetime | None = None) -> Json:
+    """How far behind the readings are (#282): per machine, model and grain the newest window; the newest day reading
+    and how many days ago it was (Bangkok); closed months after the last sealed recap that have none; the session
+    readings. warnings: what status() should say. The readings stopped on 2026-10-25 and nothing reported it."""
+    from datetime import timedelta, timezone
+    from . import session_readings as SR
+    from .sealday import recap_path
+    now = now or datetime.now(timezone.utc)
+    today = (now.astimezone(timezone.utc) + timedelta(hours=7)).date()
+    newest: dict[str, dict[str, dict[str, str]]] = {}
+    day_months: set[str] = set()
+    newest_day: str | None = None
+    for p in files(root):
+        machine = os.path.splitext(os.path.basename(p))[0]
+        for r in _load(p):
+            g = newest.setdefault(machine, {}).setdefault(r["model"], {})
+            if r["start"] > g.get(r["grain"], ""):
+                g[r["grain"]] = r["start"]
+            if r["grain"] == "day":
+                day_months.add(r["start"][:7])
+                if newest_day is None or r["start"] > newest_day:
+                    newest_day = r["start"]
+    warnings: list[str] = []
+    lag_days = None
+    if newest_day:
+        lag_days = (today - datetime.strptime(newest_day[:10], "%Y-%m-%d").date()).days
+        if lag_days > STALE_DAYS:
+            warnings.append(f"readings: the newest day reading is {newest_day[:10]}, {lag_days} days ago "
+                            "(relic-extract report/readings.py stopped; run it, then relic5-push)")
+    cur = f"{today:%Y-%m}"
+    recaps = {m for m in day_months if os.path.exists(recap_path(root, m))}
+    last_recap = max(recaps, default=None)
+    missing = sorted(m for m in day_months if m < cur and m not in recaps and (last_recap is None or m > last_recap))
+    if missing and last_recap:
+        warnings.append("month recap missing for " + ", ".join(missing) + " (bin/relic5-month-recap " + missing[0] + ")")
+    sfiles = SR.files(root)
+    sess: Json = {"files": [os.path.basename(p) for p in sfiles]}
+    if sfiles:
+        allr = SR._all(root)
+        sess["sessions"] = len(allr)
+        sess["newest_at"] = max((str(r.get("at") or "") for rs in allr.values() for r in rs), default=None)
+    return {"newest_day": newest_day[:10] if newest_day else None, "lag_days": lag_days, "by_machine": newest,
+            "recaps": sorted(recaps), "recap_missing": missing, "sessions": sess, "warnings": warnings}

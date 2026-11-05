@@ -186,6 +186,10 @@ def status(root: str, now: _datetime | None = None) -> Json:
     from . import selfknow
     store, res = selfknow.store(p.root), selfknow.resources()
     warnings += [w.replace("on the hub", "on this machine (a copy of the hub)") if copy else w for w in selfknow.warnings(store, res)]
+    from . import readings as RD
+    rfresh = RD.freshness(p.root, now)
+    if not copy:
+        warnings += rfresh["warnings"]
     q = selfknow.queries(p.root)
     cur = this_month(now)
     sealed = [m for m in months if m != "undated" and m < cur]
@@ -199,6 +203,7 @@ def status(root: str, now: _datetime | None = None) -> Json:
                             for m in months]},
         "weeks": {"total": len(months), "sealed": len(sealed), "open": cur if cur in months else None, "quarantine_rows": 0},
         "freshness": fresh,
+        "readings": rfresh,
         "store": store, "resources": res,
         "queries": {"running": q["running"], "last": q["last"], "per_hour": q["per_hour"], "top": q["top"][:10], "zero_hits": q["zero_hits"][:10]},
         "machines": machines,
