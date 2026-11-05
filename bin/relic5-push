@@ -15,7 +15,7 @@ set -u
 STAMP=                                          # set by bin/relic5-install on a copy outside this checkout
 # What this push sends, as a number: bumped only when the behaviour changes (streams, meta files, _sync.json, local
 # hub...). relic_status compares this, not the git hash, which differs after every commit (relic4-scan, 2026-10-23).
-PUSH_FORMAT=9
+PUSH_FORMAT=10
 # The ssh target. RELIC5_HUB_SSH wins; RELIC5_HUB may be the hub's HTTP url (relic-chain sets it for its SYNC check):
 # then the ssh target is nat@<its host>, not the url.
 HUB="${RELIC5_HUB_SSH:-${RELIC5_HUB:-nat@white.follow-rankine.ts.net}}"
@@ -361,6 +361,22 @@ if [ "${RELIC5_DISCORD:-1}" != 0 ] && [ -f "${ATLAS_BLOBS:-$HOME/.maw/atlas-blob
     out=$(rsync -a $DRY --timeout=120 --stats --exclude='.*' --exclude='*.stamp' --exclude='*.tmp' "$DISC/" "$R$target/discord/" 2>&1) \
       || { echo "$out" >&2; rc=1; }
     report discord "$out"
+  fi
+fi
+# relic-extract's readings (report/readings.jsonl: what the models made of each window) and session readings
+# (report/session-readings.jsonl: one per session, #280) -> <hub root>/readings/<machine>.jsonl and
+# readings/sessions/<machine>.jsonl, where relic_readings and relic_session read them. They were copied by hand until
+# 2026-11-05, and the hub's copy fell 10 days behind without a word (#282). Not for an S3 hub (the readings live on disk).
+RDIR="${RELIC5_READINGS:-$SRC/report}"
+if [ -z "$S3HUB" ] && [ "${RELIC5_PUSH_READINGS:-1}" != 0 ]; then
+  rroot="$home/$(dirname "$DEST")/readings"
+  if [ -s "$RDIR/readings.jsonl" ] && { [ -n "$DRY" ] || on_hub "mkdir -p '$rroot'"; }; then
+    out=$(rsync -a $DRY --timeout=120 --stats "$RDIR/readings.jsonl" "$R$rroot/$MACHINE.jsonl" 2>&1) || { echo "$out" >&2; rc=1; }
+    report readings "$out"
+  fi
+  if [ -s "$RDIR/session-readings.jsonl" ] && { [ -n "$DRY" ] || on_hub "mkdir -p '$rroot/sessions'"; }; then
+    out=$(rsync -a $DRY --timeout=120 --stats "$RDIR/session-readings.jsonl" "$R$rroot/sessions/$MACHINE.jsonl" 2>&1) || { echo "$out" >&2; rc=1; }
+    report session-readings "$out"
   fi
 fi
 # What this machine runs, so the hub can tell when machines differ (relic_status warns on a mismatch).

@@ -562,4 +562,8 @@ class Relic5:
                 "parent": s["parent_sid"], "base": s["base"], "counts": {k: s[k] for k in (
             "text_rows", "text_msgs", "user_text", "assistant_text", "thinking", "tool_calls", "tool_results", "tool_errors")},
                 "subagents": [self._session_row(k) for k in kids]}
+        from . import session_readings as SR
+        reads = SR.of(self.parts.root, s["sid"])
+        out["reading"] = reads[0] if reads else None
+        out["display_title"] = SR.display_title(out.get("name"), out.get("title"), out["reading"])
         return out

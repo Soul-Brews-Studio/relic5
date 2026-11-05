@@ -37,8 +37,10 @@ if TYPE_CHECKING:
     from .tokens import Tokens
 
 ROUTES = {"/api/search": "relic_search", "/api/show": "relic_show", "/api/sessions": "relic_sessions",
-          "/api/session": "relic_session", "/api/status": "relic_status"}
-INT_KEYS = {"limit", "seq", "before", "after"}
+          "/api/session": "relic_session", "/api/status": "relic_status",
+          # time travel (timetravel.py, #278 #279 #281)
+          "/api/chain": "relic_chain", "/api/at": "relic_at", "/api/arc": "relic_arc"}
+INT_KEYS = {"limit", "seq", "before", "after", "cap"}
 STATUS_OF = {"usage": 400, "unavailable": 501, "not_found": 404, "failed": 500}
 
 
@@ -151,7 +153,8 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
         from . import selfknow
         return selfknow.clients(relic.parts.root)
 
-    TRACED = {"relic_search", "relic_show", "relic_session", "relic_sessions", "relic_found"}
+    TRACED = {"relic_search", "relic_show", "relic_session", "relic_sessions", "relic_found", "relic_recap", "relic_chain",
+              "relic_at", "relic_arc"}
 
     def logged(relic_: Relic5, tool: str, args: Json, door: str | None, client: str | None = None) -> mcp.ToolReply:
         """Every tool call, MCP or GET, goes through here: one line in logs/queries.jsonl (selfknow.py), with its trace
@@ -159,7 +162,7 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
         from . import trace
         parent = args.get("parent") if isinstance(args, dict) and isinstance(args.get("parent"), str) else None
         rid = trace.new_id()
-        qid, t0 = selfknow.start(tool, door, (args.get("query") or args.get("goal") or args.get("id") or "") if isinstance(args, dict) else "", client)
+        qid, t0 = selfknow.start(tool, door, (args.get("query") or args.get("goal") or args.get("id") or args.get("words") or args.get("moment") or "") if isinstance(args, dict) else "", client)
         ok, r = mcp.call_tool(relic_, tool, args, door)
         top = None
         try:
