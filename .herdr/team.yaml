@@ -1,0 +1,17 @@
+# The relic5 team. Schema: Soul-Brews-Studio/relic-extract .herdr/SPEC.md
+# session id == this repo's name (relic5). Roster + layout versioned here,
+# not in machine-local ~/.local/state/herdr-room/. Pane ids are NOT stored;
+# they resolve live from `herdr agent list` by repo/cwd at room-build time.
+session: relic5
+layout: fib
+desk: relic5
+members:
+  - name: relic5
+    repo: Soul-Brews-Studio/relic5
+    role: hub            # indexes + serves; folds on (msgkey, chunk)
+  - name: relic-extract
+    repo: Soul-Brews-Studio/relic-extract
+    role: extract        # step 2 — clean + chunk + embed-key; writes parts
+  - name: relic4-scan
+    repo: Soul-Brews-Studio/relic4-scan
+    role: scan           # step 1 — raw scan; owns msgkey (agent-relic-v4 sql.py)
