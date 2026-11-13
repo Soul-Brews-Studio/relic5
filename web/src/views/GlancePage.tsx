@@ -49,7 +49,7 @@ export function checks(s: Status, evs: JobEvent[]): Check[] {
     text: b?.at ? `Snapshot of ${bytes(b.bytes)} on ${b.host}, restore-tested. Backups run by hand since 2026-10-26 (no nightly job).` : "No snapshot of the hub exists yet.",
     command: stale ? "bin/relic5-backup && bin/relic5-restore-test" : undefined });
   const d = s.store.disk.free_pct;
-  out.push({ key: "disk", title: s.copy ? "Disk on this machine" : "Disk on white", icon: Disk, level: d < 10 ? "failed" : d < 20 ? "warning" : "ok", big: `${d}%`,
+  out.push({ key: "disk", title: s.copy ? "Disk on this machine" : `Disk on ${s.hub_machine ?? "the hub"}`, icon: Disk, level: d < 10 ? "failed" : d < 20 ? "warning" : "ok", big: `${d}%`,
     text: `${bytes(s.store.disk.free)} free of ${bytes(s.store.disk.total)}; relic5 uses ${bytes(s.store.total)} of it.`,
     command: d < 20 ? "relic5 gc" : undefined });
   const sv = s.seals?.verify, sealedN = Object.values(s.seals?.machines ?? {}).reduce((a, x) => a + x.sealed, 0);
@@ -367,7 +367,7 @@ export function GlancePage({ s, error, at, openHub, search }: { s: Status | null
           </Section>
         )}
 
-        <Section title="The hub's machine" sub="What the hub holds on white's disk and what it costs the machine right now. The Disk page has the detail.">
+        <Section title="The hub's machine" sub={`What the hub holds on ${s.hub_machine ?? "its machine"}'s disk and what it costs the machine right now. The Disk page has the detail.`}>
           <Resources s={s} />
         </Section>
 
@@ -415,7 +415,7 @@ export function GlancePage({ s, error, at, openHub, search }: { s: Status | null
               ["Thinking blocks", num(s.rows.thinking), "only the ones with text"],
               ["Memory notes", s.memory && Object.keys(s.memory).length ? num(sum(s.memory)) : "none yet", s.memory ? Object.entries(s.memory).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${num(v)}`).join(" · ") : ""],
               ["Months", `${months[0]?.month ?? "?"} to ${months[months.length - 1]?.month ?? "?"}`, `${months.length} with messages`],
-              ["On disk", bytes(s.store.total), `white · ${bytes(s.store.disk.free)} free`],
+              ["On disk", bytes(s.store.total), `${s.hub_machine ?? "hub"} · ${bytes(s.store.disk.free)} free`],
             ] as [string, string, string][]).map(([k, v, why]) => (
               <div key={k} className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-6 border-b border-line py-3 last:border-b-0">
                 <span className="text-sm text-soft">{k}<span className="mt-0.5 block text-xs text-muted">{why}</span></span>
@@ -429,7 +429,7 @@ export function GlancePage({ s, error, at, openHub, search }: { s: Status | null
           note="written by a forked agent from the sealed month only (bin/relic5-month-recap)">
           <div className="max-w-[80ch] px-6 pt-5 pb-6 text-sm leading-relaxed whitespace-pre-wrap text-soft">{recap?.text}</div>
         </Drawer>
-        <p className="mt-12 flex flex-wrap items-center gap-4 text-xs text-faint">Every number on this page comes from GET /api/status (relic_status), /api/log, /api/sessions and /api/queries on white; unknown means the hub did not say.
+        <p className="mt-12 flex flex-wrap items-center gap-4 text-xs text-faint">Every number on this page comes from GET /api/status (relic_status), /api/log, /api/sessions and /api/queries on {s.hub_machine ?? "the hub"}; unknown means the hub did not say.
           <button type="button" onClick={openHub} className="flex min-h-11 items-center gap-1.5 rounded-lg border border-line px-3.5 text-sm font-semibold text-soft hover:border-line-strong hover:text-text">Watch it live <Arrow size={16} /></button></p>
       </div>
 
