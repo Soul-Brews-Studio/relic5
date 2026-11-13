@@ -1,0 +1,37 @@
+# relic5 hub switch: white's :8795 forwards to the hub on m5 (Host rewritten). m5 sees every caller as white (nat),
+# which its tailnet door admits without a token, so this door decides who may pass:
+#  - tailnet address 100.103.52.67: only nodes owned by the tailnet owner (filled in at switch time, minus the public
+#    droplet tailnet-gw); a node shared in from another tailnet gets 403, as it needs a token on the white hub today.
+#    No Cloudflare header either: if cloudflared ever targets white's tailnet IP, its source is white itself.
+#  - loopback 127.0.0.1 (white's running sessions still use http://127.0.0.1:8795/mcp): only local callers, Host loopback
+#    and no Cloudflare header, so the public tunnel (Host relic5-mcp.buildwithoracle.com + Cf-Connecting-Ip) gets 403.
+# Loopback 8796 (tailscale serve :443) stays closed: HTTPS on the tailnet is down while switched.
+{
+	admin off
+	auto_https off
+}
+http://:8795 {
+	bind 127.0.0.1 100.103.52.67
+	@owner {
+		remote_ip @OWNER_IPS@
+		not header Cf-Connecting-Ip *
+	}
+	@local {
+		remote_ip 127.0.0.1
+		host 127.0.0.1 localhost
+		not header Cf-Connecting-Ip *
+	}
+	handle @owner {
+		reverse_proxy http://m5.follow-rankine.ts.net:8795 {
+			header_up Host m5.follow-rankine.ts.net
+			flush_interval -1
+		}
+	}
+	handle @local {
+		reverse_proxy http://m5.follow-rankine.ts.net:8795 {
+			header_up Host m5.follow-rankine.ts.net
+			flush_interval -1
+		}
+	}
+	respond "relic5 (switched to m5): not allowed" 403
+}

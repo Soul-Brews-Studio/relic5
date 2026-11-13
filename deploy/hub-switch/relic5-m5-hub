@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Run the relic5 hub on m5 (experiment, 2026-11-13), from the relic5 main checkout (alpha); root ~/relic5 (rsync of white).
+# Doors: loopback + tailnet (owner nat.wrw) + the same hashed tokens as white (~/.config/relic5-hub, copied 0600).
+# No public URL, no serve port.
+export RELIC5_TOKENS_JSON=$HOME/.config/relic5-hub/tokens.json RELIC5_TOKENS=$HOME/.config/relic5-hub/tokens
+cd /opt/Code/github.com/Soul-Brews-Studio/relic5 && exec uv run --quiet relic5 serve --root /Users/beta/relic5 --host 127.0.0.1,100.111.101.21 --port 8795
