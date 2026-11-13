@@ -158,7 +158,9 @@ def run(url: str, model: str, limit: int = 5000, prefixes: str = "", engine: str
     # publish by rename on the hub, so the index never reads half a shard
     # the vector tables rebuild on the hub after this returns (index --wait queues behind a running one); waiting
     # here made a 100-chunk embed a 60 s step (2026-10-24). RELIC5_EMBED_WAIT=1 keeps the old, blocking behaviour.
-    index = "cd ~/relic5/app && docker compose run --rm index relic5 index --root /data --vectors --wait >/dev/null 2>&1"
+    # white's docker hub by default; a hub elsewhere sets RELIC5_HUB_INDEX_VECTORS (2026-11-13: hub on m5)
+    index = os.environ.get("RELIC5_HUB_INDEX_VECTORS") or \
+        "cd ~/relic5/app && docker compose run --rm index relic5 index --root /data --vectors --wait >/dev/null 2>&1"
     if os.environ.get("RELIC5_EMBED_WAIT") != "1":
         index = f"nohup sh -c '{index}' >/dev/null 2>&1 </dev/null &"
     subprocess.run(["ssh", "-o", "BatchMode=yes", HUB, f"mv ~/{dest}.{name} ~/{dest}{name} && {index}"], check=True)
