@@ -3,7 +3,7 @@
 // POST /api/client-error when it answers again; the Incidents page lists them (pageerrors.py).
 
 const KEY = "relic5-page-errors";
-const build = (document.querySelector('script[type="module"][src*="/assets/"]') as HTMLScriptElement | null)?.src.split("/").pop() ?? "";
+export const build = (document.querySelector('script[type="module"][src*="/assets/"]') as HTMLScriptElement | null)?.src.split("/").pop() ?? "";
 
 interface Report { kind: string; message: string; stack?: string; url: string; view: string; ua: string; at: string; build: string; count: number }
 

@@ -62,10 +62,12 @@ def recent(root: str, hours: float = 24) -> Json:
         total += int(r.get("count") or 1)
         k = (r.get("kind") or "", r.get("message") or "")
         g = groups.setdefault(k, {"kind": k[0], "message": k[1], "count": 0, "first": r.get("at") or r.get("received"),
-                                  "last": "", "views": [], "stack": r.get("stack") or "", "url": r.get("url") or ""})
+                                  "last": "", "views": [], "builds": [], "stack": r.get("stack") or "", "url": r.get("url") or ""})
         g["count"] += int(r.get("count") or 1)
         g["last"] = max(g["last"], str(r.get("at") or r.get("received")))
         if r.get("view") and r["view"] not in g["views"]:
             g["views"].append(r["view"])
+        if r.get("build") and r["build"] not in g["builds"]:   # which page builds hit it: the page folds old-build-only ones
+            g["builds"].append(r["build"])
     out = sorted(groups.values(), key=lambda g: g["last"], reverse=True)
     return {"groups": out, "total": total, "hours": hours}
