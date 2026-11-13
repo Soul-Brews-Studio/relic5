@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { usePoll } from "../api";
 import { DataTable } from "../components/DataTable";
-import { ago, bkk, num } from "../format";
+import { ago, bkk, num, copyText } from "../format";
 import { Btn, Chip, cx, inputCls, PageHead, SectionHead, State } from "../components/ui";
 
 interface Device { door: string; client: string; first: string; last: string; calls: number; calls_24h: number;
@@ -18,7 +18,7 @@ function Cmd({ title, why, cmd }: { title: string; why: string; cmd: string }) {
     <div className="rounded-2xl border border-line bg-panel px-6 py-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h3 className="m-0 text-base font-bold text-text">{title}</h3>
-        <Btn type="button" onClick={() => { navigator.clipboard.writeText(cmd); setCopied(true); setTimeout(() => setCopied(false), 1500); }}>
+        <Btn type="button" onClick={() => { copyText(cmd); setCopied(true); setTimeout(() => setCopied(false), 1500); }}>
           {copied ? "Copied" : "Copy"}
         </Btn>
       </div>
@@ -90,7 +90,7 @@ export function Tokens({ url }: { url: string }) {
           <pre className="m-0 mt-2 overflow-x-auto rounded-lg bg-deep px-4 py-3 font-mono text-xs whitespace-pre-wrap text-soft select-all">{fresh.token}</pre>
           <pre className="m-0 mt-2 overflow-x-auto rounded-lg bg-deep px-4 py-3 font-mono text-xs whitespace-pre-wrap text-soft select-all">{`claude mcp add --transport http relic5 ${url} --header "Authorization: Bearer ${fresh.token}"\n# Codex:\nexport RELIC5_TOKEN=${fresh.token}\ncodex mcp add relic5 --url ${url} --bearer-token-env-var RELIC5_TOKEN`}</pre>
           <div className="mt-3 flex gap-2">
-            <Btn type="button" onClick={() => navigator.clipboard.writeText(fresh.token)}>Copy the token</Btn>
+            <Btn type="button" onClick={() => copyText(fresh.token)}>Copy the token</Btn>
             <Btn type="button" onClick={() => setFresh(null)}>Done, hide it</Btn>
           </div>
         </div>
@@ -172,7 +172,7 @@ function WhatToAsk() {
           <div key={t.name} className="min-w-0 rounded-xl border border-line bg-panel px-5 py-4">
             <code className="font-mono text-sm font-semibold text-accent">{t.name}</code>
             <p className="m-0 mt-1.5 line-clamp-3 text-sm text-muted" title={t.description}>{t.description}</p>
-            {ASK[t.name] && <button type="button" onClick={() => { navigator.clipboard.writeText(ASK[t.name]); setCopied(t.name); setTimeout(() => setCopied(""), 1500); }}
+            {ASK[t.name] && <button type="button" onClick={() => { copyText(ASK[t.name]); setCopied(t.name); setTimeout(() => setCopied(""), 1500); }}
               className="mt-3 w-full rounded-lg border border-line bg-deep px-3 py-2 text-left text-sm text-soft hover:border-line-strong hover:text-text">
               {copied === t.name ? "Copied" : `“${ASK[t.name]}”`}</button>}
           </div>))}

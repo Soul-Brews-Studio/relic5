@@ -5,7 +5,7 @@
 // the first hit is selected, so the pane is never empty). Narrower screens open the same reader as a drawer.
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { get, usePoll } from "../api";
-import { ago, bkk, repoColor, shortRepo } from "../format";
+import { ago, bkk, repoColor, shortRepo, copyText } from "../format";
 import type { Explain, Hit, HomeRow, SearchResult, ShowResult } from "../types";
 import { Drawer } from "../components/Drawer";
 import { Markdown } from "../components/Markdown";
@@ -187,7 +187,7 @@ function AsCall({ st }: { st: SearchState }) {
   const args = Object.fromEntries(Object.entries({ query: st.q, with: st.with, horizon: st.horizon, repo: st.repo, role: st.role, session: st.session }).filter(([, v]) => v));
   const call = `relic_search ${JSON.stringify(args)}`;
   return (
-    <RailGroup label="As an agent asks it" aside={<button type="button" className={linkBtn} onClick={() => { navigator.clipboard.writeText(call); setCopied(true); setTimeout(() => setCopied(false), 1500); }}>{copied ? "copied" : "copy"}</button>}>
+    <RailGroup label="As an agent asks it" aside={<button type="button" className={linkBtn} onClick={() => { copyText(call); setCopied(true); setTimeout(() => setCopied(false), 1500); }}>{copied ? "copied" : "copy"}</button>}>
       <code className="block rounded-lg bg-deep px-3 py-2.5 font-mono text-xs leading-relaxed break-all text-soft">{call}</code>
     </RailGroup>
   );
@@ -377,7 +377,7 @@ export function SearchView({ st, setSt, machine, setMachine, machines, recent, t
             <div className="truncate text-sm font-bold text-text">{title(selected)}</div>
             <div className="mt-0.5 truncate font-mono text-xs text-faint">{selected.link}</div>
           </div>
-          <Btn type="button" onClick={() => navigator.clipboard.writeText(selected.link)}>Copy link</Btn>
+          <Btn type="button" onClick={() => copyText(selected.link)}>Copy link</Btn>
         </div>
         <Keep link={selected.link} query={st.q} parent={show?.r?.trace?.id ?? res?.trace?.id} title={`${selected.session_name ?? ""} ${selected.text_snippet.slice(0, 80)}`.trim()} />
         <div className="min-h-0 flex-1 overflow-y-auto">
@@ -459,7 +459,7 @@ export function SearchView({ st, setSt, machine, setMachine, machines, recent, t
       </div>)}
 
       <Drawer open={drawer} onClose={() => setDrawer(false)} title={title(selected)}
-        note={selected?.link} onCopy={() => selected && navigator.clipboard.writeText(selected.link)}>
+        note={selected?.link} onCopy={() => selected && copyText(selected.link)}>
         {selected && <div className="-mx-5 -mt-2 mb-3"><Keep link={selected.link} query={st.q} parent={show?.r?.trace?.id ?? res?.trace?.id} title={`${selected.session_name ?? ""} ${selected.text_snippet.slice(0, 80)}`.trim()} /></div>}
         {show?.err ? <State error>{show.err}</State> : show?.r ? <Context r={show.r} q={hq} /> : <Loading label="Reading the message" />}
       </Drawer>

@@ -53,3 +53,18 @@ export const repoColor = (name: string | null | undefined) => {
 /** "-opt-Code-github-com-laris-co-neo-oracle-wt-x" -> "laris-co-neo-oracle": a repo key as people say it. */
 export const shortRepo = (k?: string | null) => (k ?? "").replace(/^-(opt-Code|Users-[^-]+(-Code)?|home-[^-]+(-Code)?)-github-com-/, "")
   .replace(/^git:github\.com\//, "").replace(/-wt-.*$/, "").replace(/--claude-worktrees-.*$/, "") || "(no repo)";
+
+/** Copy text. navigator.clipboard exists only on a secure origin (https or localhost); the hub is mostly opened as
+ *  http://<host>.ts.net:8795, where it is undefined ("Cannot read properties of undefined (reading 'writeText')",
+ *  Incidents 2026-11-12). Fall back to a hidden textarea + execCommand there. */
+export function copyText(text: string): void {
+  if (navigator.clipboard?.writeText) { navigator.clipboard.writeText(text).catch(() => copyFallback(text)); return; }
+  copyFallback(text);
+}
+
+function copyFallback(text: string): void {
+  const t = document.createElement("textarea");
+  t.value = text; t.setAttribute("readonly", ""); t.style.position = "fixed"; t.style.opacity = "0";
+  document.body.appendChild(t); t.select();
+  try { document.execCommand("copy"); } finally { t.remove(); }
+}

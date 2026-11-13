@@ -2,7 +2,7 @@ import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { flushSync } from "react-dom";
 import { get, prefetch } from "./api";
 import { usePoll } from "./api";
-import { ago, bkk, clock } from "./format";
+import { ago, bkk, clock, copyText } from "./format";
 import type { Queries, ShowResult, Status } from "./types";
 import { NavDrawer, Palette, Sidebar, TabBar, TopNav, type Layout, type HubState, type PaletteSession, type Theme, type View, VIEWS } from "./components/Shell";
 import { Drawer } from "./components/Drawer";
@@ -157,7 +157,7 @@ export function App() {
       <NavDrawer open={drawer} onClose={() => setDrawer(false)} view={st.view} go={go} state={hub} foot={foot} badges={{ jobs: s?.jobs.running.length }} onPalette={() => setPalette(true)} />
       <Palette open={palette} onClose={() => setPalette(false)} go={go} search={search} recent={recent} sessions={palSessions} openSession={openSession} />
       <Drawer open={!!reading} onClose={() => setReading(null)} title={reading ? <>{reading.x.repo} · {reading.x.name}</> : ""}
-        note={reading ? `relic5://session/${reading.x.sid} · the first messages` : ""} onCopy={() => reading && navigator.clipboard.writeText(`relic5://session/${reading.x.sid}`)}>
+        note={reading ? `relic5://session/${reading.x.sid} · the first messages` : ""} onCopy={() => reading && copyText(`relic5://session/${reading.x.sid}`)}>
         {reading?.err ? <State error>{reading.err}</State> : reading?.r ? <Context r={reading.r} q="" /> : <Loading label="Reading the session" />}
       </Drawer>
     </div>

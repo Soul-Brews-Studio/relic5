@@ -5,7 +5,7 @@
 // for its character and style, one for what it has come to understand. Copy a prompt into Claude; nothing is sent.
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { get, usePoll } from "../api";
-import { ago, bkk, num, repoColor } from "../format";
+import { ago, bkk, num, repoColor, copyText } from "../format";
 import { Markdown } from "../components/Markdown";
 import { Search } from "../components/Icons";
 import { Btn, cx, Lbl, Loading, PageHead, Seg, State, Toggle } from "../components/ui";
@@ -63,7 +63,7 @@ export function Gallery({ items, empty }: { items: Artifact[]; empty?: string })
       ))}
     </div>
     <Drawer open={!!open} onClose={() => setOpen(null)} title={open?.title ?? ""} note={open ? `${open.kind} · .${open.ext} · ${num(open.bytes)} bytes · sha256 ${open.id}… · ${bkk(open.at)} · by ${open.by ?? "unknown"}` : ""}
-      onCopy={open ? () => navigator.clipboard.writeText(location.origin + open.url) : undefined}>
+      onCopy={open ? () => copyText(location.origin + open.url) : undefined}>
       {open && <div className="grid h-full grid-rows-[minmax(0,1fr)_auto]">
         <div className="min-h-[50vh] bg-deep"><Show a={open} big /></div>
         {(open.prompt || open.note) && <div className="border-t border-line px-6 py-4 text-sm">
@@ -87,7 +87,7 @@ const when = (ms?: number) => (ms ? new Date(ms).toISOString() : undefined);
 
 function Copy({ text, label, short }: { text: string; label: string; short?: string }) {
   const [done, setDone] = useState(false);
-  return <Btn primary type="button" aria-label={label} onClick={() => { navigator.clipboard.writeText(text); setDone(true); setTimeout(() => setDone(false), 1800); }}>
+  return <Btn primary type="button" aria-label={label} onClick={() => { copyText(text); setDone(true); setTimeout(() => setDone(false), 1800); }}>
     {done ? "Copied" : short ? <><span className="sm:hidden">{short}</span><span className="max-sm:hidden">{label}</span></> : label}</Btn>;
 }
 
