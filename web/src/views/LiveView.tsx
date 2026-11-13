@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { get, usePoll } from "../api";
-import { clock, recent, repoColor } from "../format";
+import { clock, recent, repoColor, copyText } from "../format";
 import { Drawer } from "../components/Drawer";
 import { Loading, MachinePick } from "../components/ui";
 import { DataTable } from "../components/DataTable";
@@ -53,7 +53,7 @@ export function LiveView({ machine, role = "", on, machines, setMachine, setRole
         { key: "x", head: "text", lead: true, cell: r => (r.text ?? "").replace(/\s+/g, " ").slice(0, 180), title: r => r.text ?? "" },
       ]} />
       <Drawer open={!!open} onClose={() => setOpen(null)} title={open ? <>{open.r.cat ? shortRepo(open.r.cat) + " · " : ""}{open.r.session_name ?? open.r.sid}</> : ""}
-        note={open?.r.link} onCopy={() => open?.r.link && navigator.clipboard.writeText(open.r.link)}>
+        note={open?.r.link} onCopy={() => open?.r.link && copyText(open.r.link)}>
         {open?.err ? <State error>{open.err}</State> : open?.show ? <Context r={open.show} q="" /> : <Loading label="Reading the message" />}
       </Drawer>
     </>

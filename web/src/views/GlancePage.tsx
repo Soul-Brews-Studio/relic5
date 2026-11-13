@@ -1,7 +1,7 @@
 import { useState, type ComponentType, type ReactNode } from "react";
 import { Drawer } from "../components/Drawer";
 import { usePoll } from "../api";
-import { ago, bkk, bytes, clock, compact, num, secs, sum } from "../format";
+import { ago, bkk, bytes, clock, compact, num, secs, sum, copyText } from "../format";
 import { Badge, HealthCard, levelText, levelWord, type Level } from "../components/HealthCard";
 import { Arrow, Disk, Lock, Machine, Pulse, Search, Shield, Vector } from "../components/Icons";
 import { syncChip } from "../components/sync";
@@ -207,7 +207,7 @@ function MonthLedger({ days, months, openRecap }: { days: NonNullable<Status["se
           {d.reconciled_at && <span className="text-muted">sealed {bkk(d.reconciled_at)}</span>}
           {d.amendments > 0 && <span className="text-muted">{d.amendments} {d.amendments === 1 ? "amendment" : "amendments"} (late rows, added, never rewritten)</span>}
           {d.fingerprint && (
-            <button type="button" onClick={() => { navigator.clipboard.writeText(d.fingerprint!); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
+            <button type="button" onClick={() => { copyText(d.fingerprint!); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
               className="inline-flex min-h-9 items-center gap-2 rounded-lg bg-deep px-2.5 font-mono text-xs text-soft hover:text-text" title="Copy the fingerprint">
               <span className="text-faint">fingerprint</span>{d.fingerprint}<span className="font-sans font-semibold text-accent">{copied ? "copied" : "copy"}</span>
             </button>

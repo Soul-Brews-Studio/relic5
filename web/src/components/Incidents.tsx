@@ -2,6 +2,7 @@
 // incident and issues?"). Failing and late checks (the same checks as Home's), then the hub's own warnings that no
 // check already says, then a failed poll. Each one with its severity and the command that fixes it. It folds to a
 // small badge; a new set of problems opens it again. It sits bottom-right, above the phone's tab bar.
+import { copyText } from "../format";
 import { useEffect, useMemo, useState } from "react";
 import { usePoll } from "../api";
 import { checks, rank } from "../views/GlancePage";
@@ -42,7 +43,7 @@ export function IncidentRow({ i, full }: { i: Incident; full?: boolean }) {
         <div className="text-sm font-semibold text-text">{i.title}</div>
         <p className={cx("m-0 mt-0.5 text-sm break-words text-soft", !full && "line-clamp-3")} title={full ? undefined : i.text}>{i.text}</p>
         {i.command && (
-          <button type="button" onClick={() => { navigator.clipboard.writeText(i.command!); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
+          <button type="button" onClick={() => { copyText(i.command!); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
             className="mt-2 flex w-full min-w-0 items-center gap-2 rounded-lg bg-deep px-2.5 py-2 text-left font-mono text-xs text-soft hover:text-text" title="Copy the command">
             <span className="text-faint">$</span><span className={cx("min-w-0 flex-1", full ? "break-all" : "truncate")}>{i.command}</span>
             <span className="flex-none font-sans font-semibold text-accent">{copied ? "copied" : "copy"}</span>
