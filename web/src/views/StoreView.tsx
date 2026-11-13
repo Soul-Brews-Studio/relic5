@@ -17,7 +17,7 @@ export function StoreView({ s }: { s: Status }) {
   ];
   return (
     <>
-      <PageHead title="Store" sub="What the hub holds on white's disk, what it costs the machine, and how far each index has caught up." />
+      <PageHead title="Store" sub={`What the hub holds on ${s.hub_machine ?? "its machine"}'s disk, what it costs the machine, and how far each index has caught up.`} />
       <p className="m-0 mb-6 text-sm text-soft">Where this data lives (disk or S3), its mirror and a switch are set on <a href="#tab=settings" className="font-semibold text-accent hover:underline">Settings</a>.</p>
       <Resources s={s} />
       <DataTable rows={lines} rowKey={l => l.what} cols={[

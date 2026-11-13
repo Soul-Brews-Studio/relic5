@@ -15,6 +15,24 @@ from .types_ import JobEvent, Json
 from . import store as rfs
 
 
+_HUB_MACHINE: list[str] = []
+
+
+def hub_machine() -> str:
+    """The machine this hub runs on, by its tailnet short name (white, m5): the page names it instead of a fixed
+    "white", since the hub can move (2026-11-13: run on m5 behind white's door, switched back any time)."""
+    if not _HUB_MACHINE:
+        import socket, subprocess
+        name = ""
+        try:
+            d = json.loads(subprocess.run(["tailscale", "status", "--json"], capture_output=True, text=True, timeout=3).stdout)
+            name = (d["Self"].get("DNSName") or d["Self"].get("HostName") or "").split(".")[0]
+        except (OSError, ValueError, KeyError, subprocess.TimeoutExpired):
+            pass
+        _HUB_MACHINE.append(os.environ.get("RELIC5_HUB_MACHINE") or name or socket.gethostname().split(".")[0])
+    return _HUB_MACHINE[0]
+
+
 BACKUP_STALE_S = 36 * 3600   # nightly, plus a day of slack (relic4-scan, 2026-10-24)
 
 
@@ -214,6 +232,7 @@ def status(root: str, now: _datetime | None = None) -> Json:
         "backup": backup,
         "offsite": offsite,
         "copy": copy,
+        "hub_machine": hub_machine(),
         "memory": __import__("relic5.memory", fromlist=["counts"]).counts(p.root),
         "config": __import__("relic5.config", fromlist=["counts"]).counts(p.root),
         "config_refused": cref,   # [{machine, user, rel, why}]: path and rule, never the text

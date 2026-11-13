@@ -47,6 +47,7 @@ export interface Status {
   backup?: { at: string | null; bytes: number | null; message: string | null; age_s: number | null; host: string | null };
   memory?: Record<string, number>;
   copy?: { of: string; snapshot: string; at: string } | null;
+  hub_machine?: string;   // the machine the hub runs on (white, m5)
   seal_days?: { month: string; state: "reconciled" | "sealing" | "blocked" | "open"; waiting: string[]; problems: string[];
                  fingerprint: string | null; reconciled_at: string | null; amendments: number; recap?: boolean }[];
   seals?: { machines: Record<string, { sealed: number; newest_sealed_at: string | null; resealed: number; months: string[] }>;
