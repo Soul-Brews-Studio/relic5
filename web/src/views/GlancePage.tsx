@@ -64,7 +64,10 @@ export function checks(s: Status, evs: JobEvent[]): Check[] {
   // failed at 19:31 on 10-24 and pushed fine every pass after; the card stayed red for 24 h)
   // a failure is over when the same job ran fine after it: the same verb, for the same month when the message names one
   // (a recap's "written" never repeats its "no file naming…", so matching whole messages kept a fixed recap red for 24 h)
-  const subject = (e: typeof evs[number]) => (e.message ?? "").match(/\b\d{4}-\d{2}\b(?!-\d)/)?.[0] ?? e.host ?? "";
+  // embed, index, index-vectors and backup work on the whole hub, not on one machine's data: a clean run on any host
+  // recovers them (2026-11-13: white's gb300 embed failed, m5's ANE then embedded everything; the card stayed red)
+  const HUBWIDE = new Set(["embed", "index", "index-vectors", "backup"]);
+  const subject = (e: typeof evs[number]) => (e.message ?? "").match(/\b\d{4}-\d{2}\b(?!-\d)/)?.[0] ?? (HUBWIDE.has(e.verb) ? "" : e.host ?? "");
   const same = (a: typeof evs[number], b: typeof evs[number]) => a.verb === b.verb && subject(a) === subject(b);
   const open = failed.filter(f => !day.some(e => e.state === "done" && same(e, f) && Date.parse(e.at) > Date.parse(f.at)));
   out.push({ key: "jobs", title: "Jobs, 24 h", icon: Pulse, level: open.length ? "failed" : evs.length ? "ok" : "unknown",
