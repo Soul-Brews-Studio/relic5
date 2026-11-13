@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# relic5-hub-switch m5 | white | status  (run on white as nat)
+# m5:    check the m5 hub answers, stop app-serve-1, start a Caddy forwarder on white's tailnet :8795 -> m5:8795.
+# white: stop the forwarder, pull back the hub logs written on m5 (queries/tags/saved, append-only), start app-serve-1.
+# Clients keep RELIC5_URL=http://white.follow-rankine.ts.net:8795; nothing changes on them.
+set -euo pipefail
+D=$HOME/relic5/switch; APP=$HOME/relic5/app; M5=m5.follow-rankine.ts.net
+mkdir -p "$D"
+fwd_pid() { [ -f "$D/caddy.pid" ] && kill -0 "$(cat "$D/caddy.pid")" 2>/dev/null && cat "$D/caddy.pid"; }
+case "${1:-status}" in
+  m5)
+    code=$(curl -s -o /dev/null -w '%{http_code}' -m 5 -H "Host: $M5" "http://$M5:8795/health")
+    [ "$code" = 200 ] || { echo "m5 hub answers $code, not switching"; exit 1; }
+    # only nodes owned by the tailnet owner, minus the public door droplet tailnet-gw by its control-plane IP 100.70.92.55 (a node can rename itself, not readdress), (same people the white hub lets in without a token); shared-in nodes get 403
+    ips=$(tailscale status --json | python3 -c 'import json,sys; d=json.load(sys.stdin); o=d["Self"]["UserID"]; ns=[d["Self"]]+list((d.get("Peer") or {}).values()); print(" ".join(ip for n in ns if n.get("UserID")==o and "100.70.92.55" not in n.get("TailscaleIPs",[]) for ip in n.get("TailscaleIPs",[]) if "." in ip))')
+    [ -n "$ips" ] || { echo "no owner nodes found, not switching"; exit 1; }
+    sed "s|@OWNER_IPS@|$ips|" "$D/Caddyfile" >"$D/Caddyfile.run"
+    caddy validate --config "$D/Caddyfile.run" --adapter caddyfile >/dev/null
+    (cd "$APP" && docker compose stop serve)
+    nohup caddy run --config "$D/Caddyfile.run" --adapter caddyfile >"$D/caddy.log" 2>&1 &
+    echo $! >"$D/caddy.pid"; sleep 2
+    echo "hub -> m5: $(curl -s -o /dev/null -w '%{http_code}' -m 5 http://white.follow-rankine.ts.net:8795/health)"
+    ;;
+  white)
+    p=$(fwd_pid || true); [ -n "$p" ] && kill "$p" && rm -f "$D/caddy.pid"
+    rsync -a "beta@$M5:relic5/logs/" "$HOME/relic5/logs/" || echo "WARN: logs not pulled from m5"
+    # m5 pushed its own sessions to the m5 hub and embedded on its ANE while switched: bring both back (add, never delete)
+    rsync -a "beta@$M5:relic5/parts/m5/" "$HOME/relic5/parts/m5/" || echo "WARN: parts/m5 not pulled from m5"
+    rsync -a "beta@$M5:relic5/vectors/" "$HOME/relic5/vectors/" || echo "WARN: vectors not pulled from m5"
+    (cd "$APP" && docker compose start serve)
+    (cd "$APP" && docker compose run --rm index relic5 index --root /data --wait >/dev/null 2>&1 && \
+      docker compose run --rm index relic5 index --root /data --vectors --wait >/dev/null 2>&1) || echo "WARN: index after switch-back failed"
+    for i in $(seq 1 30); do c=$(curl -s -o /dev/null -w '%{http_code}' -m 3 -H "Host: 127.0.0.1" http://127.0.0.1:8795/health); [ "$c" = 200 ] && break; sleep 2; done
+    echo "hub -> white: $c"
+    ;;
+  status)
+    p=$(fwd_pid || true)
+    if [ -n "$p" ]; then echo "hub = m5 (forwarder pid $p)"; else echo "hub = white ($(docker ps --filter name=app-serve-1 --format '{{.Status}}'))"; fi
+    ;;
+  *) echo "usage: relic5-hub-switch m5|white|status"; exit 2;;
+esac

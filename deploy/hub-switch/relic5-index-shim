@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Shim (hub-on-m5 experiment, 2026-11-13): `relic5 import` runs "~/relic5/app/.venv/bin/relic5 index --wait" on the
+# hub over ssh, the path white's hub has. On m5 it runs the PR #289 worktree's relic5 against ~/relic5.
+cd /opt/Code/github.com/Soul-Brews-Studio/relic5/wt/hub-machine-label-laris-labs-20261113 && exec /opt/homebrew/bin/uv run --quiet relic5 "$@" --root "$HOME/relic5"

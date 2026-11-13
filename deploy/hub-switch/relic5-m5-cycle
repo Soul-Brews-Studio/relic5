@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# relic5 hub on m5 (experiment 2026-11-13), every 30 min under pm2 (relic5-cycle):
+#  1. pull what other machines pushed to white (white, mba): parts mirror except parts/m5 (m5 pushes here now);
+#     vectors/readings/etc. added, never deleted (m5's own ANE shards live here too). logs/ and index/ stay m5's own.
+#  2. relic5 import on m5 with the hub = m5: scan, extract, push parts/m5, index (shim), embed on the ANE (ane2), sync.
+#  3. index BM25 + vectors here (embed's own index step calls white's docker and does nothing on m5).
+set -uo pipefail
+LOCK=/opt/tmp/laris-labs-oracle/relic5-cycle.lock
+# lock = a dir holding the owner pid; a lock whose pid is gone (killed run) is taken over, never left to block forever
+if ! mkdir "$LOCK" 2>/dev/null; then
+  if kill -0 "$(cat "$LOCK/pid" 2>/dev/null)" 2>/dev/null; then echo "$(date '+%F %T') another cycle running, skip"; exit 0; fi
+  echo "$(date '+%F %T') stale lock, taking over"
+fi
+echo $$ >"$LOCK/pid"; trap 'rm -f "$LOCK/pid"; rmdir "$LOCK"' EXIT
+W=/opt/Code/github.com/Soul-Brews-Studio/relic5
+WH=nat@white.follow-rankine.ts.net
+export RELIC5_HUB_SSH=beta@m5.follow-rankine.ts.net RELIC5_HUB=beta@m5.follow-rankine.ts.net
+# the hub index commands over ssh (relic5 PR #291): this hub has no ~/relic5/app docker
+export RELIC5_HUB_INDEX="cd /opt/Code/github.com/Soul-Brews-Studio/relic5 && /opt/homebrew/bin/uv run --quiet relic5 index --root $HOME/relic5 --wait"
+export RELIC5_HUB_INDEX_VECTORS="cd /opt/Code/github.com/Soul-Brews-Studio/relic5 && /opt/homebrew/bin/uv run --quiet relic5 index --root $HOME/relic5 --vectors --wait >/dev/null 2>&1"
+t0=$(date +%s); say() { echo "$(date '+%F %T') $*"; }
+say "cycle start"
+rsync -a --delete --exclude 'm5/' "$WH:relic5/parts/" "$HOME/relic5/parts/"; say "pull parts rc=$?"
+# readings/m5.jsonl and readings/sessions/m5* are m5's own now (relic5-push to this hub): never take white's older copy
+for d in vectors readings artifacts recaps resolve archive; do rsync -a --exclude 'm5.jsonl' --exclude 'm5-*' --exclude 'm5.*' "$WH:relic5/$d/" "$HOME/relic5/$d/"; done; say "pull rest rc=$?"
+relic5 import; say "import rc=$?"
+cd "$W" && uv run --quiet relic5 index --root "$HOME/relic5" >/dev/null 2>&1; say "index rc=$?"
+uv run --quiet relic5 index --root "$HOME/relic5" --vectors >/dev/null 2>&1; say "vectors rc=$?"
+say "cycle done in $(( $(date +%s)-t0 ))s"
