@@ -185,11 +185,17 @@ pub fn main(args: &[String]) -> i32 {
     // what this push carries: the sync below waits for the hub to hold at least this much
     let pushed = mine(&c);
     c.stage("push", |c| run(c.cmd(&push)));
-    c.stage("index", |_| run({
+    // the hub's index command over ssh: white's checkout by default; a hub elsewhere sets RELIC5_HUB_INDEX
+    // (2026-11-13: the hub on m5 has no ~/relic5/app, the step failed, and the sync below waited 3 min for nothing)
+    let index_cmd = std::env::var("RELIC5_HUB_INDEX").unwrap_or_else(|_| "~/relic5/app/.venv/bin/relic5 index --wait".into());
+    let (index_rc, index_out) = c.stage("index", |_| run({
         let mut x = Command::new("ssh");
-        x.args(["-o", "BatchMode=yes", &hub_ssh, "~/relic5/app/.venv/bin/relic5 index --wait"]);
+        x.args(["-o", "BatchMode=yes", &hub_ssh, &index_cmd]);
         x
     }));
+    if index_rc != 0 {
+        c.log(&format!("{} index FAILED rc={index_rc} on {hub_ssh}: {}", stamp(), index_out.lines().last().unwrap_or("").trim()));
+    }
     let on_ac = run({ let mut x = Command::new("pmset"); x.args(["-g", "batt"]); x }).1.contains("AC Power");
     let mut emb = "embed skipped (battery)".to_string();
     if on_ac && crate::core::find().is_some() {
