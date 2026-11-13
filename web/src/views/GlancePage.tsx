@@ -48,10 +48,11 @@ export function checks(s: Status, evs: JobEvent[]): Check[] {
   if (!s.copy) out.push({ key: "backup", title: "Backup", icon: Shield, level: !b?.at ? "failed" : stale ? "warning" : "ok", big: b?.at ? secs(b.age_s) : "none",
     text: b?.at ? `Snapshot of ${bytes(b.bytes)} on ${b.host}, restore-tested. Backups run by hand since 2026-10-26 (no nightly job).` : "No snapshot of the hub exists yet.",
     command: stale ? "bin/relic5-backup && bin/relic5-restore-test" : undefined });
-  const d = s.store.disk.free_pct;
-  out.push({ key: "disk", title: s.copy ? "Disk on this machine" : `Disk on ${s.hub_machine ?? "the hub"}`, icon: Disk, level: d < 10 ? "failed" : d < 20 ? "warning" : "ok", big: `${d}%`,
+  // low = few percent AND few GB: a big disk at 19 % still has terabytes free (selfknow.disk_low)
+  const d = s.store.disk.free_pct, few = (s.store.disk.free ?? 0) < 100e9;
+  out.push({ key: "disk", title: s.copy ? "Disk on this machine" : `Disk on ${s.hub_machine ?? "the hub"}`, icon: Disk, level: few && d < 10 ? "failed" : few && d < 20 ? "warning" : "ok", big: `${d}%`,
     text: `${bytes(s.store.disk.free)} free of ${bytes(s.store.disk.total)}; relic5 uses ${bytes(s.store.total)} of it.`,
-    command: d < 20 ? "relic5 gc" : undefined });
+    command: few && d < 20 ? "relic5 gc" : undefined });
   const sv = s.seals?.verify, sealedN = Object.values(s.seals?.machines ?? {}).reduce((a, x) => a + x.sealed, 0);
   out.push({ key: "seals", title: "Sealed months", icon: Shield, level: !sv ? "unknown" : sv.problems.length ? "failed" : "ok",
     big: sv ? `${sv.checked - sv.problems.length}/${sv.checked}` : "none",

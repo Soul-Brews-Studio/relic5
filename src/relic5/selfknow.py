@@ -254,10 +254,20 @@ def resources() -> Json:
     return out
 
 
+LOW_FREE_B = 100e9   # a big disk at 19 % still has terabytes free (m5: 1.6 TB, 2026-11-13): low = few percent AND few GB
+
+
+def disk_low(disk: Json, pct: float = 20) -> bool:
+    """Low only when both the share and the bytes left are small."""
+    return bool(disk["free_pct"] < pct and disk.get("free", 0) < LOW_FREE_B)
+
+
 def warnings(st: Json, res: Json) -> list[str]:
     w = []
-    if st["disk"]["free_pct"] < 20:
-        w.append(f"disk: only {st['disk']['free_pct']}% free on the hub (relic5 itself: {st.get('total', 0) / 1e9:.1f} GB; "
+    if disk_low(st["disk"]):
+        from .status import hub_machine
+        w.append(f"disk: only {st['disk']['free_pct']}% ({st['disk']['free'] / 1e9:.0f} GB) free on {hub_machine()} "
+                 f"(relic5 itself: {st.get('total', 0) / 1e9:.1f} GB; "
                  "`relic5 gc` lists what else is big)")
     if res["load"][2] > (res["cpus"] or 1) * 0.8:
         w.append(f"load: {res['load'][2]:.1f} over 15 min on {res['cpus']} cpus")
