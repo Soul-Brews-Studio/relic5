@@ -85,18 +85,23 @@ def _prompts_sql(src: str, meta: str | None, where_extra: list[str]) -> str:
     relay += f" AND NOT regexp_matches({lt}, '^[A-Za-z0-9_.@-]+ -> [A-Za-z0-9_.@-]+')"   # "white -> m5 Laris: ..."
     tier = f"AND sid IN (SELECT sid FROM {meta} WHERE tier = 'main')" if meta else ""
     extra = "".join(f" AND {w}" for w in where_extra)
-    return f"""SELECT sid, md5(body) AS h, min(ts_th) AS first_at, any_value(machine) AS machine, any_value(cat) AS cat,
-                      any_value(length(body)) AS chars, any_value(body) AS text,
-                      regexp_extract_all(lower(any_value(body)), '{WORD}', 1) AS words
-               FROM (SELECT *, CASE WHEN starts_with(ltrim(text), '{MIDTURN}')   -- only wrapped texts pay for the regex
-                                    THEN trim(regexp_replace(regexp_replace(text, '^\\s*{MIDTURN}\\s*', ''),
-                                                             '\\s*{MIDTURN_TAIL}[\\s\\S]*$', ''))
-                                    ELSE text END AS body
-                     FROM {src}
-                     WHERE role = 'user' AND chunk = 0 AND ts_th IS NOT NULL
-                       AND (contains(text, '/') OR contains(text, '$')) {tier}{extra})
-               WHERE {relay}
-               GROUP BY sid, md5(body)"""
+    # words, hash, length and a short snippet are taken per row, so the group carries no full text: blobs can be
+    # 100 kB each, and carrying them through GROUP BY ran the hub out of its 6 GB DuckDB memory (#305)
+    return f"""SELECT sid, h, min(ts_th) AS first_at, any_value(machine) AS machine, any_value(cat) AS cat,
+                      any_value(chars) AS chars, any_value(snippet) AS text, any_value(words) AS words
+               FROM (SELECT sid, ts_th, machine, cat, md5(body) AS h, length(body) AS chars, left(body, 300) AS snippet,
+                            regexp_extract_all(lower(body), '{WORD}', 1) AS words
+                     FROM (SELECT sid, ts_th, machine, cat,
+                                  CASE WHEN starts_with(ltrim(text), '{MIDTURN}')   -- only wrapped texts pay for the regex
+                                       THEN trim(regexp_replace(regexp_replace(text, '^\\s*{MIDTURN}\\s*', ''),
+                                                                '\\s*{MIDTURN_TAIL}[\\s\\S]*$', ''))
+                                       ELSE text END AS body
+                           FROM {src}
+                           WHERE role = 'user' AND chunk = 0 AND ts_th IS NOT NULL
+                             AND (contains(text, '/') OR contains(text, '$')) {tier}{extra})
+                     WHERE {relay})
+               WHERE len(words) > 0
+               GROUP BY sid, h"""
 
 
 def _inside(at: str, since: str | None, until: str | None) -> bool:
