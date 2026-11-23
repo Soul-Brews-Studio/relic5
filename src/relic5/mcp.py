@@ -151,11 +151,14 @@ TOOLS = [
      "indexes (plus built-in commands, kind builtin): per skill prompts, sessions, days, first and last (Bangkok), machines, "
      "projects, launched (the agents' Skill tool calls) and months {YYYY-MM: prompts} for its evolution. sessions=true: one "
      "row per session, newest first, with the skills typed in it; session=<uuid prefix>: that session's prompts that typed "
-     "a skill, in order. Filters since/until, project, machine, contains (a substring of the skill name, e.g. 'book'); "
-     "top (default 30); all=true keeps unknown /words; auto=true keeps scheduled runs.",
+     "a skill, in order. ai=true: the skills an AI launched ON ITS OWN (a Skill tool call with no human /name typed "
+     "before it in that session), per skill launched / ai / share / never_typed / before_typed, plus by_model, "
+     "by_project and by_month. Filters since/until, project, machine, contains (a substring of the skill name, e.g. "
+     "'book'); top (default 30); all=true keeps unknown /words; auto=true keeps scheduled runs.",
      "inputSchema": {"type": "object", "properties": {"since": STR, "until": STR, "project": STR, "machine": STR, "contains": STR,
                                                       "top": INT, "sessions": {"type": "boolean"}, "session": STR,
-                                                      "all": {"type": "boolean"}, "auto": {"type": "boolean"}},
+                                                      "all": {"type": "boolean"}, "auto": {"type": "boolean"},
+                                                      "ai": {"type": "boolean"}},
                      "additionalProperties": False}},
     {"name": "relic_team", "description": "Sessions started per project per Bangkok day over the last N days (default 90), "
      "and which projects ran on the same days (pairs): who worked with whom, for a timeline or a co-activity chart.",
@@ -459,13 +462,13 @@ def run_tool(relic: Relic5, name: str, a: Json, door: str | None = None) -> Json
                               min(_int(a, "top", 1) or 30, 500))
     if name == "relic_skills":
         from . import skills
-        _check(a, ["since", "until", "project", "machine", "contains", "top", "sessions", "session", "all", "auto"])
-        for k in ("sessions", "all", "auto"):
+        _check(a, ["since", "until", "project", "machine", "contains", "top", "sessions", "session", "all", "auto", "ai"])
+        for k in ("sessions", "all", "auto", "ai"):
             if a.get(k) is not None and not isinstance(a[k], bool):
                 raise UsageError(f"{k} must be true or false")
         return skills.skills(relic, _str(a, "since"), _str(a, "until"), _str(a, "project"), _str(a, "machine"), _str(a, "contains"),
                              min(_int(a, "top", 1) or 30, 1000), bool(a.get("sessions")), _str(a, "session"),
-                             bool(a.get("all")), bool(a.get("auto")))
+                             bool(a.get("all")), bool(a.get("auto")), bool(a.get("ai")))
     if name == "relic_team":
         from . import family
         _check(a, ["days"])

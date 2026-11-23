@@ -43,7 +43,7 @@ ROUTES = {"/api/search": "relic_search", "/api/show": "relic_show", "/api/sessio
           # skills a human typed (skills.py, #299)
           "/api/skills": "relic_skills"}
 INT_KEYS = {"limit", "seq", "before", "after", "cap", "top"}
-BOOL_KEYS = {"semantic", "by_repo", "sessions", "all", "auto"}
+BOOL_KEYS = {"semantic", "by_repo", "sessions", "all", "auto", "ai"}
 STATUS_OF = {"usage": 400, "unavailable": 501, "not_found": 404, "failed": 500}
 
 
