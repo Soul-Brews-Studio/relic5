@@ -33,6 +33,10 @@
                                   running, commits, hub searches, the hit's neighbours
   relic5 arc <words> [--since D] [--until D] [--cap 3000]   how a topic began and changed: hits per month, first and
                                   last, turning points, readings and found notes that name it
+  relic5 skills [--since D] [--until D] [--project P] [--machine M] [--contains S] [--top 30] [--all] [--auto]
+                                  the skills a human typed (/name, $name): prompts, sessions, launched, months
+  relic5 skills --sessions [...]  one row per session, newest first, with the skills typed in it
+  relic5 skills --session <S>     one session's prompts that typed a skill, in order
   relic5 pending                  what is not searchable yet: stale months (BM25), chunks without vectors, push lag
   relic5 tail [--session S] [--machine M] [--n 50] [-f] [--full]   the newest messages as they land, users and agents
                                   (-f: keep following; --full: each whole message, not its first line)
@@ -482,6 +486,34 @@ def _main(argv: list[str] | None = None) -> None:
                 print(f"turn {t['month']}: {t['why']}\n   {t['hit']['text'][:160]}\n   {t['hit']['link']}")
             for x in r["readings"][:12]:
                 print(f"  read {x['day']} {x['model']}: {x.get('focus')}")
+    elif cmd == "skills":   # #299
+        rest2 = list(rest)
+        p = {k: o for k in ("since", "until", "project", "machine", "contains", "top", "session") if (o := _opt(rest2, "--" + k))}
+        for k in ("sessions", "all", "auto"):
+            if "--" + k in rest2:
+                p[k] = "1"
+        r = call("/api/skills", p)
+        if as_json:
+            print(json.dumps(r, ensure_ascii=False, indent=1))
+        elif "prompts" in r and isinstance(r.get("prompts"), list):
+            print(f"session {r['session']}: {len(r['prompts'])} prompts typed a skill")
+            for x in r["prompts"]:
+                print(f"  {x['at'][:16].replace('T', ' ')}  {' '.join('/' + s for s in x['skills'])}  " + x["text"].replace("\n", " ")[:120])
+        elif "sessions" in r and isinstance(r.get("sessions"), list):
+            for x in r["sessions"]:
+                sk = " ".join("/" + k + (f"x{n}" if n > 1 else "") for k, n in x["skills"].items())
+                print(f"{x['start'][:16].replace('T', ' ')}  {x['machine']:<6} {x['sid'][:8]}  {(x.get('title') or x.get('project') or '')[:40]:<40}  {sk}")
+        else:
+            ex = r.get("excluded") or {}
+            print(f"skills typed{' since ' + r['since'] if r.get('since') else ''}{' until ' + r['until'] if r.get('until') else ''}: "
+                  f"{r.get('total_skills', 0)} skills, {r.get('total_prompts', 0)} prompts, {r.get('sessions', 0)} sessions "
+                  f"(catalogue {r.get('catalogue', 0)}; left out: {ex.get('automated', 0)} scheduled prompts, {ex.get('unknown_words', 0)} unknown /words)")
+            print(f"  {'sessions':>8} {'prompts':>7} {'launched':>8}  {'first':<10} {'last':<10}  skill")
+            for x in r["skills"]:
+                months = "  ".join(f"{m[2:]} {n}" for m, n in x["months"].items())
+                kind = "" if x["kind"] == "skill" else f" ({x['kind']})"
+                print(f"  {x['sessions']:>8} {x['prompts']:>7} {x['launched']:>8}  {x['first'][:10]:<10} {x['last'][:10]:<10}  /{x['skill']}{kind}"
+                      f"  {' '.join(x['machines'])}  | {months}")
     elif cmd == "handoff" and rest:
         print(call("/api/handoff", {"id": rest[0], "user_only": "1" if "--role" in rest else "0"})["text"])
     elif cmd == "pending":   # relic3 `pending`: what is not searchable yet, by lane
