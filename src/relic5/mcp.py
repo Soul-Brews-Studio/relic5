@@ -146,6 +146,17 @@ TOOLS = [
      "since/until, project (substring), contains (a path substring, e.g. 'relic5/src' or '.md'); top (default 30).",
      "inputSchema": {"type": "object", "properties": {"since": STR, "until": STR, "project": STR, "contains": STR, "top": INT},
                      "additionalProperties": False}},
+    {"name": "relic_skills", "description": "The skills a human TYPED (/name, or $name in Codex) in the prompts of main "
+     "sessions, each prompt once per session, relays and scheduled runs left out, checked against every SKILL.md relic5 "
+     "indexes (plus built-in commands, kind builtin): per skill prompts, sessions, days, first and last (Bangkok), machines, "
+     "projects, launched (the agents' Skill tool calls) and months {YYYY-MM: prompts} for its evolution. sessions=true: one "
+     "row per session, newest first, with the skills typed in it; session=<uuid prefix>: that session's prompts that typed "
+     "a skill, in order. Filters since/until, project, machine, contains (a substring of the skill name, e.g. 'book'); "
+     "top (default 30); all=true keeps unknown /words; auto=true keeps scheduled runs.",
+     "inputSchema": {"type": "object", "properties": {"since": STR, "until": STR, "project": STR, "machine": STR, "contains": STR,
+                                                      "top": INT, "sessions": {"type": "boolean"}, "session": STR,
+                                                      "all": {"type": "boolean"}, "auto": {"type": "boolean"}},
+                     "additionalProperties": False}},
     {"name": "relic_team", "description": "Sessions started per project per Bangkok day over the last N days (default 90), "
      "and which projects ran on the same days (pairs): who worked with whom, for a timeline or a co-activity chart.",
      "inputSchema": {"type": "object", "properties": {"days": INT}, "additionalProperties": False}},
@@ -446,6 +457,15 @@ def run_tool(relic: Relic5, name: str, a: Json, door: str | None = None) -> Json
         _check(a, ["since", "until", "project", "contains", "top"])
         return activity.files(relic, _str(a, "since"), _str(a, "until"), _str(a, "project"), _str(a, "contains"),
                               min(_int(a, "top", 1) or 30, 500))
+    if name == "relic_skills":
+        from . import skills
+        _check(a, ["since", "until", "project", "machine", "contains", "top", "sessions", "session", "all", "auto"])
+        for k in ("sessions", "all", "auto"):
+            if a.get(k) is not None and not isinstance(a[k], bool):
+                raise UsageError(f"{k} must be true or false")
+        return skills.skills(relic, _str(a, "since"), _str(a, "until"), _str(a, "project"), _str(a, "machine"), _str(a, "contains"),
+                             min(_int(a, "top", 1) or 30, 1000), bool(a.get("sessions")), _str(a, "session"),
+                             bool(a.get("all")), bool(a.get("auto")))
     if name == "relic_team":
         from . import family
         _check(a, ["days"])

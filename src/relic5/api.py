@@ -39,8 +39,11 @@ if TYPE_CHECKING:
 ROUTES = {"/api/search": "relic_search", "/api/show": "relic_show", "/api/sessions": "relic_sessions",
           "/api/session": "relic_session", "/api/status": "relic_status",
           # time travel (timetravel.py, #278 #279 #281)
-          "/api/chain": "relic_chain", "/api/at": "relic_at", "/api/arc": "relic_arc"}
-INT_KEYS = {"limit", "seq", "before", "after", "cap"}
+          "/api/chain": "relic_chain", "/api/at": "relic_at", "/api/arc": "relic_arc",
+          # skills a human typed (skills.py, #299)
+          "/api/skills": "relic_skills"}
+INT_KEYS = {"limit", "seq", "before", "after", "cap", "top"}
+BOOL_KEYS = {"semantic", "by_repo", "sessions", "all", "auto"}
 STATUS_OF = {"usage": 400, "unavailable": 501, "not_found": 404, "failed": 500}
 
 
@@ -49,7 +52,7 @@ def args_of(params: QueryParams) -> Json:
     a: Json = {}
     for k0, v in params.multi_items():
         k = "query" if k0 == "q" else k0.replace("-", "_")
-        a[k] = int(v) if k in INT_KEYS and v.isdigit() else (v in ("1", "true")) if k in ("semantic", "by_repo") else v
+        a[k] = int(v) if k in INT_KEYS and v.isdigit() else (v in ("1", "true")) if k in BOOL_KEYS else v
     return a
 
 
