@@ -20,3 +20,18 @@ def test_searched_most_survives_big_eval_lines(root):
     q = selfknow.queries(root)
     assert {"query": "move relic data to s3", "n": 2} in q["top"]
     assert q["eval_logged"] == 1200 and all(t["query"] != "too old" for t in q["top"])
+
+
+def test_finish_takes_a_hits_count_as_well_as_rows(root):
+    """2026-11-23, issue #296: relic_arc returns "hits": len(rows), a count. finish() called len() on it and every arc
+    call answered HTTP 500 after its work was done. A list is counted, an int is kept, anything else logs None."""
+    os.makedirs(os.path.join(root, "logs"), exist_ok=True)
+    for tool, result, want in (("relic_arc", {"words": "proof book", "hits": 3, "months": []}, 3),
+                               ("relic_search", {"hits": [{"link": "a"}, {"link": "b"}]}, 2),
+                               ("relic_x", {"hits": True}, None),
+                               ("relic_y", {"hits": "many"}, None)):
+        qid, t0 = selfknow.start(tool, "token:test", "q")
+        selfknow.finish(root, qid, t0, result, {"words": "proof book"})
+        with open(os.path.join(root, "logs", "queries.jsonl")) as f:
+            line = json.loads(f.read().splitlines()[-1])
+        assert line["tool"] == tool and line["hits"] == want
