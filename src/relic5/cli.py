@@ -37,6 +37,7 @@
                                   the skills a human typed (/name, $name): prompts, sessions, launched, months
   relic5 skills --sessions [...]  one row per session, newest first, with the skills typed in it
   relic5 skills --session <S>     one session's prompts that typed a skill, in order
+  relic5 skills --ai [...]        the skills an AI launched on its own (no human /name first), by model and project
   relic5 pending                  what is not searchable yet: stale months (BM25), chunks without vectors, push lag
   relic5 tail [--session S] [--machine M] [--n 50] [-f] [--full]   the newest messages as they land, users and agents
                                   (-f: keep following; --full: each whole message, not its first line)
@@ -489,12 +490,24 @@ def _main(argv: list[str] | None = None) -> None:
     elif cmd == "skills":   # #299
         rest2 = list(rest)
         p = {k: o for k in ("since", "until", "project", "machine", "contains", "top", "session") if (o := _opt(rest2, "--" + k))}
-        for k in ("sessions", "all", "auto"):
+        for k in ("sessions", "all", "auto", "ai"):
             if "--" + k in rest2:
                 p[k] = "1"
         r = call("/api/skills", p)
         if as_json:
             print(json.dumps(r, ensure_ascii=False, indent=1))
+        elif "total_ai" in r:
+            n, a = r["total_launched"], r["total_ai"]
+            print(f"skills an AI launched on its own{' since ' + r['since'] if r.get('since') else ''}"
+                  f"{' until ' + r['until'] if r.get('until') else ''}: {a:,} of {n:,} Skill calls ({round(100 * a / n) if n else 0}%) "
+                  f"had no human /name typed before them in that session")
+            print(f"  {'by AI':>6} {'launched':>8} {'share':>5} {'sessions':>8}  {'first':<10} {'last':<10}  skill")
+            for x in r["skills"]:
+                months = "  ".join(f"{m[2:]} {k}" for m, k in x["months"].items())
+                print(f"  {x['ai']:>6} {x['launched']:>8} {round(100 * x['share']):>4}% {x['sessions']:>8}  {(x['first'] or '')[:10]:<10} "
+                      f"{(x['last'] or '')[:10]:<10}  /{x['skill']}  | {months}")
+            for title, key in (("by model", "by_model"), ("by project", "by_project")):
+                print(f"{title}: " + " · ".join(f"{k} {v['ai']}/{v['launched']}" for k, v in r[key].items()))
         elif "prompts" in r and isinstance(r.get("prompts"), list):
             print(f"session {r['session']}: {len(r['prompts'])} prompts typed a skill")
             for x in r["prompts"]:
@@ -508,12 +521,12 @@ def _main(argv: list[str] | None = None) -> None:
             print(f"skills typed{' since ' + r['since'] if r.get('since') else ''}{' until ' + r['until'] if r.get('until') else ''}: "
                   f"{r.get('total_skills', 0)} skills, {r.get('total_prompts', 0)} prompts, {r.get('sessions', 0)} sessions "
                   f"(catalogue {r.get('catalogue', 0)}; left out: {ex.get('automated', 0)} scheduled prompts, {ex.get('unknown_words', 0)} unknown /words)")
-            print(f"  {'sessions':>8} {'prompts':>7} {'launched':>8}  {'first':<10} {'last':<10}  skill")
+            print(f"  {'sessions':>8} {'prompts':>7} {'launched':>8} {'by AI':>6}  {'first':<10} {'last':<10}  skill")
             for x in r["skills"]:
                 months = "  ".join(f"{m[2:]} {n}" for m, n in x["months"].items())
                 kind = "" if x["kind"] == "skill" else f" ({x['kind']})"
-                print(f"  {x['sessions']:>8} {x['prompts']:>7} {x['launched']:>8}  {x['first'][:10]:<10} {x['last'][:10]:<10}  /{x['skill']}{kind}"
-                      f"  {' '.join(x['machines'])}  | {months}")
+                print(f"  {x['sessions']:>8} {x['prompts']:>7} {x['launched']:>8} {x.get('ai', 0):>6}  {x['first'][:10]:<10} "
+                      f"{x['last'][:10]:<10}  /{x['skill']}{kind}  {' '.join(x['machines'])}  | {months}")
     elif cmd == "handoff" and rest:
         print(call("/api/handoff", {"id": rest[0], "user_only": "1" if "--role" in rest else "0"})["text"])
     elif cmd == "pending":   # relic3 `pending`: what is not searchable yet, by lane

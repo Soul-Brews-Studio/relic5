@@ -7,6 +7,7 @@ from relic5 import mcp
 from relic5.query import Relic5
 from relic5.skills import skills
 
+LONG = "go-with-the-best-you-can-and-never-stop-when-your-dream-not-done-go-until-finish-without-anyask-or-wait-me"   # 106 chars
 HUGINN = "/huginn — write the hourly digest to ψ/memory/huginn/$TODAY/$HOUR00_works.md (REQUIRED), then check the inbox"
 
 
@@ -29,6 +30,7 @@ def hub(tmp_path):
         row("<system-reminder>run /rrr</system-reminder>", t.format(2, "16"), sid="s1-main"),             # injected
         row("PANE wDW:pCX rc=0 /rrr", t.format(2, "17"), sid="s1-main"),                                  # pane-run result
         row("ok now /RRR", t.format(3, "08"), sid="s2-main"),                                             # case-blind
+        row(f"/{LONG} until the book is done", t.format(3, "09"), sid="s2-main"),                        # a 106-char name (#302)
         blob("The user sent a new message while you were working: tell me /rrr", t.format(2, "20"), sid="s1-main"),  # blob only
         row("white -> m5 Laris: done, now /rrr", t.format(2, "21"), sid="s1-main"),                       # machine relay
         blob("The user sent a new message while you were working:\n[portal p-1 from white:glyph | to all] send /rename\n\n"
@@ -43,6 +45,8 @@ def hub(tmp_path):
         dict(row('{"skill":"press-run","args":"x"}', t.format(2, "10"), sid="s1-main", role="tool"), name="Skill"),
         dict(row('{"skill":"press-run"}', t.format(3, "10"), sid="s2-main", role="tool"), name="Skill"),
         dict(row('{"skill":"rrr"}', t.format(3, "11"), sid="s2-main", role="tool"), name="Skill"),
+        dict(row('{"skill":"kien-thai"}', t.format(1, "10"), sid="s3-codex", role="tool"), name="Skill"),    # never typed there
+        dict(row('{"skill":"herdr-kanban"}', "2026-11-22T11:30:00.000+07:00", sid="s1-main", role="tool"), name="Skill"),  # typed at 12:00
         dict(row('{"command":"ls"}', t.format(3, "12"), sid="s2-main", role="tool"), name="Bash")])
     sids = ["s1-main", "s2-main", "s3-codex"] + [f"h{i}-main" for i in range(10)]
     write_parquet(str(tmp_path / "parts/m5/meta/sessions.parquet"), META_COLS,
@@ -51,7 +55,7 @@ def hub(tmp_path):
     home = "parts/m5/config/beta/home/claude/skills/{}/SKILL.md"
     write_parquet(str(tmp_path / "index/_config/sections.parquet"), ["role", "path"],
                   [{"role": "config-skill", "path": home.format(n)} for n in
-                   ("press-run", "cover-and-title", "herdr-kanban", "rrr", "huginn", "oracle-write-complete-book")]
+                   ("press-run", "cover-and-title", "herdr-kanban", "rrr", "huginn", "oracle-write-complete-book", "kien-thai", LONG)]
                   + [{"role": "config-skill", "path": "parts/m5/config/beta/home/claude/plugins/cache/openai-codex/codex/1.0.4/skills/rescue/SKILL.md"},
                      {"role": "config-claudemd", "path": "parts/m5/config/beta/home/claude/CLAUDE.md"}])
     return Relic5(str(tmp_path), duckdb.connect())
@@ -64,13 +68,14 @@ def by_name(out):
 def test_typed_skills_once_per_session_without_relays_blobs_or_subagents(hub):
     out = skills(hub)
     s = by_name(out)
-    assert set(s) == {"press-run", "cover-and-title", "herdr-kanban", "goal", "rrr", "oracle-write-complete-book", "codex:rescue"}
-    assert (s["press-run"]["prompts"], s["press-run"]["sessions"], s["press-run"]["launched"]) == (1, 1, 2)
+    assert set(s) == {"press-run", "cover-and-title", "herdr-kanban", "goal", "rrr", "oracle-write-complete-book", "codex:rescue", LONG}
+    assert (s["press-run"]["prompts"], s["press-run"]["sessions"], s["press-run"]["launched"], s["press-run"]["ai"]) == (1, 1, 2, 1)
+    assert (s["herdr-kanban"]["launched"], s["herdr-kanban"]["ai"]) == (1, 1)   # launched before Nat typed it
     assert s["rrr"]["sessions"] == 2 and s["rrr"]["prompts"] == 2   # s1's mid-turn message (blob only) and s2's "ok now /RRR"
-    assert s["rrr"]["launched"] == 1 and s["goal"]["kind"] == "builtin" and s["press-run"]["kind"] == "skill"
+    assert (s["rrr"]["launched"], s["rrr"]["ai"]) == (1, 0) and s["goal"]["kind"] == "builtin" and s["press-run"]["kind"] == "skill"
     assert s["press-run"]["months"] == {"2026-11": 1} and s["press-run"]["machines"] == {"m5": 1}
     assert out["excluded"] == {"automated": 10, "unknown_words": 2} and out["catalogue"] >= 7
-    assert out["sessions"] == 3
+    assert out["sessions"] == 3 and s[LONG]["sessions"] == 1
 
 
 def test_all_keeps_unknown_words_and_auto_keeps_scheduled_runs(hub):
@@ -82,7 +87,7 @@ def test_all_keeps_unknown_words_and_auto_keeps_scheduled_runs(hub):
 
 def test_filters_contains_since_and_top(hub):
     assert list(by_name(skills(hub, contains="book"))) == ["oracle-write-complete-book"]
-    assert set(by_name(skills(hub, since="2026-11-23"))) == {"rrr"} and by_name(skills(hub, since="2026-11-23"))["rrr"]["sessions"] == 1
+    assert set(by_name(skills(hub, since="2026-11-23"))) == {"rrr", LONG} and by_name(skills(hub, since="2026-11-23"))["rrr"]["sessions"] == 1
     assert set(by_name(skills(hub, until="2026-11-21"))) == {"oracle-write-complete-book", "codex:rescue"}
     assert len(skills(hub, top=2)["skills"]) == 2
 
@@ -102,3 +107,25 @@ def test_mcp_tool(hub):
     ok, r = mcp.call_tool(hub, "relic_skills", {"sessions": "yes"})
     assert not ok
     assert "relic_skills" in {t["name"] for t in mcp.TOOLS}
+
+
+def test_ai_lists_the_skills_launched_with_no_human_call_first(hub):
+    out = skills(hub, ai=True)
+    s = by_name(out)
+    assert set(s) == {"press-run", "kien-thai", "herdr-kanban"}                       # rrr was typed first: not AI
+    assert (s["press-run"]["launched"], s["press-run"]["ai"], s["press-run"]["share"]) == (2, 1, 0.5)
+    assert (s["kien-thai"]["never_typed"], s["herdr-kanban"]["before_typed"]) == (1, 1)
+    assert (out["total_launched"], out["total_ai"]) == (5, 3)
+    assert out["by_model"] == {"?": {"launched": 5, "ai": 3}} and out["by_project"]["neo"] == {"launched": 5, "ai": 3}
+    assert out["by_month"] == {"2026-11": {"launched": 5, "ai": 3}}
+
+
+def test_typed_before_the_window_still_counts(hub):
+    """rrr was typed in s2 at 08:00 and launched at 11:00; a window from 10:00 sees only the launch, which is not AI."""
+    out = skills(hub, since="2026-11-23T10", ai=True)
+    assert out["total_launched"] == 2 and "rrr" not in by_name(out) and by_name(out)["press-run"]["ai"] == 1
+
+
+def test_mcp_ai_flag(hub):
+    ok, r = mcp.call_tool(hub, "relic_skills", {"ai": True, "contains": "kien"})
+    assert ok and [x["skill"] for x in r["skills"]] == ["kien-thai"] and r["total_ai"] == 1
