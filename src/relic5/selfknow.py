@@ -45,7 +45,9 @@ def finish(root: str, qid: str, t0: float, result: object = None, args: Json | N
         q = RUNNING.pop(qid, {})
     args = args or {}
     r: Json = result if isinstance(result, dict) else {}
-    line = q | {"ms": round((time.time() - t0) * 1000), "hits": len(r.get("hits", [])) if "hits" in r else None,
+    h = r.get("hits")   # a list of rows, or a count (arc returns "hits": len(rows)), issue #296
+    line = q | {"ms": round((time.time() - t0) * 1000),
+                "hits": len(h) if isinstance(h, list) else h if isinstance(h, int) and not isinstance(h, bool) else None,
                 "mode": ("hybrid" if r.get("hybrid") else "semantic") if r.get("semantic") else ("keyword" if "hits" in r else None),
                 "horizon": r.get("horizon"), "vector": "vector" in args, "error": (error or "")[:200] or None}
     top = None
