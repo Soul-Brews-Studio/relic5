@@ -17,7 +17,9 @@
   relic5 gc [--json]              on the hub: what could be reclaimed (dry run only; nothing is deleted)
   relic5 eval [tests/eval/semantic.json] [--semantic]   recall@10 of a query file against the hub
   relic5 log [-n 30]              on the hub: the last event of each job (logs/jobs.jsonl, relic3's JobEvent)
-  relic5 serve [--root ~/relic5] [--host 127.0.0.1,100.103.52.67] [--port 8795]
+  relic5 serve [--root ~/relic5] [--host 127.0.0.1,100.103.52.67] [--port 8795] [--duck-mem 6GB]
+  relic5 duck-mem [8GB] [--no-save]   the hub's DuckDB memory cap: read it, or set it live (saved for the next start);
+                                  a change only from the hub itself or Nat's tailnet (no token is sent)
   relic5 search <words> [--with tools] [--limit 20] [--since 7d] [--repo R] [--json]     any machine, over tailscale
   relic5 recap <session> [--limit 20|0] [--json]   what happened: turns asked, tools, files edited, how it ended
   relic5 show <uid | relic5://… | relic3://…> [--before 2] [--after 2]   one hit in full, with its neighbours
@@ -121,7 +123,10 @@ def serve(args: list[str]) -> None:
     from .doors import Doors
     from .tokens import Tokens
     T = Tokens()
-    app = make_app(root, T, Doors(T))
+    from . import hubmem
+    mem, src = hubmem.at_start(_opt(args, "--duck-mem"))
+    print(f"relic5 serve: DuckDB memory_limit {mem} ({src})", flush=True)
+    app = make_app(root, T, Doors(T), duck_mem=mem)
     socks = []
     binds = [(h, port) for h in hosts]
     if os.environ.get("RELIC5_SERVE_PORT"):   # tailscale serve's target: loopback only (api.py SERVE_PORT, doors.served)
@@ -487,6 +492,27 @@ def _main(argv: list[str] | None = None) -> None:
                 print(f"turn {t['month']}: {t['why']}\n   {t['hit']['text'][:160]}\n   {t['hit']['link']}")
             for x in r["readings"][:12]:
                 print(f"  read {x['day']} {x['model']}: {x.get('focus')}")
+    elif cmd == "duck-mem":   # #306: no token on purpose, so only a tokenless door (this box, Nat's tailnet) may change it
+        rest2 = [x for x in rest if x != "--no-save"]
+        url = URL.rstrip("/") + "/api/duck-mem"
+        if rest2:
+            body = json.dumps({"memory_limit": rest2[0], "persist": "--no-save" not in rest}).encode()
+            req = urllib.request.Request(url, data=body, method="POST",
+                                         headers={"Content-Type": "application/json", "X-Relic5-Request": "1"})
+        else:
+            tok = open(os.path.expanduser(TOKEN_FILE)).read().strip() if os.path.exists(os.path.expanduser(TOKEN_FILE)) else ""
+            req = urllib.request.Request(url, headers={"Authorization": "Bearer " + tok} if tok else {})
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                r = json.load(resp)
+        except urllib.error.HTTPError as ex:
+            print(f"relic5 duck-mem: {ex.code} {json.loads(ex.read() or b'{}').get('error', '')}", file=sys.stderr)
+            raise SystemExit(EXIT_USAGE if ex.code in (400, 403) else EXIT_ERROR) from None
+        if as_json:
+            print(json.dumps(r, ensure_ascii=False, indent=1))
+        else:
+            print(f"memory_limit {r['memory_limit']}" + (f" (was {r['before']})" if r.get("before") else "")
+                  + f" · saved {r.get('saved') or '-'} · default {r['default']}" + (f" · env {r['env']}" if r.get("env") else ""))
     elif cmd == "skills":   # #299
         rest2 = list(rest)
         p = {k: o for k in ("since", "until", "project", "machine", "contains", "top", "session") if (o := _opt(rest2, "--" + k))}

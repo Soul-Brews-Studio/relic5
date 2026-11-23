@@ -60,7 +60,7 @@ def dumps(v: object) -> str:
     return json.dumps(v, ensure_ascii=False, default=str)
 
 
-def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None" = None) -> FastAPI:
+def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None" = None, duck_mem: str | None = None) -> FastAPI:
     """tokens: {machine: token}; doors: who needs none (doors.py; default: loopback + Nat's own tailnet nodes)."""
     from .doors import Doors
     if not tokens and doors is None:
@@ -68,7 +68,10 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
     doors = doors if doors is not None else Doors(tokens)
     # a memory limit: DuckDB takes up to 80% of the machine by default, and white's hub was OOM-killed (2026-10-25, 46 GB
     # box, serve at 24 GB beside an index); RELIC5_DUCK_MEM overrides
-    con = duckdb.connect(":memory:", config={"threads": min(os.cpu_count() or 4, 16), "memory_limit": os.environ.get("RELIC5_DUCK_MEM", "6GB")})
+    # box, serve at 24 GB beside an index); serve --duck-mem, RELIC5_DUCK_MEM or ~/.config/relic5/hub.json override, and
+    # `relic5 duck-mem 8GB` / MCP relic_hub_memory change it while the hub runs (hubmem.py, #306)
+    from . import hubmem
+    con = duckdb.connect(":memory:", config={"threads": min(os.cpu_count() or 4, 16), "memory_limit": hubmem.at_start(duck_mem)[0]})
     from . import perf
     perf.keep(root)
     threading.Thread(target=seen.seed, args=(root,), name="seen-seed", daemon=True).start()   # last used, from the logs
@@ -120,6 +123,25 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
         if t is None:
             return bad or JSONResponse({"error": "refused"}, status_code=403)
         return [r | seen.of("token:" + r["name"]) for r in t.list()]
+
+    @app.get("/api/duck-mem", response_model=None)
+    def duck_mem_read() -> Json:
+        from . import hubmem
+        return hubmem.status(con)
+
+    @app.post("/api/duck-mem", response_model=None)
+    async def duck_mem_change(request: Request) -> Response | Json:
+        """{"memory_limit": "8GB", "persist": true}: tokenless doors only (hubmem.tokenless), JSON + X-Relic5-Request."""
+        from . import hubmem
+        if request.headers.get("x-relic5-request") != "1" or not request.headers.get("content-type", "").startswith("application/json"):
+            return JSONResponse({"error": "a change needs Content-Type: application/json and X-Relic5-Request: 1"}, status_code=400)
+        try:
+            body: Json = await request.json()
+            return hubmem.change(con, str(body.get("memory_limit") or ""), request.state.door, bool(body.get("persist", True)))
+        except PermissionError as ex:
+            return JSONResponse({"error": str(ex)}, status_code=403)
+        except (ValueError, AttributeError) as ex:
+            return JSONResponse({"error": str(ex)}, status_code=400)
 
     @app.post("/api/tokens", response_model=None)
     async def tokens_change(request: Request) -> Response | Json:

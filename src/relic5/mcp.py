@@ -224,6 +224,11 @@ TOOLS = [
      "relic-scan's user@host, sessions, messages and first/last time: nat's ~/.claude, beta's, ~/.claude1, a project's own "
      ".claude. Use a home with relic_search or relic_sessions (home=).",
      "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
+    {"name": "relic_hub_memory", "description": "The hub's DuckDB memory cap (default 6GB): with no arguments, the live "
+     "value, the saved one (~/.config/relic5/hub.json) and the default. set='8GB' changes it on the running hub (no restart) "
+     "and saves it for the next start unless persist=false; a change is only accepted from the hub itself or Nat's "
+     "tailnet (a tokenless door), never with a client token.",
+     "inputSchema": {"type": "object", "properties": {"set": STR, "persist": {"type": "boolean"}}, "additionalProperties": False}},
     {"name": "relic_status", "description": "Months, per-machine watermarks, totals, jobs and warnings (StatusReport).",
      "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
     {"name": "relic_artifact_put", "description": "Keep something you made for an oracle on the hub: an image (png jpg webp gif svg), "
@@ -505,6 +510,17 @@ def run_tool(relic: Relic5, name: str, a: Json, door: str | None = None) -> Json
     if name == "relic_homes":
         _check(a, [])
         return relic.homes()
+    if name == "relic_hub_memory":
+        from . import hubmem
+        _check(a, ["set", "persist"])
+        if a.get("persist") is not None and not isinstance(a["persist"], bool):
+            raise UsageError("persist must be true or false")
+        if not _str(a, "set"):
+            return hubmem.status(relic.con)
+        try:
+            return hubmem.change(relic.con, _str(a, "set") or "", door, a.get("persist") is not False)
+        except (PermissionError, ValueError) as ex:
+            raise UsageError(str(ex)) from ex
     if name == "relic_status":
         _check(a, [])
         return {"you": door, **status(relic.parts.root)}
