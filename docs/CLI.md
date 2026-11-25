@@ -61,6 +61,14 @@ compares the Rust and Python clients in embedded mode. Differences, on purpose:
   `relic5 mcp` opens the store on a call and closes it after `RELIC5_LOCAL_IDLE` seconds idle (default 60). Settings:
   `RELIC5_LOCAL_MEM` (DuckDB cap per reader, default 1GB), `RELIC5_LOCAL_THREADS` (4), `RELIC5_LOCAL_STICKY` (60:
   after the hub was unreachable, `relic5 mcp` answers embedded this long before trying it again).
+- **Two engines: Python, and Rust for `search`.** `relic5` (the default build) answers every embedded read through the
+  Python core. `relic5-rs` (`just cli-rs`, `cargo build --profile native --features native --bin relic5-rs`) is the
+  same CLI with `cli/src/native.rs`: `search` read in-process with lancedb 0.40.0 / lance 13.0.0, the versions the
+  core's Python packages run, so the BM25 scores are the same and no Python is needed. Anything the port does not
+  carry (a cursor, `--repo` and the other session filters, semantic, discord, a vault hit, an FTS error, a window it
+  cannot read) goes to the core, so the answer is still the core's. `RELIC5_LOCAL_ENGINE=py` sends search to the core
+  too. test_rust_cli.py checks both engines print the same bytes over 18 queries (phrase, Thai, layers, windows,
+  filters, errors).
 - **Slow cold `status`.** `status` reads the readings, the git log and the query log in full. On a large store that
   takes tens of seconds in a fresh process (the hub keeps the answer cached).
 

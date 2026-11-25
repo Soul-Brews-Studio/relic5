@@ -12,6 +12,18 @@ description = "relic5 command line: the hub client in Rust; every hub-side comma
 name = "relic5"
 path = "src/main.rs"
 
+# relic5-rs: the same CLI with a Rust-native embedded engine (#311): with no hub, `search` reads the BM25 index with
+# lancedb in-process (the same lance as the Python core's), no Python needed. Every other embedded read still goes to
+# the core, and RELIC5_LOCAL_ENGINE=py sends search there too: both engines stay supported.
+#   cargo build --profile native --features native --bin relic5-rs
+[[bin]]
+name = "relic5-rs"
+path = "src/main.rs"
+required-features = ["native"]
+
+[features]
+native = ["dep:lancedb", "dep:lance-index", "dep:lance-tokenizer", "dep:arrow-array", "dep:arrow-schema", "dep:arrow-cast", "dep:tokio", "dep:futures", "dep:parquet", "dep:regex", "dep:sha1_smol", "dep:base64"]
+
 [dependencies]
 # same crates as relic4-scan and relic-extract
 ureq = { version = "3", default-features = false, features = ["rustls"] }
@@ -22,6 +34,27 @@ libc = "0.2"
 serde = "1"
 # relic-scan's TUI crates, same versions
 ratatui = { version = "0.30.2", default-features = false, features = ["crossterm", "layout-cache"] }
+# native engine only (feature "native"): pinned to what the Python core's lancedb 0.40.0 / pylance 13.0.0 run, so a
+# query gets the same BM25 scores either way
+# "remote": lancedb 0.40.0 does not compile without it (job.rs names Error::Http); the Python wheel is built with it too
+lancedb = { version = "=0.40.0", default-features = false, features = ["remote"], optional = true }
+lance-index = { version = "=13.0.0", default-features = false, optional = true }
+lance-tokenizer = { version = "=13.0.0", default-features = false, optional = true }
+arrow-array = { version = "58", optional = true }
+arrow-schema = { version = "58", optional = true }
+arrow-cast = { version = "58", optional = true }
+parquet = { version = "58", default-features = false, features = ["arrow", "snap", "zstd"], optional = true }
+tokio = { version = "1", features = ["rt-multi-thread"], optional = true }
+futures = { version = "0.3", optional = true }
+regex = { version = "1", optional = true }
+sha1_smol = { version = "1", optional = true }
+base64 = { version = "0.22", optional = true }
+
+# the native engine pulls lance + datafusion: thin LTO keeps its build under an hour
+[profile.native]
+inherits = "release"
+lto = "thin"
+codegen-units = 16
 
 [profile.release]
 opt-level = 3

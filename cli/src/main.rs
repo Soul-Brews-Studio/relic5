@@ -8,6 +8,8 @@ mod core;
 mod hub;
 mod import;
 mod memory;
+#[cfg(feature = "native")]
+mod native;
 mod notes;
 mod top;
 mod py;

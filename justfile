@@ -71,6 +71,14 @@ cli-bin:
     PATH="$HOME/.cargo/bin:$PATH" cargo install --quiet --locked --force --path cli --root "$HOME/.local"
     @"$HOME/.local/bin/relic5" --version
 
+# relic5-rs (#311): the same CLI plus a Rust-native embedded engine, so `search` with no hub needs no Python
+# (lancedb in-process, the same lance as the core's). Beside relic5, never instead of it; the first build takes
+# ~25 min (lance + datafusion), later ones reuse cli/target. Other embedded reads still use relic5-core.
+cli-rs:
+    @PATH="$HOME/.cargo/bin:$PATH" command -v cargo >/dev/null || { echo "cargo not found (not in ~/.cargo/bin nor on PATH)" >&2; exit 1; }
+    PATH="$HOME/.cargo/bin:$PATH" cargo install --quiet --locked --force --path cli --profile native --features native --bin relic5-rs --root "$HOME/.local" --target-dir cli/target
+    @"$HOME/.local/bin/relic5-rs" --version
+
 # Rust CLI against the Python CLI on a test hub (same output, same exit codes)
 cli-test:
     cd cli && cargo test --release && cargo build --release

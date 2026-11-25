@@ -107,6 +107,14 @@ pub fn fix_hint() -> String {
 /// The route answered by the Python core from this machine's store (relic5-core local-call): the same JSON, and on an
 /// error the same message and exit code as the hub's, printed by the core itself
 fn local(path: &str, params: &[(String, String)], why: String) -> Result<Value, Fail> {
+    // relic5-rs: search answered in Rust when it can (native.rs); RELIC5_LOCAL_ENGINE=py always asks the core
+    #[cfg(feature = "native")]
+    if path == "/api/search" && std::env::var("RELIC5_LOCAL_ENGINE").map(|e| e != "py").unwrap_or(true) {
+        if let Some(v) = crate::native::search(&root(), params) {
+            set_mode(json!({"used": "local", "why": why, "root": root(), "engine": "rs"}));
+            return Ok(v);
+        }
+    }
     let Some(core) = core::find() else {
         return Err(Fail::Other(
             "relic5: embedded mode runs in the Python core, and relic5-core is not installed here\n  \
@@ -120,10 +128,18 @@ fn local(path: &str, params: &[(String, String)], why: String) -> Result<Value, 
         .args(["local-call", path, &pairs.to_string()])
         .env("RELIC5_ROOT", root())
         .stdin(Stdio::null())
-        .stderr(Stdio::inherit())
+        .stderr(Stdio::piped())
         .output()
         .map_err(|e| Fail::Other(format!("relic5: cannot run {}: {e}", core.display()), 1))?;
     if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr);
+        if err.contains("unknown command 'local-call'") {   // a core from before #311
+            return Err(Fail::Other(format!(
+                "relic5: embedded mode needs a newer relic5-core than {} (it has no local-call)\n  \
+                 upgrade it: just cli (in a relic5 checkout), or set RELIC5_CORE to a newer one",
+                core.display()), 1));
+        }
+        eprint!("{err}");
         return Err(Fail::Exit(out.status.code().unwrap_or(1)));
     }
     set_mode(json!({"used": "local", "why": why, "root": root()}));
