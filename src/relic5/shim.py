@@ -8,11 +8,14 @@ is ever written to stdout.
 
   claude mcp add -s user relic5 -- <repo>/.venv/bin/relic5 mcp      (needs the `embed` extra: uv sync --extra embed)
 """
-import json, os, sys, urllib.request
-from typing import Callable, TextIO
+import json, os, sys, urllib.error, urllib.request
+from typing import TYPE_CHECKING, Callable, TextIO
 
 from .types_ import Json
 from . import store as rfs
+
+if TYPE_CHECKING:
+    from . import local
 
 Encoder = Callable[[list[str], str], list[list[float]]]
 """encode.encode's shape as add_vector calls it: (texts, model) -> unit vectors."""
@@ -68,7 +71,32 @@ def with_note(out: Json, note: str) -> Json:
     return out
 
 
-def serve(url: str, stdin: TextIO = sys.stdin, stdout: TextIO = sys.stdout, encode: Encoder | None = None) -> None:
+STICKY_S = float(os.environ.get("RELIC5_LOCAL_STICKY", "60"))
+"""After the hub could not be reached, answer embedded for this long before trying the hub again (a dead tailnet
+address can take a connect timeout per call)."""
+
+
+def _unreachable(ex: BaseException) -> bool:
+    """Never reached the hub (refused, no route, connect timeout), as opposed to the hub answering with an error."""
+    return isinstance(ex, urllib.error.URLError) and not isinstance(ex, urllib.error.HTTPError) or isinstance(ex, ConnectionError)
+
+
+def serve(url: str, stdin: TextIO = sys.stdin, stdout: TextIO = sys.stdout, encode: Encoder | None = None,
+          reader: "local.Reader | local.Worker | None" = None) -> None:
+    """Forward to the hub; embedded (local.py) when RELIC5_LOCAL=1, or while the hub cannot be reached and a store is
+    here (#311). The embedded store is opened on a call and closed again after RELIC5_LOCAL_IDLE seconds idle."""
+    from . import local, mcp
+    rd = reader or local.Worker()   # the store in a child process, ended when idle
+    if reader is None:
+        rd.keep_closing()
+    local_until = float("inf") if local.forced() else 0.0
+
+    def embedded(msg: object) -> object:
+        if isinstance(msg, list):
+            return [r for r in (mcp.handle(None, m, local.DOOR, lambda _r, n, a, _d: rd.tool(n, a)) for m in msg) if r is not None] or None  # type: ignore[arg-type]
+        return mcp.handle(None, msg, local.DOOR, lambda _r, n, a, _d: rd.tool(n, a))  # type: ignore[arg-type]
+
+    import time as _time
     for line in stdin:
         if not line.strip():
             continue
@@ -79,14 +107,25 @@ def serve(url: str, stdin: TextIO = sys.stdin, stdout: TextIO = sys.stdout, enco
             stdout.flush()
             continue
         try:
-            sent = add_vector(msg, encode) if isinstance(msg, dict) else msg
-            failed = sent.pop("_embed_failed", None) if isinstance(sent, dict) else None
-            out = forward(url, sent)
-            if failed and isinstance(out, dict):
-                out = with_note(out, "query embedding failed on this Mac (" + "; ".join(failed) + "): keyword hits")
+            if _time.monotonic() < local_until:
+                out = embedded(msg)
+            else:
+                sent = add_vector(msg, encode) if isinstance(msg, dict) else msg
+                failed = sent.pop("_embed_failed", None) if isinstance(sent, dict) else None
+                try:
+                    out = forward(url, sent)
+                except Exception as ex:
+                    if not (_unreachable(ex) and local.has_store(rd.root)):
+                        raise
+                    print(f"relic5 mcp: hub unreachable ({url}: {ex}); answering from {rd.root} (embedded) for {STICKY_S:g}s", file=sys.stderr)
+                    local_until = _time.monotonic() + STICKY_S
+                    out = embedded(msg)
+                if failed and isinstance(out, dict):
+                    out = with_note(out, "query embedding failed on this Mac (" + "; ".join(failed) + "): keyword hits")
         except Exception as ex:
             out = None if isinstance(msg, dict) and "id" not in msg else \
-                {"jsonrpc": "2.0", "id": msg.get("id") if isinstance(msg, dict) else None, "error": {"code": -32603, "message": f"hub unreachable: {ex}"}}
+                {"jsonrpc": "2.0", "id": msg.get("id") if isinstance(msg, dict) else None, "error": {"code": -32603, "message":
+                 f"hub unreachable: {ex} (start it: relic5 serve --root {rd.root}, or run relic5 mcp with RELIC5_LOCAL=1 and a store at --root/RELIC5_ROOT)"}}
         if out is not None:
             stdout.write(json.dumps(out, ensure_ascii=False) + "\n")
             stdout.flush()

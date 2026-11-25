@@ -25,6 +25,45 @@ The core is found in this order: `$RELIC5_CORE`, `relic5-core` on `PATH`, beside
 `~/.local/share/uv/tools/relic5/bin/relic5-core`, `~/relic5/app/.venv/bin/relic5-core`. The Rust binary never runs
 itself again.
 
+## When you need `serve`, and when you don't (#311)
+
+`relic5 serve` keeps the whole store warm: the DuckDB buffer (up to its `--duck-mem` cap), the open search tables, the
+Map and Knowledge map, the page caches. Most of its memory goes to that warm state, mostly the Map (measured on a copy
+of a full store: ~0.7 GB after searches, sessions and status, then ~8.9 GB once the Map was built). One machine's own
+searches do not need any of it.
+
+| you want | you need |
+|---|---|
+| the web pages, the Map, other machines searching this one, claude.ai's connector, saved searches, tags, found notes, artifacts | `relic5 serve` |
+| semantic search (`semantic: true`: the vector matrices are the hub's warm memory) | `relic5 serve` (embedded answers by keyword and says so) |
+| `search`, `show`, `recap`, `conversation`, `handoff`, `readings`, `tail`, `pending`, `status`, `searched`, `trace`, `chain`, `at`, `arc`, `skills` on this machine, and `relic5 mcp`'s read tools | nothing: a store on disk is enough |
+
+How the client picks:
+
+- `RELIC5_LOCAL=1` or `--local`: always embedded, reading the store at `--root` / `RELIC5_ROOT` / storage.json's root / `~/relic5`.
+- Otherwise the hub (`RELIC5_URL`, or the default). If it cannot be reached (refused, no route, connect timeout, or
+  no token file) **and** a store exists at the root, the same command is answered embedded. A hub that answers with
+  an error is never re-asked locally.
+- Neither: the hub's error, followed by the commands that fix it (`relic5 serve --root …`, `export RELIC5_LOCAL=1`,
+  `export RELIC5_URL=…`).
+- `relic5 status` starts with `"mode": {"used": "hub" | "local", "why": …, "url" | "root": …}`.
+
+Embedded answers come from the same code as the hub's (`mcp.call_tool` and `src/relic5/routes.py`), so the output,
+the error text and the exit codes match; tests/test_local.py compares them route by route, and test_rust_cli.py
+compares the Rust and Python clients in embedded mode. Differences, on purpose:
+
+- **Nothing is written.** No query log, no trace records, so results carry no `trace` and `relic_found`, `relic_tag`,
+  `relic_saved add/remove`, `relic_artifact_put` and `relic_hub_memory set` answer "needs the hub". `you` is `local`.
+- **Safe beside a writer.** DuckDB is an in-memory connection reading parquet (no database file, no lock); the index
+  publishes a new Lance generation and renames `current.json` last, keeping 3 generations, so a reader holds one
+  whole generation. `relic5 index`, `import` and the cycle write as before.
+- **Opened per call, let go after.** The Rust client runs `relic5-core local-call <path> <params>` once per command.
+  `relic5 mcp` opens the store on a call and closes it after `RELIC5_LOCAL_IDLE` seconds idle (default 60). Settings:
+  `RELIC5_LOCAL_MEM` (DuckDB cap per reader, default 1GB), `RELIC5_LOCAL_THREADS` (4), `RELIC5_LOCAL_STICKY` (60:
+  after the hub was unreachable, `relic5 mcp` answers embedded this long before trying it again).
+- **Slow cold `status`.** `status` reads the readings, the git log and the query log in full. On a large store that
+  takes tens of seconds in a fresh process (the hub keeps the answer cached).
+
 ## Same as before, on purpose
 
 - **Settings:** `RELIC5_URL` (default white), `RELIC5_TOKEN_FILE` (default `~/.config/relic5/token`), and for

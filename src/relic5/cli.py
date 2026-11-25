@@ -12,7 +12,8 @@
   relic5 import relic3 [--weeks 2026W40-2026-09-28,...] [--all] [--out ~/.relic-import/relic3]
                                   old relic3 weeks -> relic-scan month files of the sessions no machine holds
   relic5 tui [--token]            the hub in a terminal: status, live, search (+ show), jobs, queries
-  relic5 mcp                      stdio MCP on a Mac: forwards to the hub, embeds semantic queries here
+  relic5 mcp                      stdio MCP on a Mac: forwards to the hub, embeds semantic queries here;
+                                  no hub reachable (or RELIC5_LOCAL=1): reads the local store itself (#311)
   relic5 embed [--probe] [--limit 5000] [--prefix 0,1] [--engine mps]   client: embed missing chunks, ship a shard
   relic5 gc [--json]              on the hub: what could be reclaimed (dry run only; nothing is deleted)
   relic5 eval [tests/eval/semantic.json] [--semantic]   recall@10 of a query file against the hub
@@ -47,6 +48,8 @@
 
 Client settings: RELIC5_URL (default http://white.follow-rankine.ts.net:8795), RELIC5_TOKEN_FILE
 (default ~/.config/relic5/token, 0600, the one line `relic5 token add` printed on the hub).
+No hub? The read commands and `relic5 mcp` read this machine's store directly when the hub cannot be reached, or
+always with --local / RELIC5_LOCAL=1 (store: --root, RELIC5_ROOT, else ~/relic5). docs/CLI.md: when you need serve.
 Hub settings: RELIC5_ROOT (default ~/relic5), RELIC5_TOKENS (default ~/.config/relic5/tokens: `<machine> <token>` lines).
 """
 import json, os, re, secrets, sys, time, urllib.error, urllib.parse, urllib.request
@@ -140,13 +143,47 @@ def serve(args: list[str]) -> None:
     uvicorn.Server(uvicorn.Config(app, log_level="warning", proxy_headers=False)).run(sockets=socks)
 
 
+MODE: Json = {}
+"""How the last call() was answered: {"used": "hub" | "local", "why": ..., "url" | "root": ...} (relic5 status shows it)."""
+
+
 def call(path: str, params: dict[str, str]) -> Json:
-    tok = open(os.path.expanduser(TOKEN_FILE)).read().strip()
+    """GET a hub route; embedded (local.py) when RELIC5_LOCAL=1, or when no hub can be reached and a store is here (#311)."""
+    from . import local
+    if local.forced():
+        return _local(path, params, "RELIC5_LOCAL=1")
+    try:
+        tok = open(os.path.expanduser(TOKEN_FILE)).read().strip()
+    except OSError as ex:
+        if local.has_store():
+            return _local(path, params, f"no hub token ({os.path.expanduser(TOKEN_FILE)})")
+        raise urllib.error.URLError(f"no token file {TOKEN_FILE} ({ex.strerror})")
     url = URL.rstrip("/") + path + ("?" + urllib.parse.urlencode(params) if params else "")
     req = urllib.request.Request(url, headers={"Authorization": "Bearer " + tok})
-    with urllib.request.urlopen(req, timeout=60) as r:
-        out: Json = json.load(r)
-        return out
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            out: Json = json.load(r)
+    except urllib.error.HTTPError:
+        raise
+    except urllib.error.URLError as ex:   # never reached the hub (refused, no route, connect timeout)
+        if local.has_store():
+            return _local(path, params, f"hub unreachable ({URL}): {ex.reason}")
+        raise
+    MODE.clear()
+    MODE.update(used="hub", why="RELIC5_URL" if "RELIC5_URL" in os.environ else "the default hub answered", url=URL)
+    return out
+
+
+def _local(path: str, params: dict[str, str], why: str) -> Json:
+    """The same route answered from this machine's store; an error is raised as the hub's would be (same text, same exit)."""
+    import io
+    from . import local
+    status, body = local.Reader().get(path, list(params.items()))
+    MODE.clear()
+    MODE.update(used="local", why=why, root=local.root())
+    if status != 200:
+        raise urllib.error.HTTPError(path, status, "embedded", None, io.BytesIO(local.error_text(body).encode()))  # type: ignore[arg-type]
+    return body
 
 
 def _line(h: Json, width: int = 110) -> str:
@@ -154,6 +191,10 @@ def _line(h: Json, width: int = 110) -> str:
     who = ",".join(h.get("machines") or [])
     return f"{(h.get('ts') or '')[:16]}  {who:<7} {h.get('role') or '':<9} {(h.get('session_uuid') or '')[:8]}  {txt}"
 
+
+CLIENT = {"search", "show", "conversation", "readings", "recap", "chain", "at", "arc", "skills", "handoff", "pending",
+          "tail", "status", "mcp"}
+"""Commands that read through call() (or the MCP shim): they take --local and --root (embedded mode, #311)."""
 
 # Exit codes, as relic3: 0 ok · 1 error · 2 usage · 3 parity refused (embed) · 75 locked · 130 cancelled
 EXIT_ERROR, EXIT_USAGE, EXIT_LOCKED, EXIT_CANCELLED = 1, 2, 75, 130
@@ -169,7 +210,8 @@ def main(argv: list[str] | None = None) -> None:
         print(f"relic5: {ex.code} {body}", file=sys.stderr)
         sys.exit(EXIT_USAGE if ex.code in (400, 404) else EXIT_ERROR)
     except urllib.error.URLError as ex:
-        print(f"relic5: hub unreachable ({URL}): {ex.reason}", file=sys.stderr)
+        from . import local
+        print(f"relic5: hub unreachable ({URL}): {ex.reason}\n{local.fix_hint(URL)}", file=sys.stderr)
         sys.exit(EXIT_ERROR)
 
 
@@ -185,6 +227,26 @@ def _main(argv: list[str] | None = None) -> None:
     cmd, rest = args[0], args[1:]
     as_json = "--json" in rest
     rest = [a for a in rest if a != "--json"]
+    if cmd in CLIENT:   # embedded mode switches (#311): --local, and --root for the store it reads
+        if "--local" in rest:
+            rest.remove("--local")
+            os.environ["RELIC5_LOCAL"] = "1"
+        if (r_ := _opt(rest, "--root")) is not None:
+            os.environ["RELIC5_ROOT"] = r_
+    if cmd == "local-worker":   # relic5 mcp's embedded reader, in a child it can end when idle (local.Worker)
+        from .local import worker_main
+        return worker_main()
+    if cmd == "local-call":   # the Rust client's embedded mode (#311): one hub route from this machine's store, its JSON on stdout
+        from . import local
+        if len(rest) != 2:
+            print("usage: relic5-core local-call <path> <json [[k, v], ...]>", file=sys.stderr)
+            sys.exit(EXIT_USAGE)
+        st_, ans = local.Reader().get(rest[0], [(str(k), str(v)) for k, v in json.loads(rest[1])])
+        if st_ != 200:
+            print(f"relic5: {st_} {local.error_text(ans)[:300]}", file=sys.stderr)
+            sys.exit(EXIT_USAGE if st_ in (400, 404) else EXIT_ERROR)
+        print(json.dumps(ans, ensure_ascii=False))
+        return
     if cmd == "token":
         from .tokens import Tokens
         T, sub = Tokens(), rest[:1]
@@ -543,10 +605,10 @@ def _main(argv: list[str] | None = None) -> None:
                 sk = " ".join("/" + k + (f"x{n}" if n > 1 else "") for k, n in x["skills"].items())
                 print(f"{x['start'][:16].replace('T', ' ')}  {x['machine']:<6} {x['sid'][:8]}  {(x.get('title') or x.get('project') or '')[:40]:<40}  {sk}")
         else:
-            ex = r.get("excluded") or {}
+            left = r.get("excluded") or {}
             print(f"skills typed{' since ' + r['since'] if r.get('since') else ''}{' until ' + r['until'] if r.get('until') else ''}: "
                   f"{r.get('total_skills', 0)} skills, {r.get('total_prompts', 0)} prompts, {r.get('sessions', 0)} sessions "
-                  f"(catalogue {r.get('catalogue', 0)}; left out: {ex.get('automated', 0)} scheduled prompts, {ex.get('unknown_words', 0)} unknown /words)")
+                  f"(catalogue {r.get('catalogue', 0)}; left out: {left.get('automated', 0)} scheduled prompts, {left.get('unknown_words', 0)} unknown /words)")
             print(f"  {'sessions':>8} {'prompts':>7} {'launched':>8} {'by AI':>6}  {'first':<10} {'last':<10}  skill")
             for x in r["skills"]:
                 months = "  ".join(f"{m[2:]} {n}" for m, n in x["months"].items())
@@ -622,7 +684,7 @@ def _main(argv: list[str] | None = None) -> None:
             sys.exit(1 if vf["problems"] else 0)
     elif cmd == "status":
         r = call("/api/status", {})
-        print(json.dumps(r, ensure_ascii=False, indent=1))
+        print(json.dumps({"mode": dict(MODE), **r}, ensure_ascii=False, indent=1))
     else:
         print(f"unknown command '{cmd}'\n  relic5 --help", file=sys.stderr)
         sys.exit(EXIT_USAGE)

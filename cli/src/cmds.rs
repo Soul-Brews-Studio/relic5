@@ -374,7 +374,13 @@ pub fn tail(mut a: Args) -> Result<(), Fail> {
 }
 
 pub fn status() -> Result<(), Fail> {
-    println!("{}", dumps(&hub::call("/api/status", &[])?));
+    let r = hub::call("/api/status", &[])?;
+    let mut out = serde_json::Map::new();
+    out.insert("mode".into(), hub::mode());   // hub or local, and why (#311)
+    if let Value::Object(m) = r {
+        out.extend(m);
+    }
+    println!("{}", dumps(&Value::Object(out)));
     Ok(())
 }
 

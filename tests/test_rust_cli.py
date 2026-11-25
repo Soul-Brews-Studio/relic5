@@ -87,3 +87,19 @@ def test_version_is_pyprojects(hub):
     from relic5 import __version__
     out = subprocess.run([RUST, "--version"], capture_output=True, text=True).stdout
     assert out == f"relic5 {__version__}\n"
+
+
+def test_embedded_mode_matches_python(hub):
+    """RELIC5_LOCAL=1 (#311): the Rust CLI goes through the core's local-call, the Python CLI reads in-process; both print
+    the same bytes and exit codes, the hub never asked."""
+    env = hub | {"RELIC5_LOCAL": "1", "RELIC5_URL": "http://127.0.0.1:9"}
+    for args in (["search", "hub"], ["search", "hub", "--json"], ["search", "hub", "--limit", "2"], ["show", "f" * 32],
+                 ["show", "0" * 32], ["recap", "s1-aaaa"], ["conversation", "s1-aaaa"], ["search", ""]):
+        py, rs = both(env, *args)
+        assert py == rs, args
+    py, rs = both(env, "status")   # its ages move between two runs: the same keys and the same mode
+    p_, r_ = json.loads(py[1]), json.loads(rs[1])
+    assert list(p_) == list(r_) and p_["mode"] == r_["mode"] == {"used": "local", "why": "RELIC5_LOCAL=1", "root": hub["RELIC5_ROOT"]}
+    # no token, no hub, but a store: both fall back on their own
+    py, rs = both(hub | {"RELIC5_URL": "http://127.0.0.1:9", "RELIC5_TOKEN_FILE": "/nonexistent"}, "search", "hub")
+    assert py == rs and py[0] == 0

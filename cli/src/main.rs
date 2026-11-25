@@ -29,6 +29,25 @@ fn main() {
     let mut rest: Vec<String> = argv[1..].to_vec();
     let json = rest.iter().any(|a| a == "--json");
     rest.retain(|a| a != "--json");
+    if matches!(cmd.as_str(), "search" | "show" | "conversation" | "readings" | "recap" | "handoff" | "pending" | "tail" | "status" | "searched" | "trace") {
+        // embedded mode (#311): --local reads this machine's store with no hub; --root names the store
+        let local = rest.iter().any(|a| a == "--local");
+        rest.retain(|a| a != "--local");
+        let root = rest.iter().position(|a| a == "--root").map(|i| {
+            let v = rest.get(i + 1).cloned();
+            rest.drain(i..(i + 2).min(rest.len()));
+            v
+        });
+        unsafe {
+            // single-threaded here, before any other work
+            if local {
+                std::env::set_var("RELIC5_LOCAL", "1");
+            }
+            if let Some(Some(r)) = root {
+                std::env::set_var("RELIC5_ROOT", r);
+            }
+        }
+    }
     let has_id = !rest.is_empty();
     let r = match cmd.as_str() {
         "search" => cmds::search(Args(rest), json),
