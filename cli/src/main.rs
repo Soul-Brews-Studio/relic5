@@ -70,6 +70,7 @@ fn main() {
         "pending" => cmds::pending(),
         "tail" => cmds::tail(Args(rest)),
         "status" => cmds::status(),
+        "engine" => cmds::engine(Args(rest)),
         // search what was already searched, and read trace chains (Nat, 2026-10-27)
         "searched" => searched::searched(Args(rest), json),
         "trace" => searched::trace(Args(rest), json),

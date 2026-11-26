@@ -57,6 +57,27 @@ ssh nat@white.follow-rankine.ts.net '~/relic5/app/.venv/bin/relic5 index'
 uv run relic5 search ภาษาไทย --limit 5   # RELIC5_URL defaults to http://white.follow-rankine.ts.net:8795
 ```
 
+### Install the CLI, and pick how it reads
+
+Needs `git`, `just`, `uv` and Rust (`cargo`). From a checkout:
+
+```sh
+just cli                 # relic5 + relic5-core; engine rs (default): ~200 MB, the first build takes ~25 min
+just cli --engine py     # the small binary (~2.6 MB): a no-hub search goes through Python
+relic5 --version         # "... (engine rs)" on the rs build
+git pull && just cli     # update
+```
+
+Two choices, both changeable later:
+
+| choice | when | how |
+|---|---|---|
+| **engine** (how a no-hub `search` runs) | at install; switch any time | `rs`: Rust, ~0.3 s, no Python needed. `py`: the Python core, ~1 s. `relic5 engine` shows it, `relic5 engine py\|rs\|default` switches it (rs needs the rs build) |
+| **store or hub** (where reads come from) | per command | a store on this machine (`~/relic5`, or `--root DIR`) is read by default, no `relic5 serve`. `--hub` asks the hub (every machine's newest pushes), `--local` never does. `export RELIC5_HUB=1` / `RELIC5_LOCAL=1` makes either the default |
+
+No store on the machine: every read goes to the hub (token in `~/.config/relic5/token`). `relic5 status` says which
+was used (`mode`). The details: [docs/CLI.md](docs/CLI.md#install).
+
 MCP is the easy way: an agent calls `relic_search`, `relic_show`, `relic_sessions`, `relic_session`, `relic_trace`,
 `relic_saved`, `relic_asked`, `relic_tag`, `relic_tags`, `relic_found` and `relic_status` directly. Register it once per machine. `bin/relic5-mcp-headers` reads the 0600 token file, so the token
 never sits in `~/.claude.json`:

@@ -116,12 +116,34 @@ pub fn fix_hint() -> String {
     )
 }
 
+/// The engine a no-hub `search` uses: RELIC5_LOCAL_ENGINE, else `relic5 engine`'s file, else the build's own
+/// (rs on a native build, py otherwise). A py-only build answers py whatever is asked. (engine, why)
+pub fn engine_file() -> String {
+    expand(&std::env::var("RELIC5_ENGINE_FILE").unwrap_or_else(|_| "~/.config/relic5/engine".into()))
+}
+
+pub fn engine() -> (&'static str, String) {
+    let built = if cfg!(feature = "native") { "rs" } else { "py" };
+    let (want, why) = match std::env::var("RELIC5_LOCAL_ENGINE") {
+        Ok(e) => (if e.trim() == "py" { "py" } else { "rs" }, "RELIC5_LOCAL_ENGINE".to_string()),
+        Err(_) => match std::fs::read_to_string(engine_file()).map(|t| t.trim().to_string()) {
+            Ok(t) if t == "py" || t == "rs" => (if t == "py" { "py" } else { "rs" }, engine_file()),
+            _ => (built, "this build's default".to_string()),
+        },
+    };
+    if want == "rs" && built == "py" {
+        return ("py", format!("{why} asks for rs, but this build has only py (just cli --engine rs)"));
+    }
+    (want, why)
+}
+
 /// The route answered by the Python core from this machine's store (relic5-core local-call): the same JSON, and on an
 /// error the same message and exit code as the hub's, printed by the core itself
 fn local(path: &str, params: &[(String, String)], why: String) -> Result<Value, Fail> {
-    // --engine rs build: search answered in Rust when it can (native.rs); RELIC5_LOCAL_ENGINE=py always asks the core
+    // --engine rs build: search answered in Rust when it can (native.rs); engine py (RELIC5_LOCAL_ENGINE=py, or
+    // `relic5 engine py`) always asks the core
     #[cfg(feature = "native")]
-    if path == "/api/search" && std::env::var("RELIC5_LOCAL_ENGINE").map(|e| e != "py").unwrap_or(true) {
+    if path == "/api/search" && engine().0 == "rs" {
         if let Some(v) = crate::native::search(&root(), params) {
             set_mode(json!({"used": "local", "why": why, "root": root(), "engine": "rs"}));
             return Ok(v);

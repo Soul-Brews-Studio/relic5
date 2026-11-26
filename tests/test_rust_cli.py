@@ -142,3 +142,22 @@ def test_native_engine_matches_the_core(hub, monkeypatch):
     rs = subprocess.run([RS, "search", "hub"], env=env, capture_output=True, text=True)
     py = subprocess.run([sys.executable, "-m", "relic5.cli", "search", "hub"], env=env, capture_output=True, text=True)
     assert rs.stdout == py.stdout and rs.returncode == 0
+
+
+def test_engine_switch(tmp_path):
+    """`relic5 engine` (#311): a py build refuses rs with the install command; an rs build switches, kept in the file,
+    RELIC5_LOCAL_ENGINE wins for one command, `default` goes back to the build's own."""
+    env = dict(os.environ, RELIC5_ENGINE_FILE=str(tmp_path / "engine"))
+    env.pop("RELIC5_LOCAL_ENGINE", None)
+    r = subprocess.run([RUST, "engine"], env=env, capture_output=True, text=True)
+    assert r.returncode == 0 and r.stdout.startswith("engine py ") and "this build has: py\n" in r.stdout
+    r = subprocess.run([RUST, "engine", "rs"], env=env, capture_output=True, text=True)
+    assert r.returncode == 2 and "just cli --engine rs" in r.stderr and not (tmp_path / "engine").exists()
+    if not os.path.exists(RS):
+        return
+    run = lambda *a, **e: subprocess.run([RS, "engine", *a], env=env | e, capture_output=True, text=True).stdout
+    assert run().startswith("engine rs   (this build's default)") and "this build has: rs, py" in run()
+    assert run("py").startswith("engine py ") and (tmp_path / "engine").read_text() == "py\n"
+    assert run().startswith("engine py ") and run(RELIC5_LOCAL_ENGINE="rs").startswith("engine rs   (RELIC5_LOCAL_ENGINE)")
+    assert run("default").startswith("engine rs ") and not (tmp_path / "engine").exists()
+    assert subprocess.run([RS, "engine", "go"], env=env, capture_output=True, text=True).returncode == 2

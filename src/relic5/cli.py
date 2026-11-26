@@ -45,6 +45,7 @@
   relic5 tail [--session S] [--machine M] [--n 50] [-f] [--full]   the newest messages as they land, users and agents
                                   (-f: keep following; --full: each whole message, not its first line)
   relic5 status [--json]
+  relic5 engine [py|rs|default]   the engine a no-hub search uses; switch it (rs: a `just cli --engine rs` build)
 
 Client settings: RELIC5_URL (default http://white.follow-rankine.ts.net:8795), RELIC5_TOKEN_FILE
 (default ~/.config/relic5/token, 0600, the one line `relic5 token add` printed on the hub).
@@ -692,6 +693,12 @@ def _main(argv: list[str] | None = None) -> None:
             for p_ in vf["problems"]:
                 print("  " + p_)
             sys.exit(1 if vf["problems"] else 0)
+    elif cmd == "engine":   # the Rust relic5 switches engines (#311); the Python CLI has only its own
+        if rest and rest[0] not in ("py", "default"):
+            print("relic5: this relic5 has only the py engine\n  install the rs one: just cli --engine rs (in a relic5 checkout)",
+                  file=sys.stderr)
+            sys.exit(EXIT_USAGE)
+        print("engine py   (the Python CLI)\nthis build has: py")
     elif cmd == "status":
         r = call("/api/status", {})
         print(json.dumps({"mode": dict(MODE), **r}, ensure_ascii=False, indent=1))
