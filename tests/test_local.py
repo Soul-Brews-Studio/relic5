@@ -129,7 +129,7 @@ def test_cli_with_no_hub_running(hub, built):
     st = json.loads(cli("status", "--root", built, env={}).stdout)
     assert st["mode"]["used"] == "local" and "no hub token" in st["mode"]["why"] and st["mode"]["root"] == built
     st = json.loads(cli("status", env={"RELIC5_ROOT": built, "RELIC5_LOCAL": "1"}).stdout)
-    assert st["mode"] == {"used": "local", "why": "RELIC5_LOCAL=1", "root": built}
+    assert st["mode"] == {"used": "local", "why": "RELIC5_LOCAL=1", "root": built, "engine": "py"}
     bad = cli("show", "0" * 32, env={"RELIC5_ROOT": built})
     assert bad.returncode == 2 and bad.stderr.startswith('relic5: 404 {"error":')
 

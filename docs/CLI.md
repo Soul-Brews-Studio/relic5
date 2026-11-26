@@ -52,7 +52,7 @@ How the client picks:
   land. `--hub` when you need the newest.
 - Neither: the hub's error, followed by the commands that fix it (`relic5 serve --root …`, `export RELIC5_LOCAL=1`,
   `export RELIC5_URL=…`).
-- `relic5 status` starts with `"mode": {"used": "hub" | "local", "why": …, "url" | "root": …}`.
+- `relic5 status` starts with `"mode": {"used": "hub" | "local", "why": …, "url" | "root": …, "engine": "rs" | "py"}`.
 
 Embedded answers come from the same code as the hub's (`mcp.call_tool` and `src/relic5/routes.py`), so the output,
 the error text and the exit codes match; tests/test_local.py compares them route by route, and test_rust_cli.py

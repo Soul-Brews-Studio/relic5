@@ -99,7 +99,7 @@ def test_embedded_mode_matches_python(hub):
         assert py == rs, args
     py, rs = both(env, "status")   # its ages move between two runs: the same keys and the same mode
     p_, r_ = json.loads(py[1]), json.loads(rs[1])
-    assert list(p_) == list(r_) and p_["mode"] == r_["mode"] == {"used": "local", "why": "RELIC5_LOCAL=1", "root": hub["RELIC5_ROOT"]}
+    assert list(p_) == list(r_) and p_["mode"] == r_["mode"] == {"used": "local", "why": "RELIC5_LOCAL=1", "root": hub["RELIC5_ROOT"], "engine": "py"}
     # no token, no hub, but a store: both fall back on their own
     py, rs = both(hub | {"RELIC5_URL": "http://127.0.0.1:9", "RELIC5_TOKEN_FILE": "/nonexistent"}, "search", "hub")
     assert py == rs and py[0] == 0
@@ -144,7 +144,7 @@ def test_native_engine_matches_the_core(hub, monkeypatch):
     assert rs.stdout == py.stdout and rs.returncode == 0
 
 
-def test_engine_switch(tmp_path):
+def test_engine_switch(hub, tmp_path):
     """`relic5 engine` (#311): a py build refuses rs with the install command; an rs build switches, kept in the file,
     RELIC5_LOCAL_ENGINE wins for one command, `default` goes back to the build's own."""
     env = dict(os.environ, RELIC5_ENGINE_FILE=str(tmp_path / "engine"))
@@ -161,3 +161,9 @@ def test_engine_switch(tmp_path):
     assert run().startswith("engine py ") and run(RELIC5_LOCAL_ENGINE="rs").startswith("engine rs   (RELIC5_LOCAL_ENGINE)")
     assert run("default").startswith("engine rs ") and not (tmp_path / "engine").exists()
     assert subprocess.run([RS, "engine", "go"], env=env, capture_output=True, text=True).returncode == 2
+    status = lambda: json.loads(subprocess.run([RS, "status"], env=hub | {"RELIC5_ENGINE_FILE": env["RELIC5_ENGINE_FILE"]},
+                                               capture_output=True, text=True).stdout)["mode"]
+    assert status()["engine"] == "rs"
+    run("py")
+    assert status()["engine"] == "py"
+    run("default")

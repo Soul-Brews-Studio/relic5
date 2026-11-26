@@ -701,7 +701,7 @@ def _main(argv: list[str] | None = None) -> None:
         print("engine py   (the Python CLI)\nthis build has: py")
     elif cmd == "status":
         r = call("/api/status", {})
-        print(json.dumps({"mode": dict(MODE), **r}, ensure_ascii=False, indent=1))
+        print(json.dumps({"mode": dict(MODE) | {"engine": "py"}, **r}, ensure_ascii=False, indent=1))   # the Python CLI: py only
     else:
         print(f"unknown command '{cmd}'\n  relic5 --help", file=sys.stderr)
         sys.exit(EXIT_USAGE)

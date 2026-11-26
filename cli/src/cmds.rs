@@ -376,7 +376,12 @@ pub fn tail(mut a: Args) -> Result<(), Fail> {
 pub fn status() -> Result<(), Fail> {
     let r = hub::call("/api/status", &[])?;
     let mut out = serde_json::Map::new();
-    out.insert("mode".into(), hub::mode());   // hub or local, and why (#311)
+    // hub or local, and why; the engine a no-hub search uses (#311, `relic5 engine` switches it)
+    let mut mode = hub::mode();
+    if let Value::Object(m) = &mut mode {
+        m.insert("engine".into(), Value::String(hub::engine().0.into()));
+    }
+    out.insert("mode".into(), mode);
     if let Value::Object(m) = r {
         out.extend(m);
     }
