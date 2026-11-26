@@ -22,7 +22,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from starlette.datastructures import QueryParams
 
-from . import mcp
+from . import mcp, routes
 from .query import Relic5
 from .types_ import JobEvent, Json
 from . import store as rfs
@@ -36,28 +36,21 @@ if TYPE_CHECKING:
     from .memory import Listing
     from .tokens import Tokens
 
-ROUTES = {"/api/search": "relic_search", "/api/show": "relic_show", "/api/sessions": "relic_sessions",
-          "/api/session": "relic_session", "/api/status": "relic_status",
-          # time travel (timetravel.py, #278 #279 #281)
-          "/api/chain": "relic_chain", "/api/at": "relic_at", "/api/arc": "relic_arc",
-          # skills a human typed (skills.py, #299)
-          "/api/skills": "relic_skills"}
-INT_KEYS = {"limit", "seq", "before", "after", "cap", "top"}
-BOOL_KEYS = {"semantic", "by_repo", "sessions", "all", "auto", "ai"}
-STATUS_OF = {"usage": 400, "unavailable": 501, "not_found": 404, "failed": 500}
+ROUTES, INT_KEYS, BOOL_KEYS, STATUS_OF = routes.ROUTES, routes.INT_KEYS, routes.BOOL_KEYS, routes.STATUS_OF   # moved to routes.py (#311)
 
 
 def args_of(params: QueryParams) -> Json:
     """Query string -> tool args, as v3 http.ts argsOf: q -> query, ints and the semantic boolean coerced."""
-    a: Json = {}
-    for k0, v in params.multi_items():
-        k = "query" if k0 == "q" else k0.replace("-", "_")
-        a[k] = int(v) if k in INT_KEYS and v.isdigit() else (v in ("1", "true")) if k in BOOL_KEYS else v
-    return a
+    return routes.args_of(params.multi_items())
 
 
 def dumps(v: object) -> str:
     return json.dumps(v, ensure_ascii=False, default=str)
+
+
+def reply(status: int, body: Json) -> Json | JSONResponse:
+    """A routes.py answer as the hub sends it: the body itself on 200, else a JSON error with its status."""
+    return body if status == 200 else JSONResponse(body, status_code=status)
 
 
 def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None" = None, duck_mem: str | None = None) -> FastAPI:
@@ -313,11 +306,7 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
     @app.get("/api/trace", response_model=None)
     def trace_route(id: str = "", limit: int = 30) -> Response | Json:
         """One record's whole chain (id), or the newest chains."""
-        from . import trace
-        if id:
-            out = trace.chain(relic.parts.root, id)
-            return JSONResponse(out, status_code=404) if "error" in out else out
-        return {"chains": trace.chains(relic.parts.root, max(1, min(limit, 200)))}
+        return reply(*routes.trace_chain(relic, id, limit))
 
     @app.get("/api/access", response_model=None)
     def access_route(limit: int = 100, before: int | None = None, tool: str = "", client: str = "", door: str = "", q: str = "",
@@ -368,13 +357,7 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
     @app.get("/api/searched", response_model=None)
     def searched_route(q: str = "", link: str = "", since: str = "", until: str = "", limit: int = 20) -> Response | Json:
         """Search the searched: past queries, found notes and tags (q), or the way back from a message (link)."""
-        from . import trace
-        from .query import UsageError
-        from .window import WindowError
-        try:
-            return trace.searched(relic.parts.root, q or None, link or None, since or None, until or None, max(1, min(limit, 200)))
-        except (UsageError, WindowError) as ex:
-            return JSONResponse({"error": str(ex)}, status_code=400)
+        return reply(*routes.searched(relic, q, link, since, until, limit))
 
     @app.get("/api/rule", response_model=None)
     def rule_route(phrase: str = "", forbids: str = "", since: str = "", until: str = "", retired: str = "") -> Response | Json:
@@ -731,7 +714,7 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
     @cached(60)
     def memory_route() -> "Listing":
         from . import memory
-        return memory.listing(relic.parts.root)
+        return memory.listing(relic.parts.root)   # routes.memory is the same, for embedded mode
 
     @app.get("/api/memory/map", response_model=None)
     def memory_map_route() -> Json:
@@ -764,7 +747,7 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
     @app.get("/api/tail", response_model=None)
     @cached(5)
     def tail(n: int = 50, session: str = "", machine: str = "", since: str = "", full: int = 0) -> Json:
-        return relic.tail(min(max(n, 1), 500), session or None, machine or None, since or None, bool(full))
+        return routes.tail(relic, n, session, machine, since, full)[1]
 
     @app.get("/api/queries", response_model=None)
     @cached(15)
@@ -774,22 +757,12 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
     @app.get("/api/conversation", response_model=None)
     def conversation_route(id: str, offset: int = 0, limit: int = 200, tools: int = 0, role: str = "",
                            since: str = "", until: str = "") -> Json | JSONResponse:
-        from .recap import conversation
-        from .query import NotFound, UsageError
-        try:
-            return conversation(relic, id, max(offset, 0), min(max(limit, 0), 1000), bool(tools), role or None, since or None, until or None)
-        except (NotFound, UsageError) as ex:
-            return JSONResponse({"error": str(ex)}, status_code=404 if isinstance(ex, NotFound) else 400)
+        return reply(*routes.conversation(relic, id, offset, limit, tools, role, since, until))
 
     @app.get("/api/readings", response_model=None)
     def readings_route(since: str = "", until: str = "", grain: str = "", model: str = "", q: str = "",
                        limit: int = 50, offset: int = 0) -> Json | JSONResponse:
-        from . import readings
-        try:
-            return readings.readings(root, since or None, until or None, grain or None, model or None, q or None,
-                                     min(max(limit, 1), 500), max(offset, 0))
-        except ValueError as ex:
-            return JSONResponse({"error": str(ex)}, status_code=400)
+        return reply(*routes.readings(relic, since, until, grain, model, q, limit, offset))
 
     @app.get("/api/hours", response_model=None)
     @cached(60)
@@ -837,21 +810,11 @@ def make_app(root: str, tokens: "Tokens | dict[str, str]", doors: "Doors | None"
 
     @app.get("/api/recap", response_model=None)
     def recap_route(id: str, limit: int = 20) -> Json | JSONResponse:
-        from .recap import recap
-        from .query import NotFound, UsageError
-        try:
-            return recap(relic, id, max(limit, 0))
-        except (NotFound, UsageError) as ex:
-            return JSONResponse({"error": str(ex)}, status_code=404 if isinstance(ex, NotFound) else 400)
+        return reply(*routes.recap(relic, id, limit))
 
     @app.get("/api/handoff", response_model=None)
     def handoff_route(id: str, user_only: int = 0) -> Json | JSONResponse:
-        from .recap import handoff
-        from .query import NotFound, UsageError
-        try:
-            return handoff(relic, id, bool(user_only))
-        except (NotFound, UsageError) as ex:
-            return JSONResponse({"error": str(ex)}, status_code=404 if isinstance(ex, NotFound) else 400)
+        return reply(*routes.handoff(relic, id, user_only))
 
     @app.get("/api/eval", response_model=None)
     def eval_log(n: int = 200) -> list[Json]:

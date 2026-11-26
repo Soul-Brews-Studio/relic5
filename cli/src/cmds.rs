@@ -374,7 +374,50 @@ pub fn tail(mut a: Args) -> Result<(), Fail> {
 }
 
 pub fn status() -> Result<(), Fail> {
-    println!("{}", dumps(&hub::call("/api/status", &[])?));
+    let r = hub::call("/api/status", &[])?;
+    let mut out = serde_json::Map::new();
+    // hub or local, and why; the engine a no-hub search uses (#311, `relic5 engine` switches it)
+    let mut mode = hub::mode();
+    if let Value::Object(m) = &mut mode {
+        m.insert("engine".into(), Value::String(hub::engine().0.into()));
+    }
+    out.insert("mode".into(), mode);
+    if let Value::Object(m) = r {
+        out.extend(m);
+    }
+    println!("{}", dumps(&Value::Object(out)));
     Ok(())
 }
 
+
+/// `relic5 engine [py|rs|default]` (#311): which engine a no-hub search uses, and switch it. Kept in
+/// ~/.config/relic5/engine (RELIC5_LOCAL_ENGINE overrides it for one command); no rebuild, the rs build holds both
+pub fn engine(a: Args) -> Result<(), Fail> {
+    let built = if cfg!(feature = "native") { "rs, py" } else { "py" };
+    let f = hub::engine_file();
+    match a.0.first().map(String::as_str) {
+        None => {}
+        Some(e @ ("py" | "rs")) => {
+            if e == "rs" && !cfg!(feature = "native") {
+                return Err(Fail::Other(
+                    "relic5: this relic5 has only the py engine\n  install the rs one: just cli --engine rs (in a relic5 checkout)".into(),
+                    2,
+                ));
+            }
+            if let Some(d) = std::path::Path::new(&f).parent() {
+                let _ = std::fs::create_dir_all(d);
+            }
+            std::fs::write(&f, format!("{e}\n")).map_err(|x| Fail::Other(format!("relic5: cannot write {f}: {x}"), 1))?;
+        }
+        Some("default") => {
+            if std::path::Path::new(&f).exists() {
+                std::fs::remove_file(&f).map_err(|x| Fail::Other(format!("relic5: cannot remove {f}: {x}"), 1))?;
+            }
+        }
+        Some(x) => return Err(Fail::Other(format!("relic5: engine {x}? one of: py, rs, default\n  relic5 engine rs"), 2)),
+    }
+    let (e, why) = hub::engine();
+    println!("engine {e}   ({why})");
+    println!("this build has: {built}");
+    Ok(())
+}
