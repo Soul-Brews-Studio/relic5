@@ -4,11 +4,15 @@
 pages and for other machines. A single machine's own searches do not need that: this module opens the store for
 the call, answers through the very functions the hub uses (mcp.call_tool, routes.py), and lets go again.
 
-When:
+When (the CLI's read commands):
   RELIC5_LOCAL=1 (or --local)                      always embedded
-  otherwise                                        the hub; embedded only when it cannot be reached (refused, timed
-                                                   out, no token file) AND a store exists at the root
+  RELIC5_HUB=1 (or --hub), or RELIC5_URL set       the hub; embedded only when it cannot be reached
+  otherwise, a store at the root                   embedded: the default, no `relic5 serve` needed. `status` alone
+                                                   asks the hub first (a local status reads everything, tens of s)
+  otherwise                                        the hub; embedded when it cannot be reached (refused, timed out,
+                                                   no token file) AND a store exists at the root
   neither                                          the hub's error, with the commands that fix it
+`relic5 mcp` keeps the hub first: semantic search and the trace records it writes are the hub's.
 
 Root: --root, else RELIC5_ROOT, else storage.json's root (the hub's own choice, mirror.py), else ~/relic5.
 
@@ -41,6 +45,19 @@ NEEDS_HUB = ("{what} are the hub's records and embedded mode never writes: start
 
 def forced() -> bool:
     return os.environ.get("RELIC5_LOCAL", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def hub_forced() -> bool:
+    return os.environ.get("RELIC5_HUB", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+DEFAULT_WHY = "the default: a store is here, no hub needed (--hub or RELIC5_HUB=1 asks the hub)"
+
+
+def local_first(path: str) -> bool:
+    """The CLI's default (#311): this machine's store when one is here, unless the hub was asked for (--hub,
+    RELIC5_HUB=1, an explicit RELIC5_URL). status asks the hub first: a local status reads everything."""
+    return not hub_forced() and "RELIC5_URL" not in os.environ and path != "/api/status" and has_store()
 
 
 def root() -> str:

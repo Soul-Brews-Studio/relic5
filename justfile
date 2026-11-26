@@ -56,28 +56,25 @@ pet-studio:
 # ~/.local/bin/relic5 (the uv tool writes a Python `relic5` there too; the Rust one replaces it). Rerun after
 # `uv tool upgrade relic5`, which puts the Python one back. A Mac gets the `embed` extra (torch): without it
 # `relic5 embed` dies at `import torch` (m5, 2026-10-29).
-cli:
+[arg("engine", long="engine", pattern="py|rs")]
+cli engine="rs":
     @PATH="$HOME/.cargo/bin:$PATH" command -v cargo >/dev/null || { echo "cargo not found: nothing installed (uv would replace the Rust relic5 and cli-bin could not put it back)" >&2; exit 1; }
     if [ "$(uname)" = Darwin ]; then uv tool install --force --reinstall "$(pwd)[embed,ane2]"; else uv tool install --force --reinstall "$(pwd)"; fi
-    just cli-bin
+    just cli-bin --engine {{engine}}
     @command -v relic5-core && relic5-core --version
 
 # The Rust binary only (the hub: its core is ~/relic5/app/.venv/bin/relic5-core). cargo install, not a copy of
 # cli/target: a machine may build elsewhere (white sets build.target-dir in ~/.cargo/config.toml). The replaced file
 # is kept as relic5.bak-<its version>.
-cli-bin:
+# --engine rs (#311, `just cli`'s default): the same relic5 with a Rust engine for a no-hub `search` (no Python, ~4x
+# faster to start); the binary is ~200 MB and the first build takes ~25 min (lance + datafusion). py (cli-bin's
+# default, the hub's): every no-hub read goes to relic5-core. Either way `relic5 --version` says which, and RELIC5_LOCAL_ENGINE=py sends search to the core.
+[arg("engine", long="engine", pattern="py|rs")]
+cli-bin engine="py":
     @PATH="$HOME/.cargo/bin:$PATH" command -v cargo >/dev/null || { echo "cargo not found (not in ~/.cargo/bin nor on PATH)" >&2; exit 1; }
-    @f="$HOME/.local/bin/relic5"; [ -e "$f" ] && cp -p "$f" "$f.bak-$("$f" --version 2>/dev/null | sed 's/^[^ ]* //')"; rm -f "$f"
-    PATH="$HOME/.cargo/bin:$PATH" cargo install --quiet --locked --force --path cli --root "$HOME/.local"
+    @f="$HOME/.local/bin/relic5"; [ -e "$f" ] && cp -p "$f" "$f.bak-$("$f" --version 2>/dev/null | awk '{print $2}')"; rm -f "$f"
+    if [ "{{engine}}" = rs ]; then PATH="$HOME/.cargo/bin:$PATH" cargo install --quiet --locked --force --path cli --profile native --features native --root "$HOME/.local"; else PATH="$HOME/.cargo/bin:$PATH" cargo install --quiet --locked --force --path cli --root "$HOME/.local"; fi
     @"$HOME/.local/bin/relic5" --version
-
-# relic5-rs (#311): the same CLI plus a Rust-native embedded engine, so `search` with no hub needs no Python
-# (lancedb in-process, the same lance as the core's). Beside relic5, never instead of it; the first build takes
-# ~25 min (lance + datafusion), later ones reuse cli/target. Other embedded reads still use relic5-core.
-cli-rs:
-    @PATH="$HOME/.cargo/bin:$PATH" command -v cargo >/dev/null || { echo "cargo not found (not in ~/.cargo/bin nor on PATH)" >&2; exit 1; }
-    PATH="$HOME/.cargo/bin:$PATH" cargo install --quiet --locked --force --path cli --profile native --features native --bin relic5-rs --root "$HOME/.local" --target-dir cli/target
-    @"$HOME/.local/bin/relic5-rs" --version
 
 # Rust CLI against the Python CLI on a test hub (same output, same exit codes)
 cli-test:

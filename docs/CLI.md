@@ -41,9 +41,15 @@ searches do not need any of it.
 How the client picks:
 
 - `RELIC5_LOCAL=1` or `--local`: always embedded, reading the store at `--root` / `RELIC5_ROOT` / storage.json's root / `~/relic5`.
-- Otherwise the hub (`RELIC5_URL`, or the default). If it cannot be reached (refused, no route, connect timeout, or
-  no token file) **and** a store exists at the root, the same command is answered embedded. A hub that answers with
-  an error is never re-asked locally.
+- **The default: a store is here, so it is read.** No `relic5 serve`, no hub. `status` is the one exception: it asks
+  the hub first (a local status reads the readings, the git log and the query log in full: tens of seconds cold) and
+  says `"reads": "local"` for the rest.
+- `--hub`, `RELIC5_HUB=1`, or an explicit `RELIC5_URL`: the hub. No store here: the hub too. If it cannot be reached
+  (refused, no route, connect timeout, or no token file) **and** a store exists at the root, the same command is
+  answered embedded. A hub that answers with an error is never re-asked locally.
+- `relic5 mcp` keeps the hub first: semantic search and the trace records (`relic_found`, tags) are the hub's.
+- The local store is only as fresh as this machine's last `relic5 index`; the hub has every machine's pushes as they
+  land. `--hub` when you need the newest.
 - Neither: the hub's error, followed by the commands that fix it (`relic5 serve --root …`, `export RELIC5_LOCAL=1`,
   `export RELIC5_URL=…`).
 - `relic5 status` starts with `"mode": {"used": "hub" | "local", "why": …, "url" | "root": …}`.
@@ -61,9 +67,9 @@ compares the Rust and Python clients in embedded mode. Differences, on purpose:
   `relic5 mcp` opens the store on a call and closes it after `RELIC5_LOCAL_IDLE` seconds idle (default 60). Settings:
   `RELIC5_LOCAL_MEM` (DuckDB cap per reader, default 1GB), `RELIC5_LOCAL_THREADS` (4), `RELIC5_LOCAL_STICKY` (60:
   after the hub was unreachable, `relic5 mcp` answers embedded this long before trying it again).
-- **Two engines: Python, and Rust for `search`.** `relic5` (the default build) answers every embedded read through the
-  Python core. `relic5-rs` (`just cli-rs`, `cargo build --profile native --features native --bin relic5-rs`) is the
-  same CLI with `cli/src/native.rs`: `search` read in-process with lancedb 0.40.0 / lance 13.0.0, the versions the
+- **Two engines: Python, and Rust for `search`, picked at install.** One command, `relic5`, either way.
+  `just cli --engine py` answers every embedded read through the Python core. `just cli` (engine rs, the default;
+  `cargo install --path cli --profile native --features native`) is the same CLI with `cli/src/native.rs`: `search` read in-process with lancedb 0.40.0 / lance 13.0.0, the versions the
   core's Python packages run, so the BM25 scores are the same and no Python is needed. Anything the port does not
   carry (a cursor, `--repo` and the other session filters, semantic, discord, a vault hit, an FTS error, a window it
   cannot read) goes to the core, so the answer is still the core's. `RELIC5_LOCAL_ENGINE=py` sends search to the core
@@ -93,7 +99,9 @@ between two Python calls; `recap.py` now breaks ties by name.
 ## Install
 
 ```sh
-just cli         # a client: uv tool install (relic5-core), then the Rust binary at ~/.local/bin/relic5
+just cli         # a client: uv tool install (relic5-core), then the Rust binary at ~/.local/bin/relic5, engine rs
+                 #   (~200 MB, first build ~25 min; relic5 --version ends "(engine rs)")
+just cli --engine py   # the same with the small binary (~2.6 MB): every no-hub read through relic5-core
 just cli-bin     # the hub (white): the Rust binary only; its core is the hub venv's relic5-core
 just cli-test    # cargo test, then the Rust-vs-Python comparison
 ```

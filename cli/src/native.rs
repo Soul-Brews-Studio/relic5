@@ -1,4 +1,4 @@
-//! The Rust-native embedded engine (feature "native", binary relic5-rs, #311): `search` read straight from the
+//! The Rust-native embedded engine (feature "native": just cli --engine rs, #311): `search` read straight from the
 //! published BM25 index with lancedb, the same lance (13.0.0) the Python core runs, so no Python is needed for the
 //! command people run most. A line-for-line port of src/relic5/search.py `search()` (keyword, no cursor):
 //! widening 7d -> 15d -> 1m -> 3m -> archive, phrase hits first, the fold, the best older hits after the window,

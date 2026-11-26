@@ -105,12 +105,12 @@ def test_embedded_mode_matches_python(hub):
     assert py == rs and py[0] == 0
 
 
-RS = os.path.join(os.path.dirname(__file__), "..", "cli", "target", "native", "relic5-rs")
+RS = os.path.join(os.path.dirname(__file__), "..", "cli", "target", "native", "relic5")
 
 
-@pytest.mark.skipif(not os.path.exists(RS), reason="relic5-rs not built (cargo build --profile native --features native --bin relic5-rs)")
+@pytest.mark.skipif(not os.path.exists(RS), reason="the rs engine is not built (cargo build --profile native --features native)")
 def test_native_engine_matches_the_core(hub, monkeypatch):
-    """relic5-rs answers search in Rust (native.rs, #311); RELIC5_LOCAL_ENGINE=py asks the Python core. Same bytes, same
+    """The rs build (just cli --engine rs) answers search in Rust (native.rs, #311); RELIC5_LOCAL_ENGINE=py asks the Python core. Same bytes, same
     exit codes, for plain queries, phrases, Thai, layers, windows, sort, paging and the filters it hands back to the core."""
     import duckdb
     from relic5 import fts
@@ -125,6 +125,7 @@ def test_native_engine_matches_the_core(hub, monkeypatch):
              ["hub", "--with", "all"], ["hub", "--since", "2026-10-01"], ["hub", "--since", "30d"], ["hub", "--until", "2026-10-22"],
              ["hub", "--horizon", "7d"], ["hub", "--role", "user"], ["hub", "--session", "s1-"], ["chunk", "long"],
              ["nothingmatchesthis"], ["hub", "--repo", "relic5"], ["hub", "--since", "bogus"], ["hub", "--limit", "0"]]
+    assert subprocess.run([RS, "--version"], capture_output=True, text=True).stdout.endswith(" (engine rs)\n")
     native_answered = 0
     for c in cases:
         rs = subprocess.run([RS, "search", *c, "--json"], env=env, capture_output=True, text=True, timeout=120)

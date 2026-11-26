@@ -48,8 +48,9 @@
 
 Client settings: RELIC5_URL (default http://white.follow-rankine.ts.net:8795), RELIC5_TOKEN_FILE
 (default ~/.config/relic5/token, 0600, the one line `relic5 token add` printed on the hub).
-No hub? The read commands and `relic5 mcp` read this machine's store directly when the hub cannot be reached, or
-always with --local / RELIC5_LOCAL=1 (store: --root, RELIC5_ROOT, else ~/relic5). docs/CLI.md: when you need serve.
+No serve needed: with a store on this machine (--root, RELIC5_ROOT, else ~/relic5) the read commands read it directly;
+--hub / RELIC5_HUB=1 / RELIC5_URL ask the hub, --local / RELIC5_LOCAL=1 never does. `relic5 mcp` and `status` ask the
+hub first and read the store when it cannot be reached. docs/CLI.md: when you need serve.
 Hub settings: RELIC5_ROOT (default ~/relic5), RELIC5_TOKENS (default ~/.config/relic5/tokens: `<machine> <token>` lines).
 """
 import json, os, re, secrets, sys, time, urllib.error, urllib.parse, urllib.request
@@ -148,10 +149,13 @@ MODE: Json = {}
 
 
 def call(path: str, params: dict[str, str]) -> Json:
-    """GET a hub route; embedded (local.py) when RELIC5_LOCAL=1, or when no hub can be reached and a store is here (#311)."""
+    """GET a hub route, or answer it from this machine's store (local.py, #311): with RELIC5_LOCAL=1, by default when a
+    store is here (local_first), and when no hub can be reached."""
     from . import local
     if local.forced():
         return _local(path, params, "RELIC5_LOCAL=1")
+    if local.local_first(path):
+        return _local(path, params, local.DEFAULT_WHY)
     try:
         tok = open(os.path.expanduser(TOKEN_FILE)).read().strip()
     except OSError as ex:
@@ -170,7 +174,10 @@ def call(path: str, params: dict[str, str]) -> Json:
             return _local(path, params, f"hub unreachable ({URL}): {ex.reason}")
         raise
     MODE.clear()
-    MODE.update(used="hub", why="RELIC5_URL" if "RELIC5_URL" in os.environ else "the default hub answered", url=URL)
+    MODE.update(used="hub", why="RELIC5_HUB=1" if local.hub_forced() else "RELIC5_URL" if "RELIC5_URL" in os.environ
+                else "the default hub answered", url=URL)
+    if path == "/api/status" and local.local_first("/api/search"):
+        MODE["reads"] = "local"   # status asked the hub; the other reads answer from the store
     return out
 
 
@@ -194,7 +201,7 @@ def _line(h: Json, width: int = 110) -> str:
 
 CLIENT = {"search", "show", "conversation", "readings", "recap", "chain", "at", "arc", "skills", "handoff", "pending",
           "tail", "status", "mcp"}
-"""Commands that read through call() (or the MCP shim): they take --local and --root (embedded mode, #311)."""
+"""Commands that read through call() (or the MCP shim): they take --local, --hub and --root (embedded mode, #311)."""
 
 # Exit codes, as relic3: 0 ok · 1 error · 2 usage · 3 parity refused (embed) · 75 locked · 130 cancelled
 EXIT_ERROR, EXIT_USAGE, EXIT_LOCKED, EXIT_CANCELLED = 1, 2, 75, 130
@@ -231,6 +238,9 @@ def _main(argv: list[str] | None = None) -> None:
         if "--local" in rest:
             rest.remove("--local")
             os.environ["RELIC5_LOCAL"] = "1"
+        if "--hub" in rest:
+            rest.remove("--hub")
+            os.environ["RELIC5_HUB"] = "1"
         if (r_ := _opt(rest, "--root")) is not None:
             os.environ["RELIC5_ROOT"] = r_
     if cmd == "local-worker":   # relic5 mcp's embedded reader, in a child it can end when idle (local.Worker)

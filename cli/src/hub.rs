@@ -67,6 +67,18 @@ pub fn local_forced() -> bool {
     matches!(std::env::var("RELIC5_LOCAL").unwrap_or_default().trim().to_lowercase().as_str(), "1" | "true" | "yes" | "on")
 }
 
+pub fn hub_forced() -> bool {
+    matches!(std::env::var("RELIC5_HUB").unwrap_or_default().trim().to_lowercase().as_str(), "1" | "true" | "yes" | "on")
+}
+
+const DEFAULT_WHY: &str = "the default: a store is here, no hub needed (--hub or RELIC5_HUB=1 asks the hub)";
+
+/// The default (#311, local.py's local_first): this machine's store when one is here, unless the hub was asked for
+/// (--hub, RELIC5_HUB=1, an explicit RELIC5_URL). status asks the hub first: a local status reads everything.
+fn local_first(path: &str) -> bool {
+    !hub_forced() && std::env::var("RELIC5_URL").is_err() && path != "/api/status" && has_store()
+}
+
 /// --root (set as RELIC5_ROOT by main), else RELIC5_ROOT, else storage.json's root (the hub's own choice), else ~/relic5
 pub fn root() -> String {
     if let Ok(r) = std::env::var("RELIC5_ROOT") {
@@ -107,7 +119,7 @@ pub fn fix_hint() -> String {
 /// The route answered by the Python core from this machine's store (relic5-core local-call): the same JSON, and on an
 /// error the same message and exit code as the hub's, printed by the core itself
 fn local(path: &str, params: &[(String, String)], why: String) -> Result<Value, Fail> {
-    // relic5-rs: search answered in Rust when it can (native.rs); RELIC5_LOCAL_ENGINE=py always asks the core
+    // --engine rs build: search answered in Rust when it can (native.rs); RELIC5_LOCAL_ENGINE=py always asks the core
     #[cfg(feature = "native")]
     if path == "/api/search" && std::env::var("RELIC5_LOCAL_ENGINE").map(|e| e != "py").unwrap_or(true) {
         if let Some(v) = crate::native::search(&root(), params) {
@@ -152,6 +164,12 @@ pub fn call(path: &str, params: &[(String, String)]) -> Result<Value, Fail> {
     if local_forced() {
         return local(path, params, "RELIC5_LOCAL=1".into());
     }
+    if local_first(path) {
+        match local(path, params, DEFAULT_WHY.into()) {
+            Err(Fail::Other(m, _)) => eprintln!("{m}\n  asking the hub instead"),   // no core, or one too old: the hub
+            r => return r,
+        }
+    }
     let tok = match token() {
         Ok(t) => t,
         Err(Fail::Other(..)) if has_store() => return local(path, params, format!("no hub token ({})", token_file())),
@@ -161,8 +179,18 @@ pub fn call(path: &str, params: &[(String, String)]) -> Result<Value, Fail> {
     match get(path, params, Some(tok), 60) {
         Err(Fail::Unreachable(r)) if has_store() => local(path, params, format!("hub unreachable ({}): {r}", url())),
         Ok(v) => {
-            let why = if std::env::var("RELIC5_URL").is_ok() { "RELIC5_URL" } else { "the default hub answered" };
-            set_mode(json!({"used": "hub", "why": why, "url": url()}));
+            let why = if hub_forced() {
+                "RELIC5_HUB=1"
+            } else if std::env::var("RELIC5_URL").is_ok() {
+                "RELIC5_URL"
+            } else {
+                "the default hub answered"
+            };
+            let mut m = json!({"used": "hub", "why": why, "url": url()});
+            if path == "/api/status" && local_first("/api/search") {
+                m["reads"] = json!("local");   // status asked the hub; the other reads answer from the store
+            }
+            set_mode(m);
             Ok(v)
         }
         other => other,

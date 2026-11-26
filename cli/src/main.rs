@@ -25,16 +25,22 @@ fn main() {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let Some(cmd) = argv.first().cloned() else { core::exec(&argv) };   // no arguments: the core prints the help
     if matches!(cmd.as_str(), "--version" | "-V" | "version") {
-        println!("relic5 {}", env!("RELIC5_VERSION"));
+        // the engine a no-hub search uses (#311): only a native build says so, so the default line stays the core's
+        if cfg!(feature = "native") {
+            println!("relic5 {} (engine rs)", env!("RELIC5_VERSION"));
+        } else {
+            println!("relic5 {}", env!("RELIC5_VERSION"));
+        }
         return;
     }
     let mut rest: Vec<String> = argv[1..].to_vec();
     let json = rest.iter().any(|a| a == "--json");
     rest.retain(|a| a != "--json");
     if matches!(cmd.as_str(), "search" | "show" | "conversation" | "readings" | "recap" | "handoff" | "pending" | "tail" | "status" | "searched" | "trace") {
-        // embedded mode (#311): --local reads this machine's store with no hub; --root names the store
+        // embedded mode (#311): --local reads this machine's store with no hub, --hub asks the hub; --root names the store
         let local = rest.iter().any(|a| a == "--local");
-        rest.retain(|a| a != "--local");
+        let hub_ = rest.iter().any(|a| a == "--hub");
+        rest.retain(|a| a != "--local" && a != "--hub");
         let root = rest.iter().position(|a| a == "--root").map(|i| {
             let v = rest.get(i + 1).cloned();
             rest.drain(i..(i + 2).min(rest.len()));
@@ -44,6 +50,9 @@ fn main() {
             // single-threaded here, before any other work
             if local {
                 std::env::set_var("RELIC5_LOCAL", "1");
+            }
+            if hub_ {
+                std::env::set_var("RELIC5_HUB", "1");
             }
             if let Some(Some(r)) = root {
                 std::env::set_var("RELIC5_ROOT", r);

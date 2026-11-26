@@ -235,3 +235,24 @@ def test_worker_child_matches_and_ends_when_idle(hub, built, monkeypatch):
         assert w.tool("relic_show", {"id": "f" * 32})[0]   # started again on the next call
     finally:
         w.close()
+
+
+def test_store_first_by_default(built, tmp_path, monkeypatch):
+    """The CLI's default (#311): a store is here, so it is read and the hub is never asked; --hub / RELIC5_HUB=1 / an
+    explicit RELIC5_URL / no store send it to the hub; status asks the hub first."""
+    from relic5 import cli as rcli
+    for k in ("RELIC5_URL", "RELIC5_LOCAL", "RELIC5_HUB"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("RELIC5_ROOT", built)
+    monkeypatch.setattr(rcli.urllib.request, "urlopen", lambda *a, **k: pytest.fail("asked the hub"))
+    r = rcli.call("/api/search", {"q": "hub"})
+    assert r["hits"] and rcli.MODE == {"used": "local", "why": local.DEFAULT_WHY, "root": built}
+    assert local.local_first("/api/search") and not local.local_first("/api/status")
+    monkeypatch.setenv("RELIC5_HUB", "1")
+    assert not local.local_first("/api/search")
+    monkeypatch.delenv("RELIC5_HUB")
+    monkeypatch.setenv("RELIC5_URL", DEAD)
+    assert not local.local_first("/api/search")
+    monkeypatch.delenv("RELIC5_URL")
+    monkeypatch.setenv("RELIC5_ROOT", str(tmp_path / "empty"))   # no store here
+    assert not local.local_first("/api/search")
